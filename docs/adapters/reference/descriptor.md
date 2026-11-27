@@ -351,6 +351,7 @@ The battery, clause 6, holds a declaration to the adapter's own corpus: every `k
 | `tests_failed` | whole number | the run's test summary | |
 | `tests_passed` | whole number | the run's test summary | |
 | `tests_ignored` | whole number | the run's test summary | |
+| `waits_on` | `ListPath` to item keys in the run's own source | the runs a run waits on: a run a write started brings each one and follows it to its end ([ADR-0031](../../adr/0031-refresh-is-an-optional-read-of-one-item-serialized-behind-the-run.md), amended 2026-11-27). A run kind that leaves it empty is followed alone, as before | |
 | `language` | string | a repository's language | |
 | `teams` | `ListPath` to names | a repository's teams | |
 | `owner` | string | a repository's owner | |
