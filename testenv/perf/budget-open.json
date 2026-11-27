@@ -272,6 +272,21 @@
     "moved": 0
    }
   },
+  "builds-folder": {
+   "1": {
+    "usefulMs": 100,
+    "moved": 0
+   },
+   "4": {
+    "usefulMs": 200,
+    "moved": 0
+   },
+   "6": {
+    "usefulMs": 300,
+    "drawnMs": 300,
+    "moved": 0
+   }
+  },
   "builds-recent-start": {
    "1": {
     "usefulMs": 100,
