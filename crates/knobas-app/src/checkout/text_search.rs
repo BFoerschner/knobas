@@ -21,6 +21,13 @@
 //! the index does not read and no clone that holds it cannot be searched
 //! faithfully, and a search over the wrong branch would be a lie.
 //!
+//! What is typed is its words (#2561): each a literal, in the order typed,
+//! on one line with anything between, so `xy room` finds `xy_room`,
+//! `xyRoom` and `xy = room`; a `"`-quoted phrase is one literal, spaces
+//! included, and text with no space is the literal it was. *.\** is a
+//! pattern as typed. Not letter by letter: over a whole repository that
+//! finds nearly every line.
+//!
 //! Each scan stops at [`MOST_HITS`] lines; a file over [`FILE_CAP`] bytes
 //! and a file with a NUL in its first 8,000 bytes (git's binary sniff) are
 //! counted and skipped. A newer search of the same place stops the one
@@ -51,7 +58,9 @@ const LINE_BEFORE: usize = 60;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct TextQuery {
-    /// What is typed: a literal, or a pattern when `regex` is on.
+    /// What is typed: words, matched in order on one line with anything
+    /// between (a `"`-quoted phrase as typed, text with no space as one
+    /// literal), or a pattern when `regex` is on.
     pub text: String,
     /// *Aa*: match the case typed. Off, the case is smart: a query with an
     /// upper-case letter matches its case, one without matches every case.
@@ -168,10 +177,45 @@ impl TextFound {
 #[derive(Debug, Clone)]
 pub struct Matcher {
     regex: Regex,
-    /// The text as typed, folded when the case is not matched: for names.
+    /// The one literal typed, folded when the case is not matched: for names.
     name: Option<(String, bool)>,
-    /// The text is a pattern: names are matched by it too.
+    /// The text is a pattern, or words: names are matched by `regex` too.
     pattern: bool,
+    /// Words typed apart: `regex` holds one group a word, and each group is
+    /// marked, not the run between them.
+    words: bool,
+}
+
+/// What is typed outside a pattern, as the literals it is matched by
+/// (#2561): text with no space is one literal, quotes and all, as typed;
+/// text with spaces is its words, a `"` at a word's start holding
+/// everything up to the next `"` (or the end) as one phrase, spaces
+/// included.
+fn terms(text: &str) -> Vec<String> {
+    let text = text.trim();
+    if !text.contains(char::is_whitespace) {
+        return vec![text.to_owned()];
+    }
+    let mut terms = Vec::new();
+    let mut chars = text.chars().peekable();
+    loop {
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        let Some(first) = chars.next() else {
+            return terms;
+        };
+        let term: String = if first == '"' {
+            chars.by_ref().take_while(|c| *c != '"').collect()
+        } else {
+            std::iter::once(first)
+                .chain(std::iter::from_fn(|| {
+                    chars.next_if(|c| !c.is_whitespace())
+                }))
+                .collect()
+        };
+        if !term.is_empty() {
+            terms.push(term);
+        }
+    }
 }
 
 impl Matcher {
@@ -185,10 +229,23 @@ impl Matcher {
         if query.text.trim().is_empty() {
             return Err("Type something to search for.".to_owned());
         }
-        let pattern = if query.regex {
-            query.text.clone()
+        let terms = if query.regex {
+            Vec::new()
         } else {
-            regex::escape(&query.text)
+            terms(&query.text)
+        };
+        let words = terms.len() > 1;
+        let pattern = match terms.as_slice() {
+            [] if query.regex => query.text.clone(),
+            [] => return Err("Type something to search for.".to_owned()),
+            [one] => regex::escape(one),
+            // Each word a group, in the order typed, anything but a line
+            // break between them, as little as reaches the next word.
+            more => more
+                .iter()
+                .map(|term| format!("({})", regex::escape(term)))
+                .collect::<Vec<_>>()
+                .join("(?-u:[^\\n])*?"),
         };
         let insensitive = !query.case_sensitive && !typed_upper(&query.text, query.regex);
         let regex = RegexBuilder::new(&pattern)
@@ -196,17 +253,19 @@ impl Matcher {
             .size_limit(8 * 1024 * 1024)
             .build()
             .map_err(|error| refusal(&error))?;
-        let name = query.names.then(|| {
-            if insensitive {
-                (query.text.to_lowercase(), true)
+        let name = match terms.as_slice() {
+            [one] if query.names => Some(if insensitive {
+                (one.to_lowercase(), true)
             } else {
-                (query.text.clone(), false)
-            }
-        });
+                (one.clone(), false)
+            }),
+            _ => None,
+        };
         Ok(Self {
             regex,
             name,
-            pattern: query.regex,
+            pattern: query.names && (query.regex || words),
+            words,
         })
     }
 
@@ -219,12 +278,12 @@ impl Matcher {
     /// Whether a path's name holds the text, where names were asked.
     #[must_use]
     pub fn names(&self, path: &str) -> bool {
-        let Some((text, folded)) = &self.name else {
-            return false;
-        };
         if self.pattern {
             return self.regex.is_match(path.as_bytes());
         }
+        let Some((text, folded)) = &self.name else {
+            return false;
+        };
         if *folded {
             path.to_lowercase().contains(text.as_str())
         } else {
@@ -239,12 +298,24 @@ impl Matcher {
         let mut more = 0_u32;
         for (at, line) in bytes.split(|b| *b == b'\n').enumerate() {
             let line = line.strip_suffix(b"\r").unwrap_or(line);
-            let found: Vec<(usize, usize)> = self
-                .regex
-                .find_iter(line)
-                .filter(|m| m.end() > m.start())
-                .map(|m| (m.start(), m.end()))
-                .collect();
+            let found: Vec<(usize, usize)> = if self.words {
+                self.regex
+                    .captures_iter(line)
+                    .flat_map(|caps| {
+                        caps.iter()
+                            .skip(1)
+                            .flatten()
+                            .map(|m| (m.start(), m.end()))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            } else {
+                self.regex
+                    .find_iter(line)
+                    .filter(|m| m.end() > m.start())
+                    .map(|m| (m.start(), m.end()))
+                    .collect()
+            };
             if found.is_empty() {
                 continue;
             }
@@ -906,6 +977,89 @@ mod tests {
         assert_eq!(lines(&two, "see\n"), vec![(1, "s[e][e]".to_owned())]);
     }
 
+    const ROOMS: &str = "let xy_room = 1;\nxyRoom()\nxy-room\nxy.room\nxy = room\nroom xy\nxy\nroom\n";
+
+    #[test]
+    fn words_typed_with_spaces_match_in_order_on_one_line_with_anything_between() {
+        let words = Matcher::new(&asked("xy room", false, false)).unwrap();
+        assert_eq!(
+            lines(&words, ROOMS),
+            vec![
+                (1, "let [xy]_[room] = 1;".to_owned()),
+                (2, "[xy][Room]()".to_owned()),
+                (3, "[xy]-[room]".to_owned()),
+                (4, "[xy].[room]".to_owned()),
+                (5, "[xy] = [room]".to_owned()),
+            ]
+        );
+        // The order typed: `room xy` is another query.
+        let turned = Matcher::new(&asked("room xy", false, false)).unwrap();
+        assert_eq!(lines(&turned, ROOMS), vec![(6, "[room] [xy]".to_owned())]);
+        // One line: the words never meet across a line break, in a file's
+        // first test either.
+        assert!(!words.finds(b"xy\nroom\n"));
+        assert!(words.finds(b"a\nxy_room\n"));
+        // Spaces around and between the words are not part of them.
+        let spaced = Matcher::new(&asked("  xy   room ", false, false)).unwrap();
+        assert_eq!(lines(&spaced, ROOMS).len(), 5);
+    }
+
+    #[test]
+    fn a_quoted_phrase_is_matched_as_typed_and_one_word_as_before() {
+        let phrase = Matcher::new(&asked("\"xy room\"", false, false)).unwrap();
+        assert_eq!(
+            lines(&phrase, "xy room\nxy_room\nxy  room\n"),
+            vec![(1, "[xy room]".to_owned())]
+        );
+        // A phrase among words: each is one term, in the order typed.
+        let mixed = Matcher::new(&asked("let \"xy_room\" 1", false, false)).unwrap();
+        assert_eq!(
+            lines(&mixed, ROOMS),
+            vec![(1, "[let] [xy_room] = [1];".to_owned())]
+        );
+        // One word, quotes and all, is the literal it was.
+        let one = Matcher::new(&asked("\"name\":", false, false)).unwrap();
+        assert_eq!(
+            lines(&one, "{\"name\": 1}\nname: 2\n"),
+            vec![(1, "{[\"name\":] 1}".to_owned())]
+        );
+        // Every hit of one word is still marked.
+        let each = Matcher::new(&asked("xy", false, false)).unwrap();
+        assert_eq!(lines(&each, "xy xy\n"), vec![(1, "[xy] [xy]".to_owned())]);
+    }
+
+    #[test]
+    fn smart_case_reads_the_whole_query_and_aa_holds_every_word() {
+        let any = Matcher::new(&asked("xy room", false, false)).unwrap();
+        assert_eq!(lines(&any, "XY_ROOM\n").len(), 1);
+        // One upper-case letter anywhere turns case on for every word.
+        let smart = Matcher::new(&asked("xy Room", false, false)).unwrap();
+        assert_eq!(
+            lines(&smart, "xyRoom\nXYRoom\nxy_room\n"),
+            vec![(1, "[xy][Room]".to_owned())]
+        );
+        let exact = Matcher::new(&asked("xy room", true, false)).unwrap();
+        assert_eq!(lines(&exact, "xy_room\nxyRoom\n").len(), 1);
+        // A pattern is a pattern: its space is a space.
+        let pattern = Matcher::new(&asked("xy room", false, true)).unwrap();
+        assert_eq!(
+            lines(&pattern, "xy room\nxy_room\n"),
+            vec![(1, "[xy room]".to_owned())]
+        );
+    }
+
+    #[test]
+    fn names_hold_the_words_in_order_too() {
+        let words = Matcher::new(&TextQuery {
+            names: true,
+            ..asked("xy room", false, false)
+        })
+        .unwrap();
+        assert!(words.names("src/xy_room.rs"));
+        assert!(words.names("src/xy/Room.rs"));
+        assert!(!words.names("src/room_xy.rs"));
+    }
+
     #[test]
     fn a_pattern_that_does_not_parse_says_why() {
         let refused = Matcher::new(&asked("(open", false, true)).unwrap_err();
@@ -1077,6 +1231,29 @@ mod tests {
             ]
         );
         assert_eq!(found.skipped, 1, "logo.bin");
+    }
+
+    #[tokio::test]
+    async fn words_find_their_separated_forms_in_a_branch_and_on_the_working_tree() {
+        let (dir, _, feature) = branches();
+        let at = dir.path();
+        // `feature`'s pay.rs says `retry_on_feature`; the disk says it
+        // camel-cased, in a file git does not track yet.
+        write(at, "src/disk.rs", b"retryOnDisk();\non retry\n");
+        let words = Matcher::new(&asked("retry on", false, false)).unwrap();
+        let branch = scan_tree(at, &feature, &words, &turn()).await.unwrap();
+        assert_eq!(
+            found_lines(&branch),
+            vec!["src/pay.rs:2:    [retry]_[on]_feature();".to_owned()]
+        );
+        let disk = scan_disk(at, &words, &turn()).await.unwrap();
+        assert_eq!(
+            found_lines(&disk),
+            vec![
+                "src/disk.rs:1:[retry][On]Disk();".to_owned(),
+                "src/pay.rs:2:    [retry]_[on]_main();".to_owned(),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1254,6 +1431,8 @@ mod tests {
         let cases = [
             ("rare literal", asked("zqxjkv_none", false, false)),
             ("common literal", asked("return", false, false)),
+            ("rare words", asked("zqxjkv none", false, false)),
+            ("common words", asked("return self", false, false)),
             ("smart-case literal", asked("Config", false, false)),
             ("pattern", asked(r"fn\s+\w+_new\b|\bstd::\w+", false, true)),
         ];
