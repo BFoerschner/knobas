@@ -31,6 +31,21 @@
 //! flight. At most [`PER_SOURCE`] runs of one source are followed; a newer one
 //! stops the oldest.
 //!
+//! **A started run brings its chain** (#2594, ADR-0064's *build chain*). A
+//! run waits on others before it starts (its kind's `waits_on`: TeamCity's
+//! snapshot dependencies), and those are queued by the same press. On every
+//! read of a followed run, each run it waits on that the mirror does not hold
+//! as finished is followed too, the same way: read by id at once (it may not
+//! be mirrored yet), then on the cadence, to the same ends, and each brings
+//! its own. They keep the clock of the run that brought them, so a chain's
+//! 30 s as a person and its 2 h end where the started run's do. A chain
+//! counts against [`PER_SOURCE`] run by run, but **only a write's own run
+//! makes room**: a run of a chain joins only where a slot is free and stops
+//! nobody, and one left out joins on a later read of the run that waits on
+//! it, once a slot frees. So the started run is never stopped by its own
+//! chain, and a source has at most [`PER_SOURCE`] reads in flight however
+//! long the chain.
+//!
 //! Not polling for somebody else's change: the press started a process, and
 //! reading it to its end is that write's read-back.
 
@@ -119,6 +134,26 @@ impl RunFollows {
         Some(stop)
     }
 
+    /// Note `entity` of `source` as followed for the chain of a followed run,
+    /// only where a slot is free: it stops no follow. `None` when it is
+    /// followed already or [`PER_SOURCE`] are.
+    fn join(&self, source: &str, entity: &str) -> Option<Arc<AtomicBool>> {
+        let mut all = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let runs = all.entry(source.to_owned()).or_default();
+        if runs.len() >= PER_SOURCE || runs.iter().any(|run| run.entity == entity) {
+            return None;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        runs.push_back(Followed {
+            entity: entity.to_owned(),
+            stop: Arc::clone(&stop),
+        });
+        Some(stop)
+    }
+
     /// The follow `stop` belongs to has ended.
     fn end(&self, source: &str, stop: &Arc<AtomicBool>) {
         let mut all = self
@@ -156,10 +191,24 @@ pub fn followed(scheduler: &Scheduler, source: &str) -> Vec<String> {
 /// Whether `entity` is a run in the mirror, live and not finished: its kind
 /// declares the run frame and its payload no `finished` instant.
 pub(crate) async fn in_flight(scheduler: &Scheduler, entity: &str) -> bool {
-    use knobas_core::payload::{Frame, resolve_string};
+    matches!(mirrored(scheduler, entity).await, Mirrored::InFlight { .. })
+}
+
+/// What the mirror holds of `entity`, as a follow reads it.
+enum Mirrored {
+    /// No live row, or one the follow cannot read.
+    Nothing,
+    /// A run, live and not finished, and the keys of the runs it waits on.
+    InFlight { waits_on: Vec<String> },
+    /// Anything else: a finished run, or no run at all.
+    Settled,
+}
+
+async fn mirrored(scheduler: &Scheduler, entity: &str) -> Mirrored {
+    use knobas_core::payload::{Frame, resolve_list, resolve_string};
     let deps = scheduler.deps();
     let Ok(parsed) = knobas_core::entity::EntityRef::parse(entity) else {
-        return false;
+        return Mirrored::Nothing;
     };
     let row: Option<(String, serde_json::Value)> =
         sqlx::query_as("select kind, payload from sync.live_item where entity_id = $1")
@@ -169,17 +218,27 @@ pub(crate) async fn in_flight(scheduler: &Scheduler, entity: &str) -> bool {
             .ok()
             .flatten();
     let Some((kind, payload)) = row else {
-        return false;
+        return Mirrored::Nothing;
     };
     let Ok(declarations) = super::paths::declared_paths(&deps.pool, deps.registry.as_ref()).await
     else {
-        return false;
+        return Mirrored::Nothing;
     };
-    declarations
-        .get(&parsed.namespace, &kind)
-        .is_some_and(|paths| {
-            paths.frame == Some(Frame::Run) && resolve_string(&payload, &paths.finished).is_none()
-        })
+    match declarations.get(&parsed.namespace, &kind) {
+        Some(paths)
+            if paths.frame == Some(Frame::Run)
+                && resolve_string(&payload, &paths.finished).is_none() =>
+        {
+            Mirrored::InFlight {
+                waits_on: resolve_list(&payload, &paths.waits_on)
+                    .iter()
+                    .map(|key| knobas_core::entity::EntityRef::new(&parsed.namespace, key))
+                    .map(|run| run.to_string())
+                    .collect(),
+            }
+        }
+        _ => Mirrored::Settled,
+    }
 }
 
 /// After a landed write's read-back of `entity`: follow it, in the
@@ -195,31 +254,101 @@ pub(crate) async fn follow_if_in_flight(scheduler: &Scheduler, source: &str, ent
     let Some(stop) = follows.begin(source, entity) else {
         return false;
     };
-    let (task, source_id, entity_id, stopped) = (
+    let began = Instant::now();
+    bring_chain(scheduler, source, entity, began).await;
+    let spawned = scheduler.background().spawn(to_its_end(
+        Followed {
+            entity: entity.to_owned(),
+            stop: Arc::clone(&stop),
+        },
         scheduler.clone(),
         source.to_owned(),
-        entity.to_owned(),
-        Arc::clone(&stop),
-    );
-    let spawned = scheduler.background().spawn(async move {
-        follow(&task, &entity_id, &stopped).await;
-        follows.end(&source_id, &stopped);
-    });
+        follows,
+        began,
+        false,
+    ));
     if !spawned {
         // The quit has begun: the next start's scheduled run reads it.
-        if let Some(follows) = RunFollows::of(scheduler) {
-            follows.end(source, &stop);
-        }
+        follows_end(scheduler, source, &stop);
     }
     spawned
 }
 
-/// Read `entity` again on [`next_wait`]'s cadence until it is no run in
-/// flight, or the follow ends otherwise (the module's list).
-async fn follow(scheduler: &Scheduler, entity: &str, stop: &AtomicBool) {
-    let began = Instant::now();
+fn follows_end(scheduler: &Scheduler, source: &str, stop: &Arc<AtomicBool>) {
+    if let Some(follows) = RunFollows::of(scheduler) {
+        follows.end(source, stop);
+    }
+}
+
+/// Follow each run `entity` waits on that the mirror does not hold as
+/// settled and nobody follows yet, where a slot is free (the module's
+/// *brings its chain*), on the clock `began` of the run that brought it.
+async fn bring_chain(scheduler: &Scheduler, source: &str, entity: &str, began: Instant) {
+    let Some(follows) = RunFollows::of(scheduler) else {
+        return;
+    };
+    let Mirrored::InFlight { waits_on } = mirrored(scheduler, entity).await else {
+        return;
+    };
+    for run in waits_on {
+        if matches!(mirrored(scheduler, &run).await, Mirrored::Settled) {
+            continue;
+        }
+        let Some(stop) = follows.join(source, &run) else {
+            continue;
+        };
+        let chained = to_its_end(
+            Followed {
+                entity: run,
+                stop: Arc::clone(&stop),
+            },
+            scheduler.clone(),
+            source.to_owned(),
+            follows.clone(),
+            began,
+            true,
+        );
+        if !scheduler.background().spawn(chained) {
+            follows_end(scheduler, source, &stop);
+        }
+    }
+}
+
+/// [`follow`] `run`, then note its follow ended: the task a follow is spawned
+/// as. Boxed by name, so a run of a chain can bring its own chain.
+fn to_its_end(
+    run: Followed,
+    scheduler: Scheduler,
+    source: String,
+    follows: RunFollows,
+    began: Instant,
+    at_once: bool,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        follow(&scheduler, &source, &run.entity, &run.stop, began, at_once).await;
+        follows.end(&source, &run.stop);
+    })
+}
+
+/// Read `entity` again on [`next_wait`]'s cadence, timed from `began`, until
+/// it is no run in flight, or the follow ends otherwise (the module's list);
+/// the first read at once when `at_once`. Each read brings its chain.
+async fn follow(
+    scheduler: &Scheduler,
+    source: &str,
+    entity: &str,
+    stop: &AtomicBool,
+    began: Instant,
+    at_once: bool,
+) {
     let mut failed = 0;
+    let mut first = at_once;
     while let Some(wait) = next_wait(began.elapsed()) {
+        let wait = if std::mem::take(&mut first) {
+            Duration::ZERO
+        } else {
+            wait
+        };
         if !nap(scheduler, wait, stop).await {
             return;
         }
@@ -251,6 +380,7 @@ async fn follow(scheduler: &Scheduler, entity: &str, stop: &AtomicBool) {
         if !in_flight(scheduler, entity).await {
             return;
         }
+        bring_chain(scheduler, source, entity, began).await;
     }
     tracing::info!(%entity, "a followed run is still in flight after 2 h; the source's runs read it from here");
 }
@@ -311,5 +441,44 @@ mod tests {
         );
         follows.end("tc", &sixth);
         assert!(!follows.of_source("tc").contains(&"tc:build:9".to_owned()));
+    }
+
+    /// **A chain counts run by run but only a write's run makes room**
+    /// (#2594): a run of a chain joins a free slot, stops nobody, and is not
+    /// followed twice; a write's run still stops the oldest.
+    #[test]
+    fn a_run_of_a_chain_joins_only_a_free_slot_and_stops_nobody() {
+        let follows = RunFollows::default();
+        let started = follows.begin("tc", "tc:build:10").expect("the write's run");
+        let chain: Vec<_> = (1..PER_SOURCE)
+            .map(|n| {
+                follows
+                    .join("tc", &format!("tc:build:{n}"))
+                    .expect("a free slot")
+            })
+            .collect();
+        assert!(follows.join("tc", "tc:build:1").is_none(), "followed already");
+        assert!(
+            follows.join("tc", "tc:build:9").is_none(),
+            "no slot is free: it waits for one"
+        );
+        assert!(!started.load(Ordering::SeqCst), "the started run goes on");
+        assert!(chain.iter().all(|stop| !stop.load(Ordering::SeqCst)));
+        assert_eq!(follows.of_source("tc").len(), PER_SOURCE);
+
+        follows.end("tc", &chain[0]);
+        assert!(
+            follows.join("tc", "tc:build:9").is_some(),
+            "a slot freed by a finished run takes the one left out"
+        );
+        assert!(
+            follows.join("tc", "tc:build:1").is_none(),
+            "and the cap holds again"
+        );
+
+        // A write's run makes room as before: the oldest, the started run, stops.
+        follows.begin("tc", "tc:build:20").expect("a new write's run");
+        assert!(started.load(Ordering::SeqCst));
+        assert_eq!(follows.of_source("tc").len(), PER_SOURCE);
     }
 }

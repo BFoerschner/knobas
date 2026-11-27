@@ -61,7 +61,8 @@ macro_rules! build_record {
             "triggered(type,user(username)),",
             "agent(name),",
             "testOccurrences(failed,passed,ignored),",
-            "revisions(revision(version))"
+            "revisions(revision(version)),",
+            "snapshot-dependencies(build(id))"
         )
     };
 }
@@ -116,6 +117,12 @@ pub(crate) const PROJECT_FIELDS: &str = "count,nextHref,project(id,name,parentPr
 /// **`testOccurrences(failed,passed,ignored)`** (#1448): the declared test
 /// counts, the summary a run row draws. Named, not left to TeamCity's
 /// default, so a zero is served as `0` rather than left out.
+///
+/// **`snapshot-dependencies(build(id))`** (#2594): the builds this one waits
+/// on, by id and nothing else, which `map` writes beside the record as the
+/// declared `waits_on`. A build a write started brings them with it: each is
+/// read by id and followed to its end, so the chain moves on the Builds pages
+/// without a run of the source.
 pub(crate) const BUILD_FIELDS: &str = concat!("count,nextHref,build(", build_record!(), ")");
 
 /// What one build is asked for by id when it is refreshed (ADR-0031, #2099):

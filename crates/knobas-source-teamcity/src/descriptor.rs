@@ -178,6 +178,10 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// one full sha per VCS root, which is what the detail of a pull request, a
 /// branch or a commit finds the builds of its commit by.
 ///
+/// **A run waits on its snapshot dependencies' builds** (#2594): `waitsOn`,
+/// their keys, which `map` writes beside the record off its own
+/// `snapshot-dependencies`. A build a write started brings them with it.
+///
 /// **No blocked-like and no done-like set** (#1501): a build or a
 /// configuration has an outcome and a state chip, not a workflow status, so
 /// no job context anchored on one is archived by its status.
@@ -223,6 +227,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             tests_failed: vec![PayloadPath::of(["testOccurrences", "failed"])],
             tests_passed: vec![PayloadPath::of(["testOccurrences", "passed"])],
             tests_ignored: vec![PayloadPath::of(["testOccurrences", "ignored"])],
+            waits_on: vec![ListPath {
+                at: PayloadPath::of(["waitsOn"]),
+                entry: PayloadPath::default(),
+            }],
             ..KindPaths::default()
         },
         KindPaths {

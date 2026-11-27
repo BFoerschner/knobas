@@ -1786,15 +1786,16 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811), a
-        // pipeline's chain of groups (#849), a repository's teams (#966). One
-        // rule for all six.
-        let lists: [(&str, &Vec<knobas_spi_types::payload::ListPath>); 6] = [
+        // pipeline's chain of groups (#849), a repository's teams (#966), the
+        // runs a run waits on (#2594). One rule for all seven.
+        let lists: [(&str, &Vec<knobas_spi_types::payload::ListPath>); 7] = [
             (field::REVIEWERS, &paths.reviewers),
             (field::REVISION, &paths.revision),
             (field::LABELS, &paths.labels),
             (field::SPRINT_STATE, &paths.sprint_state),
             (field::GROUP_PATH, &paths.group_path),
             (field::TEAMS, &paths.teams),
+            (field::WAITS_ON, &paths.waits_on),
         ];
 
         // Clause 2 for one path on one item, and the evidence clause 3 wants

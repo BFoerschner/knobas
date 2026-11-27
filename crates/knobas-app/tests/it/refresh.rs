@@ -83,6 +83,12 @@ struct Remote {
     /// BUILD-2 as the source holds it: `None` until a trigger queues it, then
     /// `queued`, `running` or `finished`.
     run_state: Mutex<Option<&'static str>>,
+    /// The keys of the runs BUILD-2 waits on (#2594): its snapshot
+    /// dependencies, queued by the same trigger.
+    waits: Mutex<Vec<String>>,
+    /// Those runs as the source holds them, by key: each one's state (`None`
+    /// once the source no longer has it) and the keys it waits on in turn.
+    chain: Mutex<std::collections::BTreeMap<String, (Option<&'static str>, Vec<String>)>>,
 }
 
 fn ticket(key: &str, title: &str) -> SyncItem {
@@ -99,15 +105,21 @@ fn ticket(key: &str, title: &str) -> SyncItem {
     }
 }
 
-/// BUILD-2 in `state`: a finished one carries its `finishDate`, which the
-/// build kind declares as its `finished` instant.
-fn run_build(state: &str) -> SyncItem {
+/// The run `key` in `state` (BUILD-2 is the one a trigger queues): a
+/// finished one carries its `finishDate`, which the build kind declares as
+/// its `finished` instant, waiting on `waits` (#2594): written beside the
+/// record as `waitsOn`, as the TeamCity adapter writes a build's snapshot
+/// dependencies, and left out where it waits on nothing.
+fn chain_run(key: &str, state: &str, waits: &[String]) -> SyncItem {
     let mut payload = json!({ "state": state });
     if state == "finished" {
         payload["finishDate"] = json!("20261125T100000+0000");
     }
+    if !waits.is_empty() {
+        payload["waitsOn"] = json!(waits);
+    }
     SyncItem {
-        entity: EntityRef::new(SOURCE, "BUILD-2"),
+        entity: EntityRef::new(SOURCE, key),
         kind: "build".to_owned(),
         title: "Build #2".to_owned(),
         body_text: String::new(),
@@ -195,9 +207,20 @@ impl Source for Fake {
                 TICKET => RefreshAnswer::Item(ticket("PAY-1", &self.0.title.lock().unwrap())),
                 BUILD => RefreshAnswer::Item(build()),
                 RUN => match *self.0.run_state.lock().unwrap() {
-                    Some(state) => RefreshAnswer::Item(run_build(state)),
+                    Some(state) => {
+                        RefreshAnswer::Item(chain_run("BUILD-2", state, &self.0.waits.lock().unwrap()))
+                    }
                     None => RefreshAnswer::Gone,
                 },
+                other if other.starts_with("refreshing:BUILD-") => {
+                    let key = other.trim_start_matches("refreshing:");
+                    match self.0.chain.lock().unwrap().get(key) {
+                        Some((Some(state), waits)) => {
+                            RefreshAnswer::Item(chain_run(key, state, waits))
+                        }
+                        _ => RefreshAnswer::Gone,
+                    }
+                }
                 REPO => RefreshAnswer::NotOffered,
                 FILED if *self.0.filed.lock().unwrap() => {
                     RefreshAnswer::Item(ticket("PAY-9", "Build #1 failed"))
@@ -306,6 +329,11 @@ fn descriptor(reads: Reads) -> SourceDescriptor {
             kind: "build".to_owned(),
             frame: Some(knobas_source::Frame::Run),
             finished: vec![knobas_source::PayloadPath::of(["finishDate"])],
+            // The runs a build waits on, by key (#2594).
+            waits_on: vec![knobas_source::ListPath {
+                at: knobas_source::PayloadPath::of(["waitsOn"]),
+                entry: knobas_source::PayloadPath::default(),
+            }],
             ..knobas_source::KindPaths::default()
         }],
     }
@@ -416,6 +444,8 @@ async fn fixture(name: &str) -> Fixture {
         walk_keeps_position: Mutex::new(false),
         walk_deleted: Mutex::new(Vec::new()),
         run_state: Mutex::new(None),
+        waits: Mutex::new(Vec::new()),
+        chain: Mutex::new(std::collections::BTreeMap::new()),
     });
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry(Arc::clone(&remote)));
     let heard = Heard::default();
@@ -1631,5 +1661,156 @@ async fn a_refresh_of_an_unmoved_item_is_unchanged_and_tells_nothing() {
         "the unchanged read told nothing: {:?}",
         f.heard()
     );
+    f.state.scheduler.shutdown().await;
+}
+
+/// The state the mirror holds the run `entity` in.
+async fn state_of(pool: &sqlx::PgPool, entity: &str) -> Option<String> {
+    sqlx::query_scalar("select payload->>'state' from sync.live_item where entity_id = $1")
+        .bind(entity)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+}
+
+/// Move the run `key` of BUILD-2's chain to `state` at the source.
+fn chain_moves(f: &Fixture, key: &str, state: &'static str) {
+    f.remote
+        .chain
+        .lock()
+        .unwrap()
+        .get_mut(key)
+        .expect("a run of the chain")
+        .0 = Some(state);
+}
+
+fn followed(f: &Fixture) -> Vec<String> {
+    knobas_app::sources::follow_run::followed(&f.state.scheduler, SOURCE)
+}
+
+/// Trigger BUILD-2 and wait until it is sent.
+async fn trigger_the_run(f: &Fixture) {
+    let id = write_queue::submit_in_background(
+        &f.state,
+        json!({ "TriggerBuild": { "entity": PIPELINE } }),
+    )
+    .await
+    .expect("queued")
+    .id;
+    assert_eq!(settled(&f.state, id).await, WriteState::Sent);
+}
+
+/// **A run started here brings the runs it waits on** (#2594): BUILD-2's
+/// trigger queued BUILD-3, which waits on BUILD-4. Each is read by id from
+/// the started run's own record and moves on in the mirror within a read of
+/// moving at the source, queued to running to finished, with no run of the
+/// source reading it (its incremental runs emit nothing); each follow ends
+/// with its run, and the started run's goes on until it finishes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_started_here_brings_the_runs_it_waits_on_to_their_end() {
+    let f = fixture("refresh_follow_chain").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    *f.remote.waits.lock().unwrap() = vec!["BUILD-3".to_owned()];
+    f.remote.chain.lock().unwrap().extend([
+        ("BUILD-3".to_owned(), (Some("queued"), vec!["BUILD-4".to_owned()])),
+        ("BUILD-4".to_owned(), (Some("queued"), Vec::new())),
+    ]);
+    trigger_the_run(&f).await;
+    let (dep, deeper) = ("refreshing:BUILD-3", "refreshing:BUILD-4");
+    until("the run and its chain are followed", || async {
+        followed(&f) == [RUN, dep, deeper]
+    })
+    .await;
+    until("the mirror holds both queued, each read at once", || async {
+        state_of(&f.state.pool, dep).await.as_deref() == Some("queued")
+            && state_of(&f.state.pool, deeper).await.as_deref() == Some("queued")
+    })
+    .await;
+
+    // The first step runs and finishes: read within a read of each.
+    chain_moves(&f, "BUILD-4", "running");
+    let moved = std::time::Instant::now();
+    until("the mirror says BUILD-4 runs", || async {
+        state_of(&f.state.pool, deeper).await.as_deref() == Some("running")
+    })
+    .await;
+    assert!(moved.elapsed() < Duration::from_secs(4), "{:?}", moved.elapsed());
+    chain_moves(&f, "BUILD-4", "finished");
+    until("BUILD-4's follow ends with it", || async {
+        followed(&f) == [RUN, dep]
+    })
+    .await;
+    assert_eq!(state_of(&f.state.pool, deeper).await.as_deref(), Some("finished"));
+
+    chain_moves(&f, "BUILD-3", "running");
+    until("the mirror says BUILD-3 runs", || async {
+        state_of(&f.state.pool, dep).await.as_deref() == Some("running")
+    })
+    .await;
+    chain_moves(&f, "BUILD-3", "finished");
+    until("BUILD-3's follow ends with it", || async { followed(&f) == [RUN] }).await;
+    assert_eq!(state_of(&f.state.pool, dep).await.as_deref(), Some("finished"));
+
+    // A finished run of the chain is not brought again by the next reads.
+    let reads = f.remote.refreshes.load(Ordering::SeqCst);
+    until("two more reads of the started run", || async {
+        f.remote.refreshes.load(Ordering::SeqCst) >= reads + 2
+    })
+    .await;
+    assert_eq!(followed(&f), [RUN]);
+
+    *f.remote.run_state.lock().unwrap() = Some("finished");
+    until("the follow ends", || async { followed(&f).is_empty() }).await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// **The follow's bounds hold for a chain** (#2594): the started run waits
+/// on more runs than [`PER_SOURCE`] leaves room for. At most that many are
+/// followed at once, the started run is never stopped by its own chain, and
+/// each one left out is brought once a slot frees, until every one has been
+/// read to its end.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chain_longer_than_the_cap_is_followed_a_slot_at_a_time_behind_the_started_run() {
+    use knobas_app::sources::follow_run::PER_SOURCE;
+    let f = fixture("refresh_follow_long_chain").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    let keys: Vec<String> = (11..11 + PER_SOURCE + 2).map(|n| format!("BUILD-{n}")).collect();
+    *f.remote.waits.lock().unwrap() = keys.clone();
+    f.remote.chain.lock().unwrap().extend(
+        keys.iter()
+            .map(|key| (key.clone(), (Some("queued"), Vec::new()))),
+    );
+    trigger_the_run(&f).await;
+    until("the cap is full", || async { followed(&f).len() == PER_SOURCE }).await;
+    assert_eq!(followed(&f)[0], RUN, "the started run first: {:?}", followed(&f));
+
+    for key in &keys {
+        let entity = format!("{SOURCE}:{key}");
+        until(&format!("{key} is followed"), || async {
+            followed(&f).contains(&entity)
+        })
+        .await;
+        let now = followed(&f);
+        assert!(now.len() <= PER_SOURCE, "{now:?}");
+        assert_eq!(now[0], RUN, "the started run goes on: {now:?}");
+        chain_moves(&f, key, "finished");
+        until(&format!("{key} is read finished"), || async {
+            state_of(&f.state.pool, &entity).await.as_deref() == Some("finished")
+        })
+        .await;
+    }
+    until("only the started run is left", || async { followed(&f) == [RUN] }).await;
+    for key in &keys {
+        assert_eq!(
+            state_of(&f.state.pool, &format!("{SOURCE}:{key}")).await.as_deref(),
+            Some("finished"),
+            "{key}"
+        );
+    }
+
+    *f.remote.run_state.lock().unwrap() = Some("finished");
+    until("the follow ends", || async { followed(&f).is_empty() }).await;
     f.state.scheduler.shutdown().await;
 }
