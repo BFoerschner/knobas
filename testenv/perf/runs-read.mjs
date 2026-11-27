@@ -39,7 +39,11 @@ const invoke = (cmd, a = {}) =>
     return answer.ok;
   });
 
-const before = await invoke("read_runs");
+// Every mark found (ADR-0063: `read_runs` answers `RunMarks`), put back by id at the end. An *opened* mark comes back
+// as a *marked* one, which reads its run the same; one taken while a run ran comes back as one after it finished if the
+// run ended meanwhile.
+const marks = await invoke("read_runs");
+const before = [...marks.read, ...marks.while_running];
 const failedRun = (run) => run.finished !== null && run.state?.tone === "err";
 const pipelines = await invoke("pipelines");
 // The pipeline with the most failures among its recent runs, its newest failed run the one marked.
@@ -220,9 +224,10 @@ try {
   await c.send("Emulation.setCPUThrottlingRate", { rate: 1 }).catch(() => {});
   // The marks as found: everything unread again, then what was read before.
   try {
-    const now = await invoke("read_runs");
+    const found = await invoke("read_runs");
+    const now = [...found.read, ...found.while_running];
     if (now.length > 0) await invoke("mark_runs_unread", { runs: now });
-    if (before.length > 0) await invoke("mark_runs_read", { runs: before, pipelines: [] });
+    if (before.length > 0) await invoke("mark_runs_read", { scope: { everything: false, pipelines: [], runs: before } });
   } catch (e) {
     console.error(`could not put the marks back: ${e}`);
   }

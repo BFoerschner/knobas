@@ -83,6 +83,18 @@ test("a mark the backend wrote while the run still ran is held as one: the run i
   expect(runs.ports.unmark).toHaveBeenCalledWith(["teamcity:build:6"]);
 });
 
+test("a mark the backend did not write over keeps the mark taken while the run ran", async () => {
+  // Marked while it ran and still running: the backend writes nothing over it (`MARK_READ`'s `where not reads!`).
+  const runs = store({ read: vi.fn(async () => ({ read: [], while_running: ["teamcity:build:9"] })), mark: vi.fn(async () => reading([])) });
+  await runs.load();
+  await runs.markRead(["teamcity:build:9"]);
+  expect(runs.read?.has("teamcity:build:9"), "not read: it fails unread").toBe(false);
+  expect(runs.whileRunning.has("teamcity:build:9")).toBe(true);
+  await runs.markAll({ runs: ["teamcity:build:9"], pipelines: [] });
+  expect(runs.read?.has("teamcity:build:9")).toBe(false);
+  expect(runs.whileRunning.has("teamcity:build:9")).toBe(true);
+});
+
 test("a run that cannot be unread takes no mark", async () => {
   const runs = store();
   await runs.toggle(failed("teamcity:build:6", { finished: null }));

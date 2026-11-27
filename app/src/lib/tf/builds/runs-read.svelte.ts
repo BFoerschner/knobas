@@ -153,9 +153,13 @@ export class RunsRead {
     this.#whileRunning = running;
   }
 
-  /** The marks a write answered, as the backend wrote them. */
-  #wrote(marks: RunMarks): void {
-    this.#with(marks.read, [], marks.while_running);
+  /**
+   * The marks a write answered, as the backend wrote them. Each of `wasRunning`, drawn read at the press, that the answer
+   * does not read keeps the mark it had: the backend writes over a mark taken while a run ran only once the run ended.
+   */
+  #wrote(marks: RunMarks, wasRunning: readonly string[] = []): void {
+    const read = new Set(marks.read);
+    this.#with(marks.read, [], [...marks.while_running, ...wasRunning.filter((id) => !read.has(id))]);
   }
 
   /** The Inbox's *Done* on a failed build read its run (the backend wrote the mark with the answer). */
@@ -188,7 +192,7 @@ export class RunsRead {
     const wasRunning = fresh.filter((id) => this.#whileRunning.has(id));
     this.#with(fresh);
     try {
-      this.#wrote(await this.#writing(this.ports.mark({ everything: false, pipelines: [], runs: [...fresh] })));
+      this.#wrote(await this.#writing(this.ports.mark({ everything: false, pipelines: [], runs: [...fresh] })), wasRunning);
     } catch (cause) {
       this.#with([], fresh, wasRunning);
       push({ text: `Could not mark ${counted(fresh.length, "run", "runs")} as read: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -238,7 +242,7 @@ export class RunsRead {
       push({ text: `Could not mark the runs as read: ${ipcErrorMessage(cause)}`, tone: "err" });
       return [];
     }
-    this.#wrote(wrote);
+    this.#wrote(wrote, wasRunning);
     const ids = idsOf(wrote);
     if (ids.length === 0) push({ text: "No unread runs", subject: "runs-read" });
     else undoable(`Marked ${counted(ids.length, "run", "runs")} as read`, () => void this.markUnread(ids));
