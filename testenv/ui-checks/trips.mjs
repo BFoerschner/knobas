@@ -116,7 +116,7 @@
 //                 fails if the address changes or the pane doesn't move.
 //
 //   nav-reopen    Round 17. At each of `sizes`, by pointer and by key: open `route`, go to the item at `left`, scroll `scroller` to `at`, press `via` (Docs if absent, `via: null` for none) and `section`, which must land on
-//                 `route`. Press `row` twice with a still pointer, or Enter twice. Fails unless that opens `left` at `at` on one history entry. Esc must go to `route`, and `row` again must open `bare` at 0, as it is used once.
+//                 `route`. Press `row` twice with a still pointer, or Enter twice. Fails unless that opens `left` at `at` on one history entry. Esc must go to `route` (to `esc` where the page sits under another, #2559), and `row` again must open `bare` at 0, as it is used once.
 //                 From another section the entry first comes back to `left` at `at` (2026-11-13), and a second press, once the press's hold has let go, is `route`.
 //                 `far`: more entries on the way, which push the page out of keep-alive. `then: "other"`: `other`'s row first, which opens `otherBare` at 0 and ends the memory. `then: "launcher"`: ⌘K `words` from `via`, which opens `bare` at 0.
 //                 `then: "tab"`: `tab`'s link, which opens `tabTo`, not `left`. `then: "back"`: ⌘[ from `via` to `left`, then the entry and `row`, which opens `bare` at 0. `keeps` is { sel, value } that must read `value` after the reopen.
@@ -978,10 +978,13 @@ const PAGES = [
     { id: "kept-docs-other", kind: "kept-opening", strict: true, finding: "F-454", then: "other", scroller: ".tf-rd-main", via: "inbox", other: "page/confluence%3Apsp-codes" },
     { id: "kept-docs-launcher", kind: "kept-opening", strict: true, finding: "F-067", then: "launcher", scroller: ".tf-rd-main", via: "tickets", other: "page/confluence%3Apsp-codes", words: "PSP error" },
     { id: "kept-docs-same", kind: "kept-opening", strict: true, finding: "F-454", then: "same", scroller: ".tf-rd-main", via: "inbox" },
-    { id: "kept-docs-esc", kind: "kept-opening", strict: true, finding: "F-454", then: "esc", scroller: ".tf-rd-main", other: "page/confluence%3Apsp-codes" },
     { id: "kept-docs-back", kind: "kept-opening", strict: true, finding: "F-454", then: "back", scroller: ".tf-rd-main", other: "page/confluence%3Apsp-codes" },
     { id: "kept-docs-continue", kind: "kept-opening", strict: true, finding: "F-431", then: "continue", scroller: ".tf-rd-main", press: { sel: "section[aria-label='Continue reading'] a.tf-dh-row" } },
     { id: "kept-docs-continue-away", kind: "kept-opening", strict: true, finding: "F-431", then: "continue", scroller: ".tf-rd-main", via: "inbox", press: { sel: "section[aria-label='Continue reading'] a.tf-dh-row" } },
+  ] },
+  // `Esc` goes up the page's own section (#2559): from a page to its space, which comes back as it was left.
+  { page: "Opening a kept page, Docs", route: "docs/space/ENG", trips: [
+    { id: "kept-docs-esc", kind: "kept-opening", strict: true, finding: "F-454", then: "esc", scroller: ".tf-rd-main", other: "page/confluence%3Asepa" },
   ] },
   { page: "Opening a kept page, Docs", route: "page/confluence%3Apsp-codes", trips: [
     { id: "kept-docs-section", kind: "kept-opening", strict: true, finding: "F-454", then: "landing", scroller: ".tf-rd-main", via: "inbox", other: "page/confluence%3Asepa/2", to: "#s-2", top: true, at: 300 },
@@ -991,7 +994,7 @@ const PAGES = [
   { page: "Opening a kept page, an asset", route: "asset/asset%3Aknobas-gitea", trips: [
     { id: "kept-asset-other", kind: "kept-opening", strict: true, finding: "F-454", then: "other", scroller: "aside.pane", via: "inbox", other: "asset/asset%3Aknobas-jira" },
     { id: "kept-asset-same", kind: "kept-opening", strict: true, finding: "F-454", then: "same", scroller: "aside.pane", via: "inbox" },
-    { id: "kept-asset-esc", kind: "kept-opening", strict: true, finding: "F-454", then: "esc", scroller: "aside.pane", other: "ticket/mock%3APAY-231" }, // Esc on an asset goes up the tree, so this one comes back from what it opened.
+    // No `esc` trip here since #2559: `Esc` on the ticket an asset opened goes to Tickets, never back; Back is the way back.
     { id: "kept-asset-back", kind: "kept-opening", strict: true, finding: "F-454", then: "back", scroller: "aside.pane", other: "asset/asset%3Aknobas-jira" },
   ] },
   // Fixer 2's, moved here in the reconcile. `once`: a second press must not ask for a second run. A run the fake holds going keeps the control off.
@@ -1086,10 +1089,10 @@ const PAGES = [
   ] },
   { page: "Way back, a pull request", route: "code/prs", trips: [
     { id: "nav-reopen-pr-launcher", kind: "nav-reopen", strict: true, finding: "F-274", then: "launcher", left: "pr/mock%3Apayout-service%23142/diff", bare: "pr/mock%3Apayout-service%23142", section: "Code", scroller: ".tf-main", at: 600, how: ["pointer"], sizes: [[1440, 560]], words: "idempotent", row: { sel: ".tf-main a.tf-rowt[href='#/pr/mock%3Apayout-service%23142']" } },
-    { id: "nav-reopen-pr", kind: "nav-reopen", strict: true, finding: "F-274", left: "pr/mock%3Apayout-service%23142/diff", bare: "pr/mock%3Apayout-service%23142", section: "Code", scroller: ".tf-main", at: 600, row: { sel: ".tf-main a.tf-rowt[href='#/pr/mock%3Apayout-service%23142']" } },
+    { id: "nav-reopen-pr", kind: "nav-reopen", strict: true, finding: "F-274", left: "pr/mock%3Apayout-service%23142/diff", bare: "pr/mock%3Apayout-service%23142", section: "Code", esc: REPO, scroller: ".tf-main", at: 600, row: { sel: ".tf-main a.tf-rowt[href='#/pr/mock%3Apayout-service%23142']" } },
   ] },
   { page: "Way back, a repository", route: "code/repos", trips: [
-    { id: "nav-reopen-repo", kind: "nav-reopen", strict: true, finding: "F-274", left: `${REPO}/files/README.md`, bare: REPO, section: "Code", scroller: ".tf-main", at: 600, row: { sel: `.tf-main tr a[href='#/${REPO}']` } },
+    { id: "nav-reopen-repo", kind: "nav-reopen", strict: true, finding: "F-274", left: `${REPO}/files/README.md`, bare: REPO, section: "Code", esc: REPO, scroller: ".tf-main", at: 600, row: { sel: `.tf-main tr a[href='#/${REPO}']` } },
   ] },
   // Coming back by the entry to a place deeper than the section's own page (2026-11-13).
   { page: "Way back, a Docs page", route: "page/confluence%3Asepa", trips: [
@@ -2430,8 +2433,10 @@ async function startBrowser() {
           await key("Escape");
           await sleep(350);
           const after = await evaluate(`location.hash`);
-          if (after !== hash) reasons.push(`at ${w} x ${h}, Esc after a nav return went to ${after}`);
-          for (const sel of Object.keys(wants)) if (Math.abs((await scrollTop(sel)) - reads[sel]) > 2) reasons.push(`at ${w} x ${h}, Esc moved ${sel}`);
+          // A pipeline sits under Builds' own page (#2559), so its Esc goes there; every other place come back to stays.
+          const up = /^#\/builds\/[^/]+/.test(hash) ? "#/builds" : hash;
+          if (after !== up) reasons.push(`at ${w} x ${h}, Esc after a nav return went to ${after}, not ${up}`);
+          if (up === hash) for (const sel of Object.keys(wants)) if (Math.abs((await scrollTop(sel)) - reads[sel]) > 2) reasons.push(`at ${w} x ${h}, Esc moved ${sel}`);
         }
         notes.push(`${w}: ${Object.entries(reads).map(([s, v]) => `${s} ${v}`).join(", ")}, focus ${focus}`);
       }
@@ -2894,13 +2899,17 @@ async function startBrowser() {
           await sleep(500);
           if (t.fill && kept) { await key("Escape"); await sleep(120); await key("Escape"); await opener.settleAfterChange(); await sleep(500); }
           const out = await hashNow();
-          if (out !== list) reasons.push(`${where}, Esc after the reopen went to ${out}, not ${list}`);
+          // `esc`: where `Esc` goes up the page's own section, when that is not the list (#2559); the list is then gone to by address.
+          const up = t.esc ? `#/${t.esc}` : list;
+          if (out !== up) reasons.push(`${where}, Esc after the reopen went to ${out}, not ${up}`);
+          if (out !== list) { await go(t.route); await sleep(300); }
           await press1(t.row);
           await sleep(500);
           const again = await hashNow();
           const top = await scrollTop(t.scroller);
           if (again !== bare) reasons.push(`${where}, a press after Esc went to ${again}, not ${bare}: it is used once`);
-          if (top > 1) reasons.push(`${where}, a press after Esc opened at ${top}, not the top`);
+          // Where Esc itself landed on `bare`, that page was left at its scroll there, which a return keeps (F-454).
+          if (top > 1 && up !== `#/${t.bare}`) reasons.push(`${where}, a press after Esc opened at ${top}, not the top`);
           notes.push(`${w} ${how}: ${reads} of ${want}, focus ${focus}${t.fill ? `, ${t.fill.sel} reads "${kept}"` : ""}`);
         }
       }
@@ -3252,16 +3261,18 @@ async function startBrowser() {
         await sleep(800);
         if ((await hashNow()) !== here) reasons.push(`at ${w}, the gear went to ${await hashNow()}, not ${here}`);
         if (Math.abs((await scrollTop(pane)) - want) > 2) reasons.push(`at ${w}, the gear read ${await scrollTop(pane)}, left at ${want}`);
+        // A section of Settings goes nowhere on Esc, wherever the gear was pressed (#2559); Back is the way out.
         await key("Escape");
         await opener.settleAfterChange();
         await sleep(400);
-        if ((await hashNow()) !== "#/inbox") reasons.push(`at ${w}, Esc from the gear went to ${await hashNow()}, not #/inbox`);
+        if ((await hashNow()) !== here) reasons.push(`at ${w}, Esc from the gear went to ${await hashNow()}, not nowhere`);
+        await toEntry("Inbox");
         await keyOf(",", 188, 4);
         await opener.settleAfterChange();
         await sleep(800);
         if ((await hashNow()) !== here) reasons.push(`at ${w}, ⌘, went to ${await hashNow()}, not ${here}`);
         if (Math.abs((await scrollTop(pane)) - want) > 2) reasons.push(`at ${w}, ⌘, read ${await scrollTop(pane)}, left at ${want}`);
-        // On the section: nothing moves, whichever way it's asked, and Esc still leaves.
+        // On the section: nothing moves, whichever way it's asked, Esc included (#2559).
         await keyOf(",", 188, 4);
         await sleep(300);
         if ((await evaluate(`window.__trip.focusPress(${JSON.stringify(gear)})`)) == null) throw new Error("can't focus the gear");
@@ -3273,7 +3284,7 @@ async function startBrowser() {
         await key("Escape");
         await opener.settleAfterChange();
         await sleep(300);
-        if ((await hashNow()) !== "#/inbox") reasons.push(`at ${w}, Esc after the gear on its own section went to ${await hashNow()}`);
+        if ((await hashNow()) !== here) reasons.push(`at ${w}, Esc after the gear on its own section went to ${await hashNow()}`);
         // A source's page: from another section the gear comes back to it (2026-11-13), and on it the gear goes to Sources.
         await go(t.source);
         await sleep(300);
