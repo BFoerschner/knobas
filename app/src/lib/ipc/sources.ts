@@ -336,11 +336,6 @@ export function syncRole(role: string): Promise<RoleRun[]> {
 }
 
 /**
- * An item's detail's *Refresh* (#2107): read `entityId` from its source and
- * resolve once the refresh has ended, with how it ended. A refresh that read
- * something also ends on `EVENTS.itemRefreshed` with no write.
- */
-/**
  * The repositories knobas looks at again now, after a branch moved (ADR-0064 rule 2, #2585): each schedule and the
  * sides it still looks for. `looking:again` tells each change; this is the read on start.
  */
@@ -348,6 +343,11 @@ export function lookingAgain(): Promise<LookingAgain[]> {
   return invoke<LookingAgain[]>("looking_again");
 }
 
+/**
+ * An item's detail's *Refresh* (#2107): read `entityId` from its source and
+ * resolve once the refresh has ended, with how it ended. A refresh that read
+ * something also ends on `EVENTS.itemRefreshed` with no write.
+ */
 export function refreshEntity(entityId: string, behind = false): Promise<EntityRefresh> {
   // `behind`: a page asks it by itself (the repository page's walk when shown), in the background lane.
   return invoke<EntityRefresh>("refresh_entity", { entityId, behind });

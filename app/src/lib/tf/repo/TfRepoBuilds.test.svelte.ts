@@ -357,7 +357,8 @@ test("the tab says Looking for new builds… while the repository's builds are l
     readLooking: () => Promise.resolve([{ scope: repo, code: true, builds: true }]),
   });
   await settle();
-  const note = () => target.querySelector(".tf-rbp-sub .tf-rb-looking")?.textContent?.trim() ?? null;
+  // The live region stays drawn, empty, so a screen reader hears the words as they come.
+  const note = () => target.querySelector(".tf-rbp-sub .tf-rb-looking[role=status]")?.textContent?.trim() || null;
   expect(note()).toBe("Looking for new builds…");
   handlers.forEach((handler) => handler({ payload: { scope: repo, code: true, builds: false } }));
   flushSync();

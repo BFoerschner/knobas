@@ -461,7 +461,7 @@
   {/if}
 {/snippet}
 
-{#snippet looking()}{#if lookingForBuilds}<span class="tf-rb-looking" role="status"> Looking for new builds…</span>{/if}{/snippet}
+{#snippet looking()}<span class="tf-rb-looking" role="status">{#if lookingForBuilds} Looking for new builds…{/if}</span>{/snippet}
 
 {#if failed !== null && rows === null}
   <p class="tf-dim">Builds could not be read: {failed}</p>
