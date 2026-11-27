@@ -283,14 +283,17 @@ pub async fn builds_in_front(
 
 /// The quit while Builds is in front leaves it (ADR-0063): the exit handler
 /// calls this before the database stops. A quit before the database was up
-/// has nothing to write. Once a process: the exit handler runs on both
+/// has nothing to write. Once an app: the exit handler runs on both
 /// `ExitRequested` and `Exit`, and the second finds the database stopped.
-/// Held to a second, so a database that stopped answering never holds the
-/// quit.
+/// The mark is the app's own managed state, not a process-wide static: a
+/// process that runs more than one app (the integration tests) leaves
+/// Builds for each. Held to a second, so a database that stopped answering
+/// never holds the quit.
 pub fn leave_builds_at_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::Manager as _;
-    static LEFT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if LEFT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    /// Managed once the app's quit has left Builds.
+    struct LeftBuilds;
+    if !app.manage(LeftBuilds) {
         return;
     }
     let Some(lifecycle) = app.try_state::<Lifecycle>() else {
