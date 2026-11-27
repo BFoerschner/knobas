@@ -627,15 +627,21 @@
       done: states.filter((state) => state === "made" || state === "same").length,
       going: states.includes("running"),
       runnable: all.filter((c) => c.runnable),
+      // Where none wants a run, every folder rendered is run anew (#2557): kept output counts as current by knobas's
+      // stamp of the tool, which misses a tool changed by a relative path, a wrapper's imports or a plugin.
+      again: all.filter((c) => c.state === "made" || c.state === "same"),
     };
   });
+  /** What a press of the band's button runs: the folders that want a run, else every rendered one anew. */
+  const folderPress = $derived(folderRuns.runnable.length > 0 ? { take: folderRuns.runnable, again: false } : { take: folderRuns.again, again: true });
   function runFolders() {
     if (folderRuns.going) {
       for (const compare of folderRuns.all) compare.stop();
       return;
     }
-    // A failed folder is left to its own bar: a batch does not run a failing tool again.
-    for (const compare of folderRuns.runnable.slice(0, RUN_AT_ONCE)) compare.press();
+    // A failed folder is left to its own bar: a batch does not run a failing tool again. A rendered folder's press is
+    // its own *Run again* (`Ask::Again` on both sides).
+    for (const compare of folderPress.take.slice(0, RUN_AT_ONCE)) compare.press();
   }
   /**
    * The band's button keeps the widest room its words have taken (section 10): *Stop all* and *Run 1 folder render*
@@ -648,10 +654,11 @@
   };
   const runLabel = $derived.by(() => {
     if (folderRuns.going) return "Stop all";
-    const n = folderRuns.runnable.length;
+    const n = folderPress.take.length;
     if (n === 0) return "Run folder renders";
-    if (n > RUN_AT_ONCE) return `Run ${RUN_AT_ONCE} of ${thousands(n)} folder renders`;
-    return `Run ${n} folder ${n === 1 ? "render" : "renders"}`;
+    const again = folderPress.again ? " again" : "";
+    if (n > RUN_AT_ONCE) return `Run ${RUN_AT_ONCE} of ${thousands(n)} folder renders${again}`;
+    return `Run ${n} folder ${n === 1 ? "render" : "renders"}${again}`;
   });
 
   let filter = $state("");
@@ -2145,7 +2152,7 @@
     <!-- The grouped folders' runs (ux26, section 10): only a press runs, at most 20 folders a press. -->
     <span class="tf-drun">
       <span class="tf-drun-n">{thousands(folderRuns.done)} of {thousands(groups.length)} {groups.length === 1 ? "folder" : "folders"} rendered</span>
-      <button type="button" class="tf-btn tf-sm" disabled={!folderRuns.going && folderRuns.runnable.length === 0} onclick={runFolders} {@attach keepWidth(runLabel)}>{runLabel}</button>
+      <button type="button" class="tf-btn tf-sm" disabled={!folderRuns.going && folderPress.take.length === 0} onclick={runFolders} {@attach keepWidth(runLabel)}>{runLabel}</button>
     </span>
   {/if}
   {#if list}
