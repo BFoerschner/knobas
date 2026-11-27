@@ -42,8 +42,8 @@ doc-list check, the conflict-marker scan, `svelte-check`, the Vitest files the c
 under `scripts/` or `testenv/` (and prose) it runs `check-scripts`: the
 doc-list check and `check`'s script half (`shell`, `test-layout`,
 `witness-unit`, `conflict-markers`, `extension-test`), no cargo. A change
-under `extension/` takes the full gate. `scripts/gate-scope.sh` says
-which, and why.
+under `extension/` counts as a script: `extension-test` is its only check.
+`scripts/gate-scope.sh` says which, and why.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
 refreshes the IPC mirror and the contract index, and runs a few quick checks.

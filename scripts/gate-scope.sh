@@ -47,6 +47,9 @@
 # A Markdown file under them is prose unless a crate opens it
 # (`.join("../../testenv/specs/README.md")` in teamcity_contract.rs); before
 # #2334 `*.md` matched first and that README could change under `front`.
+# `extension/` counts as a script (#2545): its only check is `extension-test`,
+# which `check-scripts` runs as `check` does, and nothing in `crates/` or
+# `app/src` reads it (one that names an `extension/` path still makes it full).
 # A head that mixes a script with an app file is `full`: neither `front` nor
 # `scripts` runs the other's half. Live recipes run in no gate at all, so a
 # script only they use earns nothing from the full one.
@@ -88,14 +91,14 @@ pinned=$(for s in "$root"/testenv/*.sh; do [ -f "$s" ] && awk '
     }
     while ((p = path(line)) != "") { print p; line = substr(line, index(line, p) + length(p)) }
   }' "$s"; done 2>/dev/null | sed -E 's#/*$##' | sort -u || true)
-# Every `scripts/...` or `testenv/...` path named on a non-comment line of
+# Every `scripts/...`, `testenv/...` or `extension/...` path named on a non-comment line of
 # crates/ or app/src; a directory pins its contents.
 named=$(grep -rhE --include='*.rs' --include='*.toml' --include='*.json' --include='*.ts' \
           --include='*.js' --include='*.mjs' --include='*.svelte' \
-          '(^|[^A-Za-z0-9_-])(scripts|testenv)/' "$root/crates" "$root/app/src" 2>/dev/null \
+          '(^|[^A-Za-z0-9_-])(scripts|testenv|extension)/' "$root/crates" "$root/app/src" 2>/dev/null \
         | grep -vE '^[[:space:]]*(//|#[^[!]|\*|/\*)' \
-        | grep -oE '(^|[^A-Za-z0-9_-])(scripts|testenv)/[A-Za-z0-9_.@+/-]*' \
-        | sed -E 's#^[^st]*##; s#[/.]+$##' | grep / | sort -u || true)
+        | grep -oE '(^|[^A-Za-z0-9_-])(scripts|testenv|extension)/[A-Za-z0-9_.@+/-]*' \
+        | sed -E 's#^[^a-z]*##; s#[/.]+$##' | grep / | sort -u || true)
 run_in_place=" scripts/bash-guard.py scripts/gate-slot.sh scripts/ipc-mirror-check.sh scripts/changed-crates.sh scripts/gate-scope.sh "
 saw_app='' saw_script=''
 while IFS= read -r f; do
@@ -125,7 +128,7 @@ while IFS= read -r f; do
         fi
       done <<< "$pinned" ;;
     docs/*|mockups/*) ;;
-    scripts/*|testenv/*)
+    scripts/*|testenv/*|extension/*)
       if [ "${run_in_place#* "$f" }" != "$run_in_place" ]; then
         echo "gate-scope: full: the full gate runs $f" >&2; echo full; exit 0
       fi
