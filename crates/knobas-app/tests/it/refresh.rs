@@ -67,6 +67,8 @@ struct Remote {
     reads: Mutex<Reads>,
     /// Reads of one item the fake answered.
     refreshes: AtomicUsize,
+    /// Each read of one item, by entity, as the fake was asked it.
+    read_at: Mutex<Vec<(String, std::time::Instant)>>,
     /// Whether a `CreateTicket` has filed PAY-9.
     filed: Mutex<bool>,
     /// One permit per sync the test lets through.
@@ -203,6 +205,11 @@ impl Source for Fake {
 
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         self.0.refreshes.fetch_add(1, Ordering::SeqCst);
+        self.0
+            .read_at
+            .lock()
+            .unwrap()
+            .push((entity.to_owned(), std::time::Instant::now()));
         match *self.0.reads.lock().unwrap() {
             Reads::NotOffered => Ok(RefreshAnswer::NotOffered),
             Reads::Fails => Err(SourceError::Unreachable("no route".to_owned())),
@@ -442,6 +449,7 @@ async fn fixture(name: &str) -> Fixture {
         title: Mutex::new("before".to_owned()),
         reads: Mutex::new(Reads::Answers),
         refreshes: AtomicUsize::new(0),
+        read_at: Mutex::new(Vec::new()),
         filed: Mutex::new(false),
         door: Semaphore::new(0),
         syncs_entered: AtomicUsize::new(0),
@@ -1852,5 +1860,77 @@ async fn a_chain_longer_than_the_cap_is_followed_a_slot_at_a_time_behind_the_sta
 
     *f.remote.run_state.lock().unwrap() = Some("finished");
     until("the follow ends", || async { followed(&f).is_empty() }).await;
+    f.state.scheduler.shutdown().await;
+}
+
+/// When the fake was asked to read `entity`, first first.
+fn reads_of(f: &Fixture, entity: &str) -> Vec<std::time::Instant> {
+    f.remote
+        .read_at
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(read, _)| read == entity)
+        .map(|(_, at)| *at)
+        .collect()
+}
+
+/// **A run of a chain is read at once, on the started run's clock** (#2594,
+/// ruling 3): BUILD-2 names BUILD-3 and BUILD-5 only once it has been
+/// followed past its 30 s as a person's read. Each is read at once after the
+/// read that named it, not a cadence later, though the two reads come
+/// together and the source's lock lets one through at a time; from then on
+/// each is read at the started run's 5 s, not the 2 s of a follow whose
+/// clock began there. The gaps are timed from the fake's own reads, and load
+/// only lengthens them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_of_a_chain_is_read_at_once_and_keeps_the_started_runs_clock() {
+    let f = fixture("refresh_follow_chain_clock").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    trigger_the_run(&f).await;
+    until("the run is followed", || async { followed(&f) == [RUN] }).await;
+    tokio::time::sleep(Duration::from_secs(31)).await;
+
+    let keys = ["BUILD-3", "BUILD-5"];
+    f.remote.chain.lock().unwrap().extend(
+        keys.map(|key| (key.to_owned(), (Some("queued"), Vec::new()))),
+    );
+    *f.remote.waits.lock().unwrap() = keys.map(str::to_owned).to_vec();
+    let named = std::time::Instant::now();
+    for key in keys {
+        let dep = format!("{SOURCE}:{key}");
+        for n in 1..=3 {
+            until(&format!("{key}'s read {n}"), || async {
+                reads_of(&f, &dep).len() >= n
+            })
+            .await;
+        }
+    }
+    let naming = reads_of(&f, RUN)
+        .into_iter()
+        .find(|at| *at >= named)
+        .expect("the read that named the chain");
+    for key in keys {
+        let reads = reads_of(&f, &format!("{SOURCE}:{key}"));
+        let first = reads[0].duration_since(naming);
+        assert!(
+            first < Duration::from_millis(2_500),
+            "{key} is read at once, not 5 s on: {first:?}"
+        );
+        for pair in reads.windows(2).take(2) {
+            let gap = pair[1].duration_since(pair[0]);
+            assert!(
+                gap >= Duration::from_millis(4_500),
+                "{key} is read on the started run's 5 s, not a clock of its own: {gap:?}"
+            );
+        }
+    }
+
+    for key in keys {
+        chain_moves(&f, key, "finished");
+    }
+    *f.remote.run_state.lock().unwrap() = Some("finished");
+    until("the follows end", || async { followed(&f).is_empty() }).await;
     f.state.scheduler.shutdown().await;
 }

@@ -19,7 +19,11 @@
 //! - as a person's read for the first 30 s, then in the background lane
 //!   (`knobas_http::behind`, ADR-0042);
 //! - a run of the source holding its lock skips the tick (`RunInFlight`): its
-//!   own in-flight poll reads the build;
+//!   own in-flight poll reads the build. The lock also turns a read away
+//!   while another follow's read of the source holds it, for that one read:
+//!   so a read turned away tries again [`BUSY`] on, up to [`BUSY_RETRIES`]
+//!   times, before it skips the tick (#2594: a chain's runs keep one clock
+//!   and are read at once together);
 //! - a tick whose item arrived as the mirror holds it tells nothing
 //!   (`RefreshOutcome::Unchanged`), so a build waiting for an agent costs the
 //!   window nothing.
@@ -71,6 +75,28 @@ const FAILURES: u32 = 5;
 
 /// How long the wait between two reads looks up to see the quit or a stop.
 const NAP: Duration = Duration::from_millis(250);
+
+/// How soon a read the source's lock turned away tries again: another
+/// follow's read holds it for one read, a run for the whole run.
+const BUSY: Duration = Duration::from_millis(500);
+
+/// How many times in a row a turned-away read tries again [`BUSY`] on
+/// before it waits the cadence.
+const BUSY_RETRIES: u32 = 3;
+
+/// The wait before a follow's next read, `cadence` being [`next_wait`]'s:
+/// none for a run of a chain's first read (`first`), [`BUSY`] after the
+/// lock turned `busy` reads in a row away, up to [`BUSY_RETRIES`], else the
+/// cadence.
+fn wait_before(cadence: Duration, first: bool, busy: u32) -> Duration {
+    if first {
+        Duration::ZERO
+    } else if (1..=BUSY_RETRIES).contains(&busy) {
+        BUSY.min(cadence)
+    } else {
+        cadence
+    }
+}
 
 /// The wait before the next read, `elapsed` after the read-back: 2 s for the
 /// first 30 s, 5 s up to 5 min, 15 s after that, `None` past [`AT_MOST`].
@@ -341,14 +367,10 @@ async fn follow(
     began: Instant,
     at_once: bool,
 ) {
-    let mut failed = 0;
+    let (mut failed, mut busy) = (0, 0);
     let mut first = at_once;
-    while let Some(wait) = next_wait(began.elapsed()) {
-        let wait = if std::mem::take(&mut first) {
-            Duration::ZERO
-        } else {
-            wait
-        };
+    while let Some(cadence) = next_wait(began.elapsed()) {
+        let wait = wait_before(cadence, std::mem::take(&mut first), busy);
         if !nap(scheduler, wait, stop).await {
             return;
         }
@@ -359,9 +381,13 @@ async fn follow(
             knobas_http::behind(read).await
         };
         match outcome {
-            Ok(RefreshOutcome::Refreshed | RefreshOutcome::Unchanged) => failed = 0,
-            // A run holds the lock: its in-flight poll reads the build.
-            Ok(RefreshOutcome::RunInFlight) => continue,
+            Ok(RefreshOutcome::Refreshed | RefreshOutcome::Unchanged) => (failed, busy) = (0, 0),
+            // A run holds the lock, whose in-flight poll reads the build, or
+            // another follow's read does, for a moment: [`wait_before`].
+            Ok(RefreshOutcome::RunInFlight) => {
+                busy += 1;
+                continue;
+            }
             Ok(RefreshOutcome::Gone | RefreshOutcome::NotOffered)
             | Err(
                 RefreshError::TurnedOff(_)
@@ -415,6 +441,21 @@ mod tests {
         assert_eq!(next_wait(s(300)), Some(s(15)));
         assert_eq!(next_wait(s(7_199)), Some(s(15)));
         assert_eq!(next_wait(s(7_200)), None);
+    }
+
+    /// **A read the lock turned away tries again soon, a few times** (#2594):
+    /// a chain's runs are read at once together and on one clock, so one
+    /// follow's read holds the lock when another's comes, for a moment.
+    #[test]
+    fn a_turned_away_read_tries_again_soon_a_few_times_then_waits_the_cadence() {
+        let s = Duration::from_secs;
+        assert_eq!(wait_before(s(5), true, 0), Duration::ZERO, "a chain's first read");
+        assert_eq!(wait_before(s(5), false, 0), s(5));
+        for busy in 1..=BUSY_RETRIES {
+            assert_eq!(wait_before(s(5), false, busy), BUSY, "turned away {busy}");
+        }
+        assert_eq!(wait_before(s(5), false, BUSY_RETRIES + 1), s(5), "a run holds it");
+        assert_eq!(wait_before(Duration::from_millis(100), false, 1), Duration::from_millis(100));
     }
 
     #[test]
