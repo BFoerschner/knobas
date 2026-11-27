@@ -17,7 +17,8 @@
 //     `type:<text>` inserts <text> into the focused element (Input.insertText, so a
 //       binding sees an input event). The text cannot hold ` + ` or ` > `.
 //     `key:<combo>` presses one key: `key:Meta+k`, `key:Escape`, `key:Enter`, `key:j`,
-//       `key:Shift+Tab`. Modifiers Meta, Control, Alt, Shift; a bare character also types.
+//       `key:Shift+Tab`, `key:Shift+F10` or `key:ContextMenu` (the right-click menu from the keys).
+//       Modifiers Meta, Control, Alt, Shift; a bare character also types.
 //     `select:<name>=<option>` picks the option whose text (or value) is <option> in the first
 //       enabled select whose aria-label or label text is <name>; `select:testid=<id>=<option>`.
 //       Headless Chrome on macOS will not change a select from a key press.
@@ -27,7 +28,8 @@
 //       is <name> (a row's key cell). Waits as click does; a miss exits 1 naming the step.
 //     `dblclick:<name>` double-clicks there with the pointer (a row or card that opens on it).
 //     `back:<name>` / `forward:<name>` press mouse button 3 / 4 there (#693's navigation).
-//       These four go through Input.dispatchMouseEvent, so the page sees real pointer events;
+//     `context:<name>` presses the right button there: the page's right-click menu (#2544).
+//       These five go through Input.dispatchMouseEvent, so the page sees real pointer events;
 //       click: stays a DOM click.
 //     `see:<text>` waits as click does for the page's visible text to hold <text>, and a miss
 //       exits 1 naming the step. What a route alone cannot say: an address with nothing behind
@@ -139,6 +141,8 @@ const NAMED_KEYS = {
   End: ["End", "End", 35],
   PageUp: ["PageUp", "PageUp", 33],
   PageDown: ["PageDown", "PageDown", 34],
+  F10: ["F10", "F10", 121],
+  ContextMenu: ["ContextMenu", "ContextMenu", 93],
 };
 // One printable character's physical key, for those that are not a letter or a digit.
 const PUNCTUATION = {
@@ -148,7 +152,7 @@ const PUNCTUATION = {
 };
 const MODIFIERS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
 // The steps that move the pointer, over CDP mouse events rather than a DOM click (#1483).
-const POINTER = new Set(["hover", "dblclick", "back", "forward"]);
+const POINTER = new Set(["hover", "dblclick", "back", "forward", "context"]);
 // `Meta+k` as the parameters of a CDP key event (the type is added by the caller), or
 // null for a key this table does not know. A key with no modifier but Shift carries its
 // text, so a bare `key:j` types into a focused field as well as reaching a key handler.
@@ -325,11 +329,11 @@ try {
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     })()`;
   // CDP's mouse buttons and the `buttons` bit each holds down.
-  const BUTTONS = { left: 1, back: 8, forward: 16 };
+  const BUTTONS = { left: 1, right: 2, back: 8, forward: 16 };
   const pointer = async (verb, { x, y }) => {
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     if (verb === "hover") return;
-    const button = verb === "dblclick" ? "left" : verb;
+    const button = verb === "dblclick" ? "left" : verb === "context" ? "right" : verb;
     for (let clickCount = 1; clickCount <= (verb === "dblclick" ? 2 : 1); clickCount++) {
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons: BUTTONS[button], clickCount });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, buttons: 0, clickCount });
@@ -438,7 +442,7 @@ try {
       } else if (verb === "scroll" && (/^-?\d+$/.test(arg) || arg.startsWith("testid="))) {
         if (!(await evaluate(scrollJs(arg)))) done(1, `shot: step '${step}' found nothing to scroll on #/${path}`);
       } else {
-        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, see:<text>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
+        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, context:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, see:<text>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
       }
       await sleep(500);
     }

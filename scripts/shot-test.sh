@@ -150,6 +150,12 @@ addEventListener("mouseup", (e) => {
   if (e.button === 3) shown("Went back", true);
   if (e.button === 4) shown("Went forward", true);
 });
+// The right-click menu, from the right button (`context:`) and from the keys (#2544).
+aux.addEventListener("contextmenu", (e) => { e.preventDefault(); shown("Menu", true); });
+addEventListener("keydown", (e) => {
+  if (e.key === "F10" && e.shiftKey) shown("Shift F10", true);
+  if (e.key === "ContextMenu") shown("Menu key", true);
+});
 </script>
 HTML
 # The fixture's server takes its own port and names it, as Chrome does below: one found free and closed first can be
@@ -195,13 +201,13 @@ for bad in 'SHOT_SCALE=9' 'SHOT_NOW=whenever'; do
         grep -q "must be" "$fixture/bad.err" || fail "$bad's refusal: $(cat "$fixture/bad.err")"
     fi
 done
-steps pointer '#/ + hover:Row menu + wait:200 + click:Hovered + wait:200 + dblclick:Twice + click:Doubled + dblclick:PAY-1 + click:Opened + back:Aux + click:Went back + forward:Aux + click:Went forward + click:Kept + click:Live' \
+steps pointer '#/ + hover:Row menu + wait:200 + click:Hovered + wait:200 + dblclick:Twice + click:Doubled + dblclick:PAY-1 + click:Opened + back:Aux + click:Went back + forward:Aux + click:Went forward + click:Kept + click:Live + context:Aux + click:Menu + key:Shift+F10 + click:Shift F10 + key:ContextMenu + click:Menu key' \
     || fail "pointer steps: $(cat "$fixture/pointer.err")"
 [ -s "$fixture/pointer.png" ] || fail "pointer steps wrote no image"
-for verb in hover dblclick back forward; do
+for verb in hover dblclick back forward context; do
     SHOT_STEP_WAIT_S=3 steps "miss-$verb" "#/ + $verb:Nobody" & eval "miss_$verb=\$!"
 done
-for verb in hover dblclick back forward; do
+for verb in hover dblclick back forward context; do
     pid=miss_$verb
     if wait "${!pid}"; then
         fail "$verb:Nobody passed"
