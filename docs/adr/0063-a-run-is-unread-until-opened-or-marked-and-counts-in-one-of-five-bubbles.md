@@ -48,6 +48,10 @@ One place maps a run to its bubble: `run_bubble!` in `knobas-core`'s `run_read.r
 - **Both sides are this machine's clock.** A run's side is the local time the mirror first saw it finished, stamped when its stored row first carries a finish, never the source's `finishDate`: 2026-11-17 rejected a watermark on TeamCity's clock against this one, and comparing two local stamps has no skew. A run the mirror first sees already finished is stamped when it is first written. The stamps the mirror holds before it learns to stamp, and those a backup's restore rebuilds, are older than any instant, so nothing old turns green.
 - **While Builds is in front** the page keeps the instant it read on arrival, so the green of the visit stays for the visit (question 2). A run that ends during the visit is stamped after the visit began and counts in no green, yellow or grey: you are looking at Builds. A failure still turns its blue red.
 
+## What an upgrade starts from
+
+Ruled on #2568 (the orchestrator, 2026-11-27): red counts every unread failure however old, and the top bar this replaced counted the pipelines whose newest run failed (511 runs against a handful of pipelines on the saved scale database). So that nobody meets a count they never asked for, **migration `0106` marks read the runs finished before the upgrade, except each pipeline's newest finished run when it failed and no mark read it.** The top bar starts at what the old one showed, and the history after counts as above. Only runs that are not passes get a row: a pass's finish is stamped older than any instant, so it counts in no bubble anyway. A run whose stored row bring-up had not filled yet is not marked; it counts as any failure once filled. A fresh install, and the first sync after restoring an archive from before `0106`, have nothing to seed and count the whole history.
+
 ## Rejected
 
 - **Only a finished failure can carry a mark** (2026-11-17). A running run already reporting `err` counted red and could not be marked (#2555's first bug), and nothing could say a run had been looked at while it ran.
@@ -60,4 +64,4 @@ One place maps a run to its bubble: `run_bubble!` in `knobas-core`'s `run_read.r
 
 - Migration `0105` adds `how` and `finished` to `knobas.run_read`. The frozen IPC surface changes: `read_runs` answers `RunMarks` (`read`, `while_running`), `mark_runs_read` takes a `MarkScope` (`everything`, `pipelines`, `runs`) and answers `RunMarks`, and `mark_run_opened` is new (`docs/contract.md` §10.8).
 - `knobas-core` exports `reads!`, `read_ids!`, `run_bubble!`, `runs_of!` and `failed_runs_of!` (red of `run_bubble!`), so every reader asks one predicate and one map.
-- #2568 stores the instants, stamps each run's local first-seen finish, and counts the five bubbles per pipeline.
+- #2568 stores the instants, stamps each run's local first-seen finish, counts the five bubbles per pipeline, and seeds the read state an upgrade starts from (`0106`).

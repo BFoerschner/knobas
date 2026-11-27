@@ -37,6 +37,36 @@
 --
 -- **A backup rebuilds it, never carries it**: the `sync` schema is not in an
 -- archive (section 16.12), and the rebuild stamps `-infinity`, as above.
+--
+-- ## The read state an upgrade starts from
+--
+-- Red counts every unread failure, however old (ADR-0063). The top bar this
+-- replaces counted the pipelines whose newest run failed, so an upgrade
+-- would have met every failure of its history at once (511 on the saved
+-- scale database). Ruled on #2568 (the orchestrator, 2026-11-27): **the runs
+-- finished before the upgrade count as read, except each pipeline's newest
+-- finished run when it failed and no mark read it**. The top bar starts at
+-- what the old one showed, and the history after counts as ADR-0063 says.
+--
+-- * Green, yellow and grey need no mark for that: every finish stored is
+--   stamped `-infinity` above, older than any instant.
+-- * So only the finished runs a pass does not describe are marked: each run
+--   in a pipeline (`sync.item_pipeline`) whose stored row (`sync.item_run`)
+--   carries a finish and a tone other than `ok`. A pass gets no row, as
+--   *Mark all as read* writes none for one. The tone is the stored row's:
+--   the reader's tone overrides (#2463) are merged where the app binds its
+--   declarations, which no migration sees, and only an override that turned
+--   a pass's tone into `err` would leave an old failure red.
+-- * **Each pipeline's newest finished run** (in the order every reader draws
+--   runs: `at` newest first, then the id) is left as it is: red when it
+--   failed and no mark reads it, as the old count said.
+-- * A mark already there stays; one taken while the run ran (which reads
+--   nothing once it ended) is written over as read, as a mark after the end
+--   writes it.
+-- * A run with no stored row yet (bring-up's fill had not reached it) is not
+--   marked: once filled it counts as any failure does.
+--
+-- The rows are the person's (`knobas.run_read`), so a backup carries them.
 
 create table sync.run_finished (
   entity_id text collate "C" primary key references sync.item (entity_id) on delete cascade,
@@ -69,3 +99,22 @@ insert into sync.run_finished (entity_id, seen)
 select distinct r.entity_id, '-infinity'::timestamptz
   from sync.item_run r
  where r.pkey is not null and r.finished is not null;
+
+-- The read state an upgrade starts from (above): every finished run that is
+-- not a pass and not its pipeline's newest finished run, marked read.
+insert into knobas.run_read as rr (entity_id, how, finished)
+select n.entity_id, 'marked', true
+  from (select ip.entity_id,
+               row_number() over (partition by ip.source_id, ip.pkey, ip.adapter_kind
+                                  order by ip.at desc nulls last, ip.entity_id desc) as nth
+          from sync.item_pipeline ip
+         where exists (select 1 from sync.item_run r
+                        where r.entity_id = ip.entity_id
+                          and r.pkey is not null and r.finished is not null)) n
+ group by n.entity_id
+having min(n.nth) > 1
+   and exists (select 1 from sync.item_run r
+                where r.entity_id = n.entity_id
+                  and r.finished is not null and r.state->>'tone' is distinct from 'ok')
+    on conflict (entity_id) do update set finished = true
+ where not (rr.how = 'opened' or rr.finished);

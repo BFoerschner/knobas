@@ -823,6 +823,78 @@ async fn a_database_at_0104_starts_and_its_marks_read_their_runs() {
     assert_eq!(read(&pool).await, [red]);
 }
 
+/// An upgrade meets the top bar it left (`0106`, ruled on #2568): the runs
+/// finished before it count as read, except each pipeline's newest finished
+/// run when it failed and no mark read it, which is what the old count
+/// showed. A pass gets no row. The history after counts as ADR-0063 says.
+/// The scratch database is put back to `0105`'s shape, a history written
+/// under it, then migrated.
+#[tokio::test]
+async fn an_upgrade_starts_from_the_failures_the_old_top_bar_counted() {
+    let (pool, tc) = scratch("run-counts-upgrade").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    let deploy = configuration(&pool, &tc, "Payout_Deploy").await;
+    let lint = configuration(&pool, &tc, "Payout_Lint").await;
+    // The declarations stored, as the app stores them before any read, so the
+    // history's runs have their stored rows and pipelines.
+    run_counts_inner(&pool, &registry()).await.unwrap();
+    for statement in [
+        "drop trigger run_finished_on_insert on sync.item_run",
+        "drop function sync.run_finished_inserted()",
+        "drop table sync.run_finished",
+        "delete from public._sqlx_migrations where version = 106",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+    let at = |h: u32| format!("2026-08-21T{h:02}:00:00Z");
+    // Tests: two old failures, a pass, a failure (its newest finished run),
+    // and a run still going.
+    let old_red = build(&pool, &tc, 1001, "Payout_Tests", "FAILURE", &at(1)).await;
+    let older_red = build(&pool, &tc, 1002, "Payout_Tests", "FAILURE", &at(2)).await;
+    build(&pool, &tc, 1003, "Payout_Tests", "SUCCESS", &at(3)).await;
+    let newest_red = build(&pool, &tc, 1004, "Payout_Tests", "FAILURE", &at(4)).await;
+    let running = build(&pool, &tc, 1005, "Payout_Tests", "running", &at(5)).await;
+    // Deploy: a failure, then a pass: not failing, nothing asks.
+    let deploy_red = build(&pool, &tc, 2001, "Payout_Deploy", "FAILURE", &at(1)).await;
+    build(&pool, &tc, 2002, "Payout_Deploy", "SUCCESS", &at(2)).await;
+    // Lint: a cancel, then a failure marked read under the old model.
+    let lint_grey = build(&pool, &tc, 3001, "Payout_Lint", "UNKNOWN", &at(1)).await;
+    let lint_red = build(&pool, &tc, 3002, "Payout_Lint", "FAILURE", &at(2)).await;
+    sqlx::query("insert into knobas.run_read (entity_id, how, finished) values ($1, 'marked', true)")
+        .bind(&lint_red)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    knobas_db::migrate::run(&pool)
+        .await
+        .expect("a database at 0105 starts");
+
+    assert_eq!(
+        total(&pool).await,
+        counts(1, 0, 0, 1, 0),
+        "the newest failure of Tests and its running run; nothing else asks"
+    );
+    assert_eq!(counts_of(&pool, &tests).await, counts(1, 0, 0, 1, 0));
+    assert_eq!(counts_of(&pool, &deploy).await, BubbleCounts::default());
+    assert_eq!(counts_of(&pool, &lint).await, BubbleCounts::default());
+    let mut marked = vec![old_red, older_red, deploy_red, lint_grey, lint_red];
+    marked.sort();
+    assert_eq!(read(&pool).await, marked, "no pass, no newest failure, no running run");
+    assert!(!read(&pool).await.contains(&newest_red));
+
+    // From here the history counts as ADR-0063 says.
+    synced_once(&pool, &tc).await;
+    synced(&pool, &running, "FAILURE").await;
+    build(&pool, &tc, 1006, "Payout_Tests", "FAILURE", &at(6)).await;
+    build(&pool, &tc, 2003, "Payout_Deploy", "SUCCESS", &at(3)).await;
+    assert_eq!(
+        total(&pool).await,
+        counts(0, 1, 0, 3, 0),
+        "the run that was going failed, a new failure and a new pass"
+    );
+}
+
 async fn inbox_keys(pool: &sqlx::PgPool) -> Vec<String> {
     inbox_items_inner(
         pool,
