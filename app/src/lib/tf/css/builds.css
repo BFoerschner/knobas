@@ -405,6 +405,8 @@
 .tf-pl-root .tf-fold-n { margin-left: auto; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-pi[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
 .tf-pl-root .tf-fold-n.tf-unseen { visibility: hidden; }
+/* The rail's rows held in their room while a run opened from a scope scrolls its pipeline into view (#2570). */
+.tf-pl-rows.tf-unseen { visibility: hidden; }
 /* One band, as a pipeline's runs bar is (`.tf-rbar.tf-rpickbar`'s shape): the filter bar, with *Mark all as read* after
    its count. */
 .tf-recentbar {

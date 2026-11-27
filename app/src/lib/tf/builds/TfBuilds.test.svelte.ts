@@ -1144,3 +1144,32 @@ test("a failure the list did not name, marked unread, reads the list again so th
   await settle();
   expect(reads).toBe(2);
 });
+
+test("a run opened from a scope's table holds the rail's rows unseen until its pipeline is scrolled into view, so they never move (#2570)", async () => {
+  let head = $state("builds");
+  let rest = $state<string[]>(["recent"]);
+  page = mount(TfBuilds, {
+    target,
+    props: {
+      ready: true,
+      get head() {
+        return head;
+      },
+      get rest() {
+        return rest;
+      },
+      job: null,
+      ports: { pipelines: () => Promise.resolve(LIST), runs: (id: string) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []), recent: QUIET_RECENT },
+    },
+  });
+  await settle();
+  const rail = () => target.querySelector<HTMLElement>(".tf-pl-rows")!;
+  expect(rail().classList.contains("tf-unseen"), "drawn at All pipelines").toBe(false);
+  head = "build";
+  rest = ["teamcity:buildType:Payout_Lint", "teamcity:build:904"];
+  flushSync();
+  expect(rail().classList.contains("tf-unseen"), "held unseen in the run page's first frame").toBe(true);
+  await settle();
+  expect(rail().classList.contains("tf-unseen"), "shown once scrolled").toBe(false);
+  expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Payout_Lint");
+});
