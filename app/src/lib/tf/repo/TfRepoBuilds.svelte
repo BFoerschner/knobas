@@ -38,7 +38,7 @@
   import { windowListen } from "../../ipc/shared-listen";
   import { refreshEntity, type SourceSyncStatus } from "../../ipc/sources";
   import type { EchoListen } from "../queued.svelte";
-  import { IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, InFlightReads, hearRuns, runsInFlight } from "../builds/runs-in-flight";
+  import { IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, InFlightReads, hearRuns, inFlight, runsInFlight } from "../builds/runs-in-flight";
   import { pageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown } from "../while-shown.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -316,13 +316,14 @@
    */
   const visible = pageVisible();
   const live = () => shown && visible();
-  /** Every run the tab draws, newest first: each pipeline's newest per branch, and the open pipeline's runs. */
-  const drawnRuns = $derived.by(() => {
-    const byId = new Map<string, RunRow>();
-    for (const run of [...(rows ?? []).flatMap((row) => row.latest), ...(pipelineRows ?? [])]) byId.set(run.entity_id, run);
-    return [...byId.values()].sort((a, b) => (runAt(b) ?? "").localeCompare(runAt(a) ?? ""));
-  });
+  /** Every run the tab draws: each pipeline's newest per branch, and the open pipeline's runs. */
+  const drawnRuns = $derived([...(rows ?? []).flatMap((row) => row.latest), ...(pipelineRows ?? [])]);
   const drawnIds = $derived(new Set(drawnRuns.map((run) => run.entity_id)));
+  /** The runs it draws in flight, newest first, as `runsInFlight` takes them: the few in flight sorted, never the thousands drawn. */
+  function drawnInFlight(): RunRow[] {
+    const open = new Map(untrack(() => drawnRuns).filter(inFlight).map((run) => [run.entity_id, run]));
+    return [...open.values()].sort((a, b) => (runAt(b) ?? "").localeCompare(runAt(a) ?? ""));
+  }
   const drawnSources = $derived(new Set((rows ?? []).map((row) => row.source_id)));
   /** The tab's answers again: the page's, and the open pipeline's runs. */
   function rereadDrawn(): Promise<unknown> {
@@ -364,11 +365,11 @@
       movedSoon = undefined;
     };
   });
-  const inFlight = new InFlightReads(untrack(() => follow));
-  const readInFlight = () => inFlight.read(runsInFlight(untrack(() => drawnRuns)));
+  const inFlightReads = new InFlightReads(untrack(() => follow));
+  const readInFlight = () => inFlightReads.read(runsInFlight(drawnInFlight()));
   $effect(() => {
     void repoId;
-    inFlight.reset();
+    inFlightReads.reset();
   });
   $effect(() => {
     if (!ready || !live()) return;
@@ -379,7 +380,7 @@
   onRefreshed(
     () => refreshed,
     async () => {
-      inFlight.reset();
+      inFlightReads.reset();
       await readInFlight();
       await rereadDrawn();
     },
