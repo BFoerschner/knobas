@@ -1180,3 +1180,48 @@ async fn mark_all_takes_the_green_to_zero_and_undo_brings_the_same_number_back()
     );
     assert_eq!(total(&pool).await, BubbleCounts::default());
 }
+
+/// The quit while Builds is in front leaves it (ADR-0063): the exit handler
+/// moves the instant before the database stops, so the visit's green is not
+/// counted again at the next start. On Tauri's runtime, as the exit handler
+/// runs: the leave's timer is made inside it (a timer made outside it had no
+/// reactor and the quit panicked, found on the scale database).
+#[test]
+fn the_quit_while_on_builds_leaves_it() {
+    use tauri::Manager as _;
+    let pool = tauri::async_runtime::block_on(async {
+        let (pool, tc) = scratch("run-counts-quit").await;
+        configuration(&pool, &tc, "Payout_Tests").await;
+        synced_once(&pool, &tc).await;
+        build(
+            &pool,
+            &tc,
+            1001,
+            "Payout_Tests",
+            "SUCCESS",
+            "2026-08-21T01:00:00Z",
+        )
+        .await;
+        knobas_core::run_read::builds_in_front(&pool, true)
+            .await
+            .unwrap();
+        pool
+    });
+    let lifecycle = knobas_app::Lifecycle::new();
+    lifecycle.install(knobas_app::AppState::over_pool(pool.clone()));
+    lifecycle.set(knobas_app::DbState::Ready);
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    app.manage(lifecycle);
+
+    knobas_app::shutdown(app.handle());
+
+    let answer = tauri::async_runtime::block_on(run_counts_inner(&pool, &registry())).unwrap();
+    assert!(!answer.visiting, "the quit left Builds");
+    assert_eq!(
+        answer.total,
+        BubbleCounts::default(),
+        "the visit's green was seen"
+    );
+}

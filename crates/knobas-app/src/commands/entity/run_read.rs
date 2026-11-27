@@ -299,10 +299,15 @@ pub fn leave_builds_at_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Ok(pool) = lifecycle.pool() else {
         return;
     };
-    let left = tauri::async_runtime::block_on(tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        knobas_core::run_read::builds_in_front(&pool, false),
-    ));
+    // The timer is made inside the runtime: one made outside it has no
+    // reactor to run on.
+    let left = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            knobas_core::run_read::builds_in_front(&pool, false),
+        )
+        .await
+    });
     match left {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => tracing::warn!(error = %e, "the quit could not leave Builds"),
