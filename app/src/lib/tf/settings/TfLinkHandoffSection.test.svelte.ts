@@ -173,4 +173,21 @@ test("draws the Firefox host row before its status answers", async () => {
 
   expect(target.textContent).toContain("Firefox host");
   expect(target.textContent).toContain("Checking…");
+  // A button's height is held unseen, so the row does not grow when *Install host* or *Remove* lands (`just moves`
+  // saw *Schedule* move 3 px without it).
+  const held = target.querySelector<HTMLButtonElement>("button.tf-btn.tf-sm.tf-stg-held");
+  expect(held?.getAttribute("aria-hidden")).toBe("true");
+  expect(held?.tabIndex).toBe(-1);
+});
+
+/** Not supported keeps the held button too: the row is as tall as while it was checking. */
+test("holds the Firefox host row's height where the host is not supported", async () => {
+  view = mount(TfLinkHandoffSection, {
+    target,
+    props: { source: "jira", name: "Tidewater Jira", openInside: true, ports: makePorts(undefined, hostOf({ supported: false })) },
+  });
+  await settle();
+
+  expect(target.textContent).toContain("Not supported on this system");
+  expect(target.querySelector("button.tf-stg-held")).not.toBeNull();
 });

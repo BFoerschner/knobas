@@ -66,6 +66,8 @@
 .tf-stg-l small { display: block; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
 .tf-stg-c { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tf-stg-inl { flex-wrap: wrap; }
+/* A control drawn unseen to hold its row's height until the real one lands (Link handoff's Firefox host). */
+.tf-stg-held { visibility: hidden; }
 .tf-stg-in {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
   font-size: calc(var(--t-md) * var(--fs)); width: min(420px, 100%);

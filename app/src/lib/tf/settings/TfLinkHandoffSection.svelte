@@ -211,10 +211,10 @@
       <small>Native Messaging manifest for the Firefox extension</small>
     </div>
     <div class="tf-stg-c tf-stg-inl">
-      {#if host === null}
-        <span class="tf-stg-hint">Checking…</span>
-      {:else if !host.supported}
-        <span class="tf-stg-hint">Not supported on this system</span>
+      {#if host === null || !host.supported}
+        <span class="tf-stg-hint">{host === null ? "Checking…" : "Not supported on this system"}</span>
+        <!-- A button's height held unseen: the row is as tall before the status lands as after (nothing moves once drawn). -->
+        <button type="button" class="tf-btn tf-sm tf-stg-held" tabindex="-1" aria-hidden="true" disabled>Install host</button>
       {:else if host.installed && host.matches_current}
         <span>Installed</span>
         <button type="button" class="tf-btn tf-sm tf-ghost" disabled={hostBusy} onclick={uninstallHost}>Remove</button>
