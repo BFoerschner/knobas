@@ -3824,7 +3824,14 @@ path: Array<string>,
  * Whether the reader pinned it (#849): knobas-local, never the
  * source's ([`PINS_SETTING`]).
  */
-pinned: boolean, web_url: string | null, recent: Array<RunRow>, };
+pinned: boolean, web_url: string | null, recent: Array<RunRow>, 
+/**
+ * Its unread failed runs over its whole history (#2543), by id, newest
+ * first: every finished failed run with no mark (`crate::run_read`),
+ * whether `recent` draws it or not. What the Builds rail's right-click
+ * counts, and what a mark of the pipeline writes as the list was read.
+ */
+unread: Array<string>, };
 
 /**
  * A pipeline's settings, read live (#851).

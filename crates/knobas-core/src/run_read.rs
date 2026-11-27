@@ -28,11 +28,55 @@ const READ_RUNS: &str = "select r.entity_id
   where exists (select 1 from knobas.entity e
                  where e.id = r.entity_id and e.deleted_at is null)";
 
+/// The finished failed runs of the pipelines in the relation `$pipelines`,
+/// the declarations `$1` bound: a `from … where …` that selects over `t` (the
+/// pipeline, with `source_id`, `adapter_kind` and `pkey`), `ip` (its run's
+/// `entity_id`, and `at`, the order every reader draws runs in), `i` (the
+/// run's `sync.item`) and `ru`. Live runs only, each by its stored pipeline
+/// range (`sync.item_pipeline`, as `crate::newest_runs!` reads it), with its
+/// state and finish as [`crate::builds`] reads a run: the stored row where
+/// the bound declarations wrote one, the walk where not.
+///
+/// One definition for what a pipeline's mark writes ([`MARK_READ`]) and for
+/// the unread failures the Builds list names (`crate::builds::PIPELINES`,
+/// #2543), so the rail's count is what its press marks.
+///
+/// **Its plan** (`builds_list_plan.rs`, `read_plans.rs`): one range of
+/// `item_pipeline_runs_idx` per pipeline, kept a lateral by `offset 0`;
+/// joined, the planner read every pipeline's runs whole, against
+/// `read_plans.rs`'s rule (#2185). A run is live by a scalar probe of
+/// `knobas.entity`: an `exists` became a hash of every entity rebuilt per
+/// pipeline. Moving the run's tests into the lateral too re-read `run_keys`
+/// per run, twice as slow.
+#[macro_export]
+macro_rules! failed_runs_of {
+    ($pipelines:literal) => {
+        concat!(
+            "
+    from ",
+            $pipelines,
+            " t
+    cross join lateral (select ip.entity_id, ip.at from sync.item_pipeline ip
+                         where ip.source_id = t.source_id and ip.pkey = t.pkey
+                           and ip.adapter_kind = t.adapter_kind
+                        offset 0) ip
+    join sync.item i on i.entity_id = ip.entity_id",
+            $crate::run_join!("ru", "i"),
+            "
+   where (select e.deleted_at is null from knobas.entity e where e.id = ip.entity_id)
+     and ",
+            $crate::row_or!("ru", "state", $crate::declared_state!("$1")),
+            "->>'tone' = 'err'
+     and ",
+            $crate::row_or!("ru", "finished", $crate::declared_string!("$1", "finished")),
+            " is not null"
+        )
+    };
+}
+
 /// Mark read: `$3`, runs by id, and every finished failed run of the live
-/// pipelines `$2` (`$1` the declarations), each by its stored pipeline range
-/// (`sync.item_pipeline`, as `crate::newest_runs!` reads it) and its state and
-/// finish as [`crate::builds`] reads a run: the stored row where the bound
-/// declarations wrote one, the walk where not. Answers the ids it wrote: a run
+/// pipelines `$2` (`$1` the declarations), as [`failed_runs_of!`] finds
+/// them. Answers the ids it wrote: a run
 /// already read is not among them, so *Undo* puts back exactly what this did.
 const MARK_READ: &str = concat!(
     "with ",
@@ -50,21 +94,9 @@ target as (
    where f.frame = 'pipeline' and i.entity_id = any($2::text[])
 ),
 failed as (
-  select i.entity_id
-    from target t
-    join sync.item_pipeline ip
-      on ip.source_id = t.source_id and ip.pkey = t.pkey and ip.adapter_kind = t.adapter_kind
-    join sync.item i on i.entity_id = ip.entity_id",
-    crate::run_join!("ru", "i"),
+  select i.entity_id",
+    crate::failed_runs_of!("target"),
     "
-   where exists (select 1 from knobas.entity e
-                  where e.id = ip.entity_id and e.deleted_at is null)
-     and ",
-    crate::row_or!("ru", "state", crate::declared_state!("$1")),
-    "->>'tone' = 'err'
-     and ",
-    crate::row_or!("ru", "finished", crate::declared_string!("$1", "finished")),
-    " is not null
 ),
 wanted as (
   select f.entity_id from failed f

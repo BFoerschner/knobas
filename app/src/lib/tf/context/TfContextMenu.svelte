@@ -526,7 +526,7 @@
       case "pipeline-read":
         return void runsRead.markAll({ runs: [], pipelines: [act.id] });
       case "runs-read":
-        return void runsRead.markAll({ runs: act.runs, pipelines: [] });
+        return void runsRead.markAll({ runs: act.runs, pipelines: act.pipelines });
       case "move":
         return void moveProvider()?.move(act.entityId, act.status);
       case "assign":

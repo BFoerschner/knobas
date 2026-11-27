@@ -602,24 +602,25 @@ test.each(Array.from({ length: 60 }, (_, index) => index + 1))("right-click spam
   });
 });
 
-test("a Builds folder's Mark N runs as read marks exactly those runs, with Undo on its toast (#2527)", async () => {
-  const marked: string[][] = [];
+test("a Builds folder's Mark N runs as read marks its pipelines' unread failures, drawn at once, with Undo on its toast (#2543)", async () => {
+  const marked: [string[], string[]][] = [];
   const unmarked: string[][] = [];
   runsRead.ports = {
     read: async () => [],
-    mark: async (runs, pipelines) => (marked.push([...runs, ...pipelines]), [...runs]),
+    mark: async (runs, pipelines) => (marked.push([[...runs], [...pipelines]]), [...runs]),
     unmark: async (runs) => (unmarked.push([...runs]), [...runs]),
   };
   try {
     await runsRead.load();
     await draw(`<details><summary class="f">Payout</summary></details>`);
-    menuThing(() => ({ kind: "pipeline-folder", name: "Payout", unread: ["tc:9", "tc:3"] }))(page.querySelector(".f")!);
+    menuThing(() => ({ kind: "pipeline-folder", name: "Payout", unread: ["tc:9", "tc:3"], pipelines: ["tc:Pay", "tc:Rel"] }))(page.querySelector(".f")!);
     rightClick(page.querySelector(".f")!);
     expect(rows()).toEqual(["read-runs", "copy-name"]);
     expect(row("read-runs").textContent).toContain("Mark 2 runs as read");
     row("read-runs").click();
+    expect(runsRead.read, "drawn read before the backend answers").toEqual(new Set(["tc:9", "tc:3"]));
     await settle();
-    expect(marked).toEqual([["tc:9", "tc:3"]]);
+    expect(marked, "the runs drawn, and every failed run of the folder's pipelines").toEqual([[["tc:9", "tc:3"], ["tc:Pay", "tc:Rel"]]]);
     const toast = toasts.items.find((one) => one.action?.label === "Undo")!;
     expect(toast.text).toBe("Marked 2 runs as read");
     toast.action!.run();

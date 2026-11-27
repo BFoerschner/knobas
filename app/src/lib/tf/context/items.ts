@@ -89,8 +89,11 @@ export type Act =
   | { do: "run-read"; id: string; read: boolean }
   /** *Mark all as read* on a pipeline (ux18): every failed run of it. */
   | { do: "pipeline-read"; id: string }
-  /** *Mark N runs as read* (#2527): exactly these runs, with *Undo* on the toast. */
-  | { do: "runs-read"; runs: readonly string[] }
+  /**
+   * *Mark N runs as read* (#2527, #2543): `runs` drawn read at once, and every failed run of `pipelines` by the backend,
+   * with *Undo* on the toast.
+   */
+  | { do: "runs-read"; runs: readonly string[]; pipelines: readonly string[] }
   /** *Move to ▸ ⟨status⟩* on a ticket (ADR-0054): the page offering moves makes it. */
   | { do: "move"; entityId: string; status: string }
   /** *Assign to…* on a ticket (ADR-0054, section 26): the page offering field edits opens its people picker at the card. */
@@ -327,9 +330,11 @@ function grouped(...groups: Entry[][]): Entry[] {
   return out;
 }
 
-/** *Mark 3 runs as read*, *Mark 1 run as read*; nothing at none (#2527). */
-function readRuns(runs: readonly string[]): Item[] {
-  return runs.length === 0 ? [] : [{ id: "read-runs", label: `Mark ${counted(runs.length, "run", "runs")} as read`, act: { do: "runs-read", runs } }];
+/** *Mark 3 runs as read*, *Mark 1 run as read*, `runs` the unread failures of `pipelines`; nothing at none (#2527, #2543). */
+function readRuns(runs: readonly string[], pipelines: readonly string[]): Item[] {
+  return runs.length === 0
+    ? []
+    : [{ id: "read-runs", label: `Mark ${counted(runs.length, "run", "runs")} as read`, act: { do: "runs-read", runs, pipelines } }];
 }
 
 function open(hash: string, ctx: MenuContext): Item[] {
@@ -453,12 +458,12 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         [
           ...open(thing.hash, ctx),
           ...fromSheet("pipeline", thing.id, title, ctx),
-          // On the Builds rail, the unread failures it holds, counted (#2527); elsewhere every failed run of it, older ones
-          // too (ux18). Both with *Undo* on the toast.
+          // Every failed run of it, older ones too (ux18): counted on the Builds rail (#2527, #2543), *Mark all* elsewhere.
+          // Both with *Undo* on the toast.
           ...(ctx.runs === undefined
             ? []
             : thing.unread !== undefined
-              ? readRuns(thing.unread)
+              ? readRuns(thing.unread, [thing.id])
               : [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item]),
         ],
         inSource(thing.id, ctx),
@@ -600,7 +605,7 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       return grouped([...(thing.open === null ? [] : [{ id: "open", label: "Open", act: { do: "go", hash: thing.open } } satisfies Item]), ...acts]);
     }
     case "pipeline-folder":
-      return grouped(ctx.runs === undefined ? [] : readRuns(thing.unread), [
+      return grouped(ctx.runs === undefined ? [] : readRuns(thing.unread, thing.pipelines), [
         { id: "copy-name", label: "Copy name", act: { do: "copy", text: thing.name, said: "Copied the name" } },
       ]);
     case "test":

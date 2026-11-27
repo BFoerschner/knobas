@@ -108,6 +108,7 @@ const PIPELINE: PipelineRow = {
   pinned: false,
   web_url: "http://ci.example/buildConfiguration/Payout_IntegrationTests",
   recent: RUNS.slice(0, 12),
+  unread: [],
 };
 
 const SETTINGS: PipelineSettings = {
