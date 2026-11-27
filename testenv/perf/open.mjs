@@ -82,7 +82,8 @@ const shown = ".tf-kept:not([hidden])";
  * The places. `start`: the address the app is opened at for a first visit; `press`: what is pressed (a selector,
  * the first visible match in the shown page or the nav); `useful`: the selector whose `min` visible matches are the
  * place's useful content; `away`: the nav entry pressed to leave before a return; `back`: for a place opened from a
- * row, the press that shows the row again before the return's press.
+ * row, the press that shows the row again before the return's press; `backGo`: the address that does, where `Esc` goes
+ * elsewhere (up the page's own section, #2576).
  */
 const PLACES = [
   { name: "inbox", start: "#/time", press: nav("inbox"), hash: "#/inbox", useful: ".tf-ib", min: 5, away: "time" },
@@ -96,7 +97,8 @@ const PLACES = [
   { name: "ticket", parent: "tickets", start: "#/tickets", press: `${shown} .tf-tcard`, hash: "#/ticket/", useful: ".tf-ticketpage .tf-tkhead, .tf-ticketpage .tf-facts", min: 2, marks: { held: [[".tf-ticketpage .tf-tkacts", 1]] }, back: "Escape" },
   { name: "code", start: "#/time", press: nav("code"), hash: "#/code", useful: `a[href^="#/repo/"], a[href^="#/pr/"]`, min: 5, away: "time" },
   { name: "repo", parent: "code", start: "#/code", press: `${shown} a[href^="#/repo/"]`, hash: "#/repo/", useful: ".tf-repohead, .tf-tabs", min: 2, back: "Escape" },
-  { name: "pull-request", parent: "code", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", useful: ".tf-pr .tf-side, .tf-pr .tf-md, .tf-pr .tf-cfail", min: 1, marks: { held: [[".tf-fhead.tf-holds", 1]] }, back: "Escape" },
+  // Its return leaves by the list's address: `Esc` goes up to the pull request's repository (#2576), which lists none (#2602).
+  { name: "pull-request", parent: "code", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", useful: ".tf-pr .tf-side, .tf-pr .tf-md, .tf-pr .tf-cfail", min: 1, marks: { held: [[".tf-fhead.tf-holds", 1]] }, backGo: "#/code/prs" },
   { name: "docs", start: "#/time", press: nav("docs"), hash: "#/docs", useful: ".tf-dh-row", min: 5, away: "time" },
   { name: "docs-space", parent: "docs", start: "#/docs", press: `${shown} a.tf-dh-spacelink[href="#/docs/space/SCLENG"]`, hash: "#/docs/space/", useful: ".tf-dh-row", min: 10, back: "Escape" },
   { name: "docs-page", parent: "docs", start: "#/docs/space/SCLENG", press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", useful: ".tf-rd-main h1", min: 1, titled: true, back: "Escape" },
@@ -382,7 +384,8 @@ for (const rate of throttles) {
         }
         if (has("return")) {
           if (!rounds.includes("first") && !place.returnsOnly) { await measure(place); await quiet(1000); }
-          if (place.back) await leave(place.back);
+          if (place.backGo) await goTo(place.backGo);
+          else if (place.back) await leave(place.back);
           else await leave(nav(place.away));
           if (place.setup) await leave(place.setup);
           entry.return = await measure(place);
