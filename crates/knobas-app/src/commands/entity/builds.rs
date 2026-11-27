@@ -979,10 +979,20 @@ pub async fn recent_runs_inner(
     limit: Option<u32>,
 ) -> Result<RecentRuns, IpcError> {
     // As [`pipelines_inner`]: the stored rows follow the stored declarations.
-    crate::commands::search::declare(pool, registry).await?;
-    let declarations = declared_paths(pool, registry).await?;
-    let identity = identity_of(pool).await?;
-    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
+    // The four reads are independent of each other and made per call, so a
+    // changed source or declaration is in this read; side by side they cost
+    // the slowest of them, not the sum (#2569: 3 ms of a 6 ms first page on
+    // the scale database).
+    let (_, declarations, identity, fillers) = tokio::try_join!(
+        crate::commands::search::declare(pool, registry),
+        declared_paths(pool, registry),
+        identity_of(pool),
+        async {
+            crate::sources::crud::fillers(pool, registry, knobas_source::role::CI)
+                .await
+                .map_err(IpcError::from)
+        },
+    )?;
     Ok(knobas_core::builds::recent_runs_page(
         pool,
         &declarations,
