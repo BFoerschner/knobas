@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { capturePlace, placeRestoring, resetScrolls, restorePlace } from "./return-place";
 
@@ -11,12 +11,25 @@ function draw(html: string): { main: HTMLElement; page: HTMLElement } {
   return { main: document.querySelector<HTMLElement>(".tf-main")!, page: document.querySelector<HTMLElement>(".tf-kept")! };
 }
 
+// A return counts frames (its first look, the scroll staying put) and times its hold by the clock. Both are faked: a test
+// gets the frames it names, not however many a loaded machine fits into a real 60 ms wait (one frame at load 60, where
+// the first look was not over yet and the heading still not the focus keeper's).
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+});
+
 afterEach(() => {
   document.body.innerHTML = "";
+  // A return a failed test left running ends on its next frame, its page gone, so it owes the next test no focus.
+  vi.advanceTimersToNextFrame();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-const frames = () => new Promise((resolve) => setTimeout(resolve, 60));
+/** Three frames, what a real 60 ms wait gave on an idle machine. */
+const frames = async () => {
+  for (let i = 0; i < 3; i += 1) vi.advanceTimersToNextFrame();
+};
 
 test("the page scroller and an inner scroller come back to where they were left, an inner one at 0 too", () => {
   const { main, page } = draw(`<div class="tf-scroller tf-bmain"><table><tr><td>x</td></tr></table></div>`);
