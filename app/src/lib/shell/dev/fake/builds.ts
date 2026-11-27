@@ -348,12 +348,12 @@ function buildHistory(now: Date): Map<string, RunRow[]> {
   return out;
 }
 
-/** `pipelines`: every configuration by name, each with its last twelve runs. */
 /** The unread failures among `runs`: what a pipeline row's `unread` names. */
 function unreadOf(runs: readonly RunRow[]): string[] {
   return runs.filter((run) => failedFake(run) && !readRuns.has(run.entity_id)).map((run) => run.entity_id);
 }
 
+/** `pipelines`: every configuration by name, each with its last twelve runs and its unread failures (#2543). */
 export function fakePipelines(now: Date = new Date()): PipelineRow[] {
   const runs = history(now);
   return Object.entries(CONFIGURATIONS)

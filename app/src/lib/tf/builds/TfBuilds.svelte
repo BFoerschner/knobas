@@ -234,8 +234,9 @@
 
   /**
    * A failure marked unread that the list names nowhere (#2543): it was read when the list was read, so no pipeline's
-   * `unread` holds it, and the rail's count would miss it. The list is read again. A mark the list names (*Undo* of a
-   * press, a run of the last twelve) moves the count through `read` alone.
+   * `unread` holds it, and the rail's count would miss it. The list is read again once the mark's write answered, so the
+   * read sees it. A mark the list names (*Undo* of a press, a run of the last twelve) moves the count through `read`
+   * alone.
    */
   let readBefore = untrack(() => read);
   $effect(() => {
@@ -244,7 +245,7 @@
     readBefore = now;
     if (before === null || now === null || before === now) return;
     const back = [...before].filter((id) => !now.has(id));
-    if (back.length > 0 && untrack(() => all !== null && !namesEvery(all, back))) void rereadPipelines();
+    if (back.length > 0 && untrack(() => all !== null && !namesEvery(all, back))) void runsRead.settled().then(rereadPipelines);
   });
 
   /**

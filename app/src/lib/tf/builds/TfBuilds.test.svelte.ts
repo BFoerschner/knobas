@@ -1010,8 +1010,16 @@ test("a failure the list did not name, marked unread, reads the list again so th
   expect(reads).toBe(1);
   expect(thingAt(nameOf("Api"))?.thing).toMatchObject({ unread: [] });
 
-  // Read when the list was read, so the list did not name it: an older page's *Mark as unread* puts it back.
+  // Read when the list was read, so the list did not name it: an older page's *Mark as unread* puts it back. The list is
+  // read once that write answered: a read sent beside it could miss the mark.
+  const unmark = runsRead.ports.unmark;
+  let answer = () => {};
+  runsRead.ports = { ...runsRead.ports, unmark: (runs) => new Promise((resolve) => (answer = () => resolve(runs))) };
   void runsRead.markUnread(["teamcity:build:77"]);
+  await settle();
+  expect(reads, "not while the write is out").toBe(1);
+  answer();
+  runsRead.ports = { ...runsRead.ports, unmark };
   await settle();
   expect(reads, "the list read again").toBe(2);
   expect(thingAt(nameOf("Api"))?.thing).toMatchObject({ unread: ["teamcity:build:77"] });
