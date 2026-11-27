@@ -45,9 +45,9 @@ describe("what knobas looks at again after a branch moved (#2585)", () => {
     const { listen, tell } = bridge();
     let answer: (rows: LookingAgain[]) => void = () => {};
     startLooking(listen, () => new Promise((resolve) => (answer = resolve)));
-    tell({ scope: "forge:repo:tide/pay", code: true, builds: true });
-    answer([]);
+    tell({ scope: "forge:repo:tide/pay", code: false, builds: false });
+    answer([{ scope: "forge:repo:tide/pay", code: true, builds: true }]);
     await settle();
-    expect(buildsLooked("forge:repo:tide/pay")).toBe(true);
+    expect(buildsLooked("forge:repo:tide/pay"), "the schedule ended after the read was asked").toBe(false);
   });
 });
