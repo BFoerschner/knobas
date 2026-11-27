@@ -157,6 +157,35 @@ export function wordPairs(text: string, typed: string): number[] {
   return runPairs(marks(text, typed));
 }
 
+/**
+ * Fields joined into the one text a filter's ranking reads (#2532, #2535), and where each stands in it, so the
+ * ranking's marks cut back onto the cells that draw each field. One join makes both: a separator changed or a field
+ * added moves every place after it in step.
+ */
+export interface Joined {
+  readonly text: string;
+  /**
+   * `pairs` over {@link text}, or over a longer text that starts with it, cut onto field `i` and rebased onto it;
+   * `from` and `length` narrow the cut to part of the field.
+   */
+  cut(pairs: readonly number[], i: number, from?: number, length?: number): number[];
+}
+
+/** `fields` joined by `sep` (a space), as {@link Joined}. */
+export function joined(fields: readonly string[], sep = " "): Joined {
+  const at: number[] = [];
+  let next = 0;
+  for (const field of fields) {
+    at.push(next);
+    next += field.length + sep.length;
+  }
+  const text = fields.join(sep);
+  return {
+    text,
+    cut: (pairs, i, from = 0, length = (fields[i]?.length ?? 0) - from) => sliceMarks(pairs, (at[i] ?? text.length) + from, length),
+  };
+}
+
 /** Runs cut from one text, as the UTF-16 pairs of start and end of the marked ones: what the ranking answers. */
 export function runPairs(runs: readonly Mark[]): number[] {
   const pairs: number[] = [];

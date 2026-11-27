@@ -9,6 +9,7 @@
  */
 import type { AttentionGroup, CheckoutView, CodeFacts, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
+import { joined, type Joined } from "../filter/filter";
 
 /** `code_facts`' answer by entity id. */
 export type FactsById = ReadonlyMap<string, CodeFacts>;
@@ -160,8 +161,13 @@ export function visiblePrs(
 }
 
 /** What the *Pull requests* filter ranks a line by: its number, title, repository and author, a space between each. */
-export function prText({ row, number, author }: PrLine): string {
-  return `${number ?? ""} ${row.title} ${row.path ?? ""} ${author ?? ""}`;
+export function prText(line: PrLine): string {
+  return prFields(line).text;
+}
+
+/** {@link prText} and where each field stands in it: the number, the title, the repository, the author. */
+export function prFields({ row, number, author }: PrLine): Joined {
+  return joined([number ?? "", row.title, row.path ?? "", author ?? ""]);
 }
 
 /**

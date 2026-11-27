@@ -14,7 +14,7 @@ import { ageLabel, dayHeadingLabel, secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
 import { refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
 import type { WriteSource } from "../../shell/queued-toast";
-import { sliceMarks } from "../filter/filter";
+import { joined, type Joined } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
 import { echoWrite, type Echo } from "../queued.svelte";
 import { credentialFix, secretNoun } from "../settings/settings";
@@ -324,7 +324,11 @@ export function triggerLabel(run: RunRow): string {
  * order the row draws the first three cells, so {@link runMarks} can cut the ranking's marks onto them.
  */
 export function runText(run: RunRow): string {
-  return `#${run.number ?? ""} ${run.branch ?? ""} ${run.revision ?? ""} ${triggerLabel(run)} ${run.started_by ?? ""}`;
+  return runFields(run).text;
+}
+
+function runFields(run: RunRow): Joined {
+  return joined([`#${run.number ?? ""}`, run.branch ?? "", run.revision ?? "", triggerLabel(run), run.started_by ?? ""]);
 }
 
 /** A run's matched letters on each cell the row draws them in, each rebased onto that cell's text. */
@@ -336,14 +340,8 @@ export interface RunMarks {
 
 /** The ranking's `pairs` over {@link runText} (and anything after it) cut onto the run's cells. A queued run draws no number. */
 export function runMarks(run: RunRow, pairs: readonly number[]): RunMarks {
-  const number = `#${run.number ?? ""}`.length;
-  const branch = number + 1;
-  const trigger = branch + (run.branch ?? "").length + 1 + (run.revision ?? "").length + 1;
-  return {
-    number: run.number === null ? [] : sliceMarks(pairs, 0, number),
-    branch: sliceMarks(pairs, branch, (run.branch ?? "").length),
-    trigger: sliceMarks(pairs, trigger, triggerLabel(run).length),
-  };
+  const fields = runFields(run);
+  return { number: run.number === null ? [] : fields.cut(pairs, 0), branch: fields.cut(pairs, 1), trigger: fields.cut(pairs, 3) };
 }
 
 /** Where the Runs filter's chips and scope stand; the typed words rank {@link runText} through the app. */

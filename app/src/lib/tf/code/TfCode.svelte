@@ -68,7 +68,7 @@
   import { CODE_HOST } from "../roles.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
-  import { isFiltering, type FilterConfig, type FilterScope } from "../filter/filter";
+  import { isFiltering, joined, type FilterConfig, type FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { FuzzyOrder, heldOrder } from "../filter/ranked.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
@@ -102,6 +102,7 @@
     repoTeams,
     twinRows,
     visiblePrs,
+    prFields,
     prText,
     visibleRepos,
     type PrGroup,
@@ -551,10 +552,12 @@
    * What a repository's row is ranked by: its name, its teams as the row writes them, its language, a space between
    * each, so a cell's marks are the ranking's at its place (#2532).
    */
-  const repoHaystack = (row: EntityRow) => {
+  /** A repository's name, teams and language, as the filter ranks them and the row cuts its marks back. */
+  const repoFields = (row: EntityRow) => {
     const fact = known.get(row.entity_id);
-    return `${row.title} ${fact?.teams.join(", ") ?? ""} ${fact?.language ?? ""}`;
+    return joined([row.title, fact?.teams.join(", ") ?? "", fact?.language ?? ""]);
   };
+  const repoHaystack = (row: EntityRow) => repoFields(row).text;
   const repoOrder = new FuzzyOrder<EntityRow>();
   $effect(() => repoOrder.ask(repoFilter.text, repoCandidates, repoHaystack));
   const shownRepos = $derived(repoOrder.rows(repoFilter.text, repoCandidates, repoHaystack) as EntityRow[]);
@@ -711,6 +714,8 @@
             {@const local = checkoutLine(checkouts[row.entity_id])}
             {@const fact = known.get(row.entity_id)}
             {@const teams = fact?.teams.join(", ") ?? ""}
+            {@const repoMarks = repoOrder.marks(row)}
+            {@const repoAt = repoFields(row)}
             {@const isPath = local !== null && local.text === checkouts[row.entity_id]?.path}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach repoWin.row(row.entity_id)}>
               <td
@@ -721,8 +726,8 @@
                   >{#if twinRepos.has(row.entity_id)}{" "}<span class="tf-dim">on {sourceName(row.source_id)}</span>{/if}{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</span
                 ></td
               >
-              <td title={teams || undefined}><Marked text={teams} typed={repoMarking} pairs={repoOrder.marks(row, row.title.length + 1, teams.length)} /></td>
-              <td title={fact?.language || undefined}><Marked text={fact?.language ?? ""} typed={repoMarking} pairs={repoOrder.marks(row, row.title.length + teams.length + 2)} /></td>
+              <td title={teams || undefined}><Marked text={teams} typed={repoMarking} pairs={repoAt.cut(repoMarks, 1)} /></td>
+              <td title={fact?.language || undefined}><Marked text={fact?.language ?? ""} typed={repoMarking} pairs={repoAt.cut(repoMarks, 2)} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim} title={isPath ? undefined : local?.text || undefined}>{#if isPath}<TfPath path={local!.text} />{:else}{local?.text ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</span></td>
@@ -751,19 +756,18 @@
           {#each win.slice(kept) as line (line.row.entity_id)}
             {@const { row, number, idle, author, mine } = line}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
-            <!-- Where each field starts in what the filter ranked (`prText`): number, title, repository, author. -->
-            {@const atTitle = (number ?? "").length + 1}
-            {@const atPath = atTitle + row.title.length + 1}
-            {@const atAuthor = atPath + (row.path ?? "").length + 1}
+            <!-- What the filter ranked (`prText`), cut back onto each field: number, title, repository, author. -->
+            {@const prMarks = prOrder.marks(line)}
+            {@const prAt = prFields(line)}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
-              <td class="tf-prno"><Marked text={number ?? ""} typed={prMarking} pairs={prOrder.marks(line, 0, (number ?? "").length)} /></td>
+              <td class="tf-prno"><Marked text={number ?? ""} typed={prMarking} pairs={prAt.cut(prMarks, 0)} /></td>
               <td
-                ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prMarking} pairs={prOrder.marks(line, atTitle, row.title.length)} /></a><span class="tf-sub"
-                  >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prMarking} pairs={prOrder.marks(line, atPath, row.path.length)} /></span
+                ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prMarking} pairs={prAt.cut(prMarks, 1)} /></a><span class="tf-sub"
+                  >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prMarking} pairs={prAt.cut(prMarks, 2)} /></span
                     >{/if}{#if twinPrs.has(row.entity_id)}{row.path ? " " : ""}on {sourceName(row.source_id)}{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked
                         text={author}
                         typed={prMarking}
-                        pairs={prOrder.marks(line, atAuthor, author.length)}
+                        pairs={prAt.cut(prMarks, 3)}
                       />{/if}{/if}{#if idle}{row.path ||
                     author
                       ? ", "

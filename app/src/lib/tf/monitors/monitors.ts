@@ -11,7 +11,7 @@
 import type { AssetDetail, AssetProperty, MonitorRow, MonitorTarget, UnmonitoredAsset } from "../../ipc/assets";
 import type { MonitorKind } from "../../ipc/sources";
 import { BAR_BUCKETS, chipOf as chipStateOf } from "../../assets/monitors";
-import { sliceMarks } from "../filter/filter";
+import { joined, type Joined } from "../filter/filter";
 import { stampLabel } from "../../time/format";
 import { stateWord } from "../state-word";
 import type { JobIndex } from "../job/open-jobs";
@@ -270,36 +270,32 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
 
 /** What the filter ranks a monitor by (#2535): its name, its type, and the name and type of each asset it watches. */
 export function monitorText(row: MonitorRow): string {
-  return [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
+  return monitorFields(row).text;
+}
+
+function monitorFields(row: MonitorRow): Joined {
+  return joined([row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])]);
 }
 
 /** The ranking's `pairs` over {@link monitorText} cut onto the cells that draw them: the name, and each asset's name. */
 export function monitorMarks(row: MonitorRow, pairs: readonly number[]): { name: readonly number[]; assets: (readonly number[])[] } {
-  let at = row.name.length + 1 + kindWord(row.monitor_type).length + 1;
-  const assets = row.assets.map((asset) => {
-    const cut = sliceMarks(pairs, at, asset.name.length);
-    at += asset.name.length + 1 + asset.type_label.length + 1;
-    return cut;
-  });
-  return { name: sliceMarks(pairs, 0, row.name.length), assets };
+  const fields = monitorFields(row);
+  return { name: fields.cut(pairs, 0), assets: row.assets.map((_, i) => fields.cut(pairs, 2 + 2 * i)) };
 }
 
 /** What the filter of *Assets nothing watches* ranks an asset by (#2535): its name, type, owner and environment. */
 export function unwatchedText(asset: UnmonitoredAsset): string {
-  return [asset.name, asset.type_label, asset.owner ?? "", asset.environment ?? ""].join(" ");
+  return unwatchedFields(asset).text;
+}
+
+function unwatchedFields(asset: UnmonitoredAsset): Joined {
+  return joined([asset.name, asset.type_label, asset.owner ?? "", asset.environment ?? ""]);
 }
 
 /** The ranking's `pairs` over {@link unwatchedText} cut onto the asset's cells. */
 export function unwatchedMarks(asset: UnmonitoredAsset, pairs: readonly number[]): Record<"name" | "type" | "owner" | "environment", readonly number[]> {
-  const type = asset.name.length + 1;
-  const owner = type + asset.type_label.length + 1;
-  const environment = owner + (asset.owner ?? "").length + 1;
-  return {
-    name: sliceMarks(pairs, 0, asset.name.length),
-    type: sliceMarks(pairs, type, asset.type_label.length),
-    owner: sliceMarks(pairs, owner, (asset.owner ?? "").length),
-    environment: sliceMarks(pairs, environment, (asset.environment ?? "").length),
-  };
+  const fields = unwatchedFields(asset);
+  return { name: fields.cut(pairs, 0), type: fields.cut(pairs, 1), owner: fields.cut(pairs, 2), environment: fields.cut(pairs, 3) };
 }
 
 /**

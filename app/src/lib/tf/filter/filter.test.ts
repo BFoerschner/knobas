@@ -4,7 +4,7 @@
  */
 import { expect, test } from "vitest";
 
-import { countLine, emptyFilter, isFiltering, markPairs, marks, matchesAll, runPairs, sliceMarks, toQuery, wordPairs, type FilterConfig } from "./filter";
+import { countLine, emptyFilter, isFiltering, joined, markPairs, marks, matchesAll, runPairs, sliceMarks, toQuery, wordPairs, type FilterConfig } from "./filter";
 
 const config: FilterConfig = {
   id: "tickets-all",
@@ -119,4 +119,18 @@ test("runs become the UTF-16 pairs of their marked ones, as the ranking answers 
   expect(runPairs([{ text: "pay", hit: true }, { text: "out-", hit: false }, { text: "s", hit: true }, { text: "ervice", hit: false }])).toEqual([0, 3, 7, 8]);
   expect(runPairs([{ text: "nothing", hit: false }])).toEqual([]);
   expect(wordPairs("Payout payout", "pay")).toEqual([0, 3, 7, 10]);
+});
+
+test("joined fields cut a ranking's marks back onto each field, whatever the separator (#2532, #2535)", () => {
+  const f = joined(["Payout", "", "ops, payments", "Rust"], ", ");
+  expect(f.text).toBe("Payout, , ops, payments, Rust");
+  // "pay" in the name and in the teams, "ust" in the language.
+  const pairs = [0, 3, 15, 18, 26, 29];
+  expect(f.cut(pairs, 0)).toEqual([0, 3]);
+  expect(f.cut(pairs, 1)).toEqual([]);
+  expect(f.cut(pairs, 2)).toEqual([5, 8]);
+  expect(f.cut(pairs, 3)).toEqual([1, 4]);
+  expect(f.cut(pairs, 2, 5, 3)).toEqual([0, 3]);
+  // Marks past the joined text (a longer text it starts) reach the last field when cut to the end.
+  expect(joined(["a", "b"]).cut([2, 5], 1, 0, Infinity)).toEqual([0, 3]);
 });

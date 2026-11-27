@@ -5,7 +5,7 @@
  * folders it sits in as quiet text. The rules are pure functions here, so each is a test on plain data.
  */
 import type { RecentFilter, RecentPipeline, RecentRun, RunRow } from "../../ipc/entity";
-import { sliceMarks } from "../filter/filter";
+import { joined, type Joined } from "../filter/filter";
 import { groupsOf, runMade } from "./builds";
 import { RESULTS, runMarks, runText, type RunMarks } from "./pipeline";
 
@@ -95,10 +95,15 @@ export function placeWords(pipeline: Pick<RecentPipeline, "path" | "group" | "so
  * What the typed words rank a run by (#2535): its own words as a pipeline's Runs filter reads them ({@link runText}),
  * then its pipeline's name and place as the row draws them, and the source's name where the place does not hold it.
  */
-export function recentText({ run, pipeline_id }: RecentRun, pipelines: ReadonlyMap<string, RecentPipeline>, manySources: boolean): string {
+export function recentText(run: RecentRun, pipelines: ReadonlyMap<string, RecentPipeline>, manySources: boolean): string {
+  return recentFields(run, pipelines, manySources).text;
+}
+
+function recentFields({ run, pipeline_id }: RecentRun, pipelines: ReadonlyMap<string, RecentPipeline>, manySources: boolean): Joined {
   const pipeline = pipelines.get(pipeline_id);
-  const own = `${runText(run)} ${pipeline?.name ?? ""} ${placeWords(pipeline, manySources)}`;
-  return pipeline === undefined || manySources ? own : `${own} ${pipeline.source_name}`;
+  const fields = [runText(run), pipeline?.name ?? "", placeWords(pipeline, manySources)];
+  if (pipeline !== undefined && !manySources) fields.push(pipeline.source_name);
+  return joined(fields);
 }
 
 /** A run's matched letters over {@link recentText}, cut onto the row's cells, its pipeline's name and place too. */
@@ -108,14 +113,8 @@ export function recentMarks(
   manySources: boolean,
   pairs: readonly number[],
 ): RunMarks & { name: readonly number[]; place: readonly number[] } {
-  const pipeline = pipelines.get(pipeline_id);
-  const name = runText(run).length + 1;
-  const length = pipeline?.name.length ?? 0;
-  return {
-    ...runMarks(run, pairs),
-    name: sliceMarks(pairs, name, length),
-    place: sliceMarks(pairs, name + length + 1, placeWords(pipeline, manySources).length),
-  };
+  const fields = recentFields({ run, pipeline_id }, pipelines, manySources);
+  return { ...runMarks(run, pairs), name: fields.cut(pairs, 1), place: fields.cut(pairs, 2) };
 }
 
 /** The pipelines of a page by id, laid over those held: a page names only the pipelines of its own runs. */

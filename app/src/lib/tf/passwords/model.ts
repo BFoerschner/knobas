@@ -4,7 +4,7 @@
  * no request and are tested as data.
  */
 import type { Held, PwFolder, PwRow, PwSource } from "../../ipc/passwords";
-import { matcherOf, sliceMarks } from "../filter/filter";
+import { joined, matcherOf, type Joined } from "../filter/filter";
 
 /** One entry, read out of its row. */
 export interface Entry {
@@ -341,7 +341,7 @@ export class IndexBuild {
           const e = all[i]!;
           // As drawn, not lower-cased (#2535): the ranking's marks are places in this text, and a lower-casing can
           // change a text's length.
-          const text = `${e.title}\n${e.user ?? ""}\n${e.address ?? ""}\n${this.#pathText(e.folder)}`;
+          const text = entryFields(e, this.#pathText(e.folder)).text;
           this.#hay.push(text);
           this.#texts.set(e, text);
         }
@@ -559,16 +559,21 @@ export function entryMarks(
   e: Entry,
   pairs: readonly number[],
 ): { title: readonly number[]; user: readonly number[]; address: readonly number[]; path: readonly number[] } {
-  const user = e.title.length + 1;
-  const address = user + (e.user ?? "").length + 1;
+  // The path's text is the index's (its folders' words), and the path is the last field: cut to the text's end.
+  const fields = entryFields(e, "");
   const written = e.address ?? "";
   const shown = bare(written);
   return {
-    title: sliceMarks(pairs, 0, e.title.length),
-    user: sliceMarks(pairs, user, (e.user ?? "").length),
-    address: sliceMarks(pairs, address + (shown === "" ? 0 : written.indexOf(shown)), shown.length),
-    path: sliceMarks(pairs, address + written.length + 1),
+    title: fields.cut(pairs, 0),
+    user: fields.cut(pairs, 1),
+    address: fields.cut(pairs, 2, shown === "" ? 0 : written.indexOf(shown), shown.length),
+    path: fields.cut(pairs, 3, 0, Infinity),
   };
+}
+
+/** An entry's {@link SearchIndex} text, a field a line, and where each field stands in it. */
+function entryFields(e: Entry, path: string): Joined {
+  return joined([e.title, e.user ?? "", e.address ?? "", path], "\n");
 }
 
 /** An expiry as the row and the entry say it: the tone and the words, `null` far off or with none. */
