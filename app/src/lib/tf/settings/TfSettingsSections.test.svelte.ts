@@ -10,7 +10,7 @@ import type { BackupStatus } from "../../ipc/backup";
 import type { InboxCategory, WriteAsk } from "../../ipc/entity";
 import type { KindStateColours, SourceSummary, ToneChoice } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
-import { onMac } from "../../shell/platform";
+import { keyHint, onMac } from "../../shell/platform";
 import { toasts } from "../../shell/toasts.svelte";
 import { acks } from "../../shell/ack.svelte";
 import { keptPages } from "../kept-pages.svelte";
@@ -812,8 +812,8 @@ test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
   // 35 (Zen mode's `Z`, ux31), and the Secrets page's twelve (ADR-0056; W and Shift W, ux30; `/` moved to section search, #2515),
-  // its filter's chords and Enter, and Alt+click in a tree (#2531).
-  expect(rows).toHaveLength(56);
+  // its filter's chords and Enter, Alt+click in a tree (#2531), and the files' T and Text search (#2522) and a diff's T (#2521).
+  expect(rows).toHaveLength(59);
   const where = rows.map((row) => row.querySelectorAll("td")[1]?.textContent?.trim());
   expect(where).toContain("Secrets");
   expect(where).not.toContain("Passwords");
@@ -828,6 +828,10 @@ test("Keyboard lists the fixed shortcuts", async () => {
   for (const key of ["A", "E", "L"]) expect(said, "ADR-0054").toContain(key);
   expect(where.filter((w) => w === "Secrets, in the filter"), "#2531").toHaveLength(2);
   expect(said, "#2531").toContain(onMac() ? "⌥ click" : "Alt click");
+  const row = (key: string, place: string) => rows.some((r) => r.querySelector("td")?.textContent?.trim() === key && r.querySelectorAll("td")[1]?.textContent?.trim() === place);
+  expect(row("T", "A diff"), "#2521").toBe(true);
+  expect(row("T", "A repository's files"), "#2522").toBe(true);
+  expect(row(keyHint("⌘⇧F"), "A repository's files"), "#2522").toBe(true);
   expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",
