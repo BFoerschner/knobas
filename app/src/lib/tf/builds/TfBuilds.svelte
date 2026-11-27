@@ -194,14 +194,12 @@
 
   /**
    * Where Builds was last stood this session (#2570): *All pipelines*, a folder or a pipeline, as its address. A bare
-   * `#/builds` is that place, and *All pipelines* the first time (Björn's answer 4 on #2554); it takes that address.
+   * `#/builds` draws that place, and *All pipelines* the first time (Björn's answer 4 on #2554), at its own address: it
+   * stays the section's top page, which `Esc` leaves alone, as it drew the last pipeline before.
    */
   const lastPlace = sessionValue("builds-place");
   /** The address under `#/builds` the page draws: a bare one's is the last place's. */
   const here = $derived(head === "builds" && rest.length === 0 ? (parseTfHash(lastPlace.value ?? RECENT_HASH) as { rest?: string[] }).rest ?? [] : rest);
-  $effect(() => {
-    if (head === "builds" && rest.length === 0) replaceAddress(lastPlace.value ?? RECENT_HASH);
-  });
   /**
    * Whose runs the one table lists (#2570, the mockup's rule 1): *All pipelines* (`#/builds/recent`) or a folder
    * (`#/builds/folder/<place>`); `null` on a pipeline's page or a run's, which keep their own.

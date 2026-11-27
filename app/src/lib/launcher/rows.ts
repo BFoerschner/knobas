@@ -158,7 +158,7 @@ export function flatten(input: {
       // words may still be a place's name, and a dead end one key from it helps nobody (F-042).
       const places = filtered && answer.length > 0 ? [] : placeRows(input.extras?.places ?? [], words, answer.length === 0);
       const widen = answer.length === 0 && input.extras?.widens === true && (filtered || input.titles === true);
-      // `#b` with no words yet: *Recent runs* first, the way into Builds' newest runs (2026-11-25, Fable's ruling 5).
+      // `#b` with no words yet: *All pipelines* first (*Recent runs* until #2570), the way into Builds' newest runs (2026-11-25, Fable's ruling 5).
       const recent =
         words.trim() === "" && (input.raw ?? "").trim() === "#b"
           ? (input.extras?.places ?? []).filter((place) => place.id === RECENT_PLACE).map((action): LauncherRow => ({ kind: "action", id: `action:${action.id}`, action }))

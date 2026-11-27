@@ -108,9 +108,8 @@ const PLACES = [
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
-  // Builds' *Recent* (2026-11-25): every pipeline's runs newest first, by its address from Time, and a run opened from it.
-  // The probe reaches *Recent* by its address and never presses the switch, so *Recent* is not the kept view: the late
-  // and synced rounds' second press of Builds lands on the run's pipeline (the shell's rule), and opens a run there.
+  // Builds' *All pipelines* (*Recent* until #2570): every pipeline's runs newest first, by its address from Time, and a run
+  // opened from it. A bare `#/builds` draws it too (the `builds` place) until another place of Builds was stood on.
   { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
   // *Recent* opened the moment the app has drawn its nav, the shell's start-up reads still out and the throttle on from
   // the press (#2569, `docs/decisions/2026-11-27-builds-first-open.md`): a person who starts knobas to look at the runs. Its

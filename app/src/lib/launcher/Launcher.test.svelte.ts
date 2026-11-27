@@ -2303,7 +2303,7 @@ test("> with nothing after it lists every section, then Settings and its section
     "Inbox",
     "Code",
     "Builds",
-    "Builds › Recent runs",
+    "Builds › All pipelines",
     "Docs",
     "Secrets",
     "Monitors",

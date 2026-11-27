@@ -27,7 +27,7 @@ export interface LauncherAction {
   run?: () => void;
 }
 
-/** *Recent runs*' row id: the place `#b` offers first. */
+/** *All pipelines*' row id (*Recent runs* before #2570): the place `#b` offers first. */
 export const RECENT_PLACE = "builds-recent";
 
 /** What each section holds, in one line: the row's second line. */
@@ -98,9 +98,10 @@ export function navigationActions(): LauncherAction[] {
         // Docs opens where its home is, when one is chosen (PR #2479, 2026-11-17).
         hash: section === "docs" ? docsChoices.start : sectionHash(section),
       },
-      // Builds' *Recent* (2026-11-25): the newest runs of every pipeline, a place of its own, which `#b` offers first.
+      // Builds' *All pipelines* (#2570, Recent before it, 2026-11-25): the newest runs of every pipeline, a place of its
+      // own, which `#b` offers first. Its detail keeps the word *Recent*, so `>recent` still finds it.
       ...(section === "builds"
-        ? [{ id: RECENT_PLACE, label: `${SECTION_NAME.builds} › Recent runs`, detail: "The newest runs of every pipeline, with no folders", hash: RECENT_HASH }]
+        ? [{ id: RECENT_PLACE, label: `${SECTION_NAME.builds} › All pipelines`, detail: "Recent runs: the newest of every pipeline", hash: RECENT_HASH }]
         : []),
     ]),
     ...SETTINGS_SECTIONS.map(([section, name]) => ({

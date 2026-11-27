@@ -6,6 +6,7 @@
  */
 import type { PipelineRow, RecentFilter, RecentPipeline, RecentRun, RunRow } from "../../ipc/entity";
 import { joined, type Joined } from "../filter/filter";
+import { parseTfHash } from "../route";
 import { REPO_FOLDER, groupsOf, runMade } from "./builds";
 import { RESULTS, runMarks, runText, type RunMarks } from "./pipeline";
 
@@ -53,6 +54,12 @@ export function runScopeOf(rest: readonly string[]): RunScope | null {
   if (isRecent(rest)) return { kind: "all" };
   if (rest[0] === FOLDER && rest.length > 1) return { kind: "folder", path: rest.slice(1) };
   return null;
+}
+
+/** Whether an address is a run scope's: *All pipelines* or a folder, not a pipeline, a run or a bare `#/builds`. */
+export function isRunScopeHash(hash: string): boolean {
+  const route = parseTfHash(hash);
+  return route.view === "full" && route.head === "builds" && runScopeOf(route.rest) !== null;
 }
 
 /** A run scope's address, each segment of a folder's place encoded. */

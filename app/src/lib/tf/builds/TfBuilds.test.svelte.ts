@@ -935,8 +935,9 @@ test("a bare #/builds opens All pipelines the first time in a session, and where
   location.hash = "#/builds";
   draw([]);
   await settle();
-  expect(location.hash).toBe("#/builds/recent");
+  expect(location.hash, "the section's top page keeps its address").toBe("#/builds");
   expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("All pipelines");
+  expect(target.querySelector(".tf-pl-home a")?.getAttribute("aria-current")).toBe("true");
   unmount(page!);
   draw(["teamcity:buildType:Payout_Lint"]);
   await settle();
@@ -944,7 +945,6 @@ test("a bare #/builds opens All pipelines the first time in a session, and where
   location.hash = "#/builds";
   draw([]);
   await settle();
-  expect(location.hash).toBe("#/builds/teamcity%3AbuildType%3APayout_Lint");
   expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Payout_Lint");
   unmount(page!);
   draw(["folder", "teamcity", "Payments", "Payout"], "builds", [], { pipelines: () => Promise.resolve(FOLDERED) });
@@ -953,7 +953,6 @@ test("a bare #/builds opens All pipelines the first time in a session, and where
   location.hash = "#/builds";
   draw([], "builds", [], { pipelines: () => Promise.resolve(FOLDERED) });
   await settle();
-  expect(location.hash).toBe("#/builds/folder/teamcity/Payments/Payout");
   expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout");
 });
 

@@ -1051,7 +1051,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
       const all = history(new Date());
       const drawn = [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk].filter(
-        (pipeline) => (filter.sources ?? []).length === 0 || filter.sources!.includes(pipeline.source_id),
+        (pipeline) =>
+          ((filter.sources ?? []).length === 0 || filter.sources!.includes(pipeline.source_id)) &&
+          // A folder's scope (#2570): its pipelines by id.
+          ((filter.pipelines ?? []).length === 0 || filter.pipelines!.includes(pipeline.entity_id)),
       );
       const byId = new Map(drawn.map((pipeline) => [pipeline.entity_id, pipeline]));
       const runs = drawn

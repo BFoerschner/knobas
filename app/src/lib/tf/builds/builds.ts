@@ -205,26 +205,6 @@ export function pipelineHash(entityId: string): string {
   return `#/builds/${encodeURIComponent(entityId)}`;
 }
 
-/**
- * The pipeline an address selects. A bare `#/builds` selects the first
- * failing one that asks for attention (ux18: its failure unread), else the
- * first failing, else the first, as prototype-6 opens on a failure; with the
- * job's pipelines given (*This job*, #850), the same among the job's. An id
- * nothing carries selects none.
- */
-export function pipelineOf(
-  list: readonly PipelineRow[],
-  rest: readonly string[],
-  onJob: readonly PipelineRow[] = [],
-  read: ReadonlySet<string> | null = null,
-): PipelineRow | null {
-  const id = rest[0];
-  if (id !== undefined && id !== "") return list.find((pipeline) => pipeline.entity_id === id) ?? null;
-  // With *This job* on, the job's own failure first, else its first (#850).
-  const among = onJob.length > 0 ? onJob : list;
-  return among.find((pipeline) => asksAttention(pipeline, read)) ?? among.find(isFailing) ?? among[0] ?? null;
-}
-
 // ---------------------------------------------------------------------------
 // The project tree and pins (#849, R-9.3) and *This job* (#850, R-9.1, R-9.2)
 // ---------------------------------------------------------------------------

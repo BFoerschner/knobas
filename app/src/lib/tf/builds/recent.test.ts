@@ -13,6 +13,7 @@ import {
   RECENT_HOLD,
   folderPipelines,
   isRecent,
+  isRunScopeHash,
   runScopeHash,
   runScopeOf,
   placeWords,
@@ -136,6 +137,11 @@ test("Recent and a folder are run scopes with addresses of their own, under word
   expect(hash).toBe("#/builds/folder/tc/Pay%2Fouts/Nightly%20%E2%80%BA%20EU");
   const back = hash.slice("#/builds/".length).split("/").map(decodeURIComponent);
   expect(runScopeOf(back)).toEqual({ kind: "folder", path: ["tc", "Pay/outs", "Nightly › EU"] });
+  expect(isRunScopeHash("#/builds/recent")).toBe(true);
+  expect(isRunScopeHash(hash)).toBe(true);
+  expect(isRunScopeHash("#/builds/tc%3AbuildType%3ALint")).toBe(false);
+  expect(isRunScopeHash("#/build/tc%3AbuildType%3ALint/tc%3Abuild%3A1")).toBe(false);
+  expect(isRunScopeHash("#/builds")).toBe(false);
   // A pipeline's address names its source and a `:`, never the word.
   expect(pipelineHash("tc:buildType:folder").startsWith("#/builds/folder/")).toBe(false);
 });
