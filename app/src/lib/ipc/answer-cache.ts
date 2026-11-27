@@ -138,6 +138,13 @@ export const QUIET: ReadonlySet<string> = new Set([
   // The pane's files of one repository (D11): a read of the index, which no kept answer reads.
   "search_files",
   "refused_writes",
+  // The runs' counts by bubble and the instant they count green from (#2568): read fresh on every run's move, so never
+  // kept, and the instant is read by nothing kept. Unknown here, every top bar refresh, every entry to Builds and every
+  // leave dropped every kept answer, and a return to Builds read `pipelines` again (the open budget's `builds late`).
+  "run_counts",
+  "builds_in_front",
+  "move_seen",
+  "put_back_seen",
   // A refresh of one item (the TeamCity run fix, 2026-11-25): what it moved drops answers by its own event
   // (`item:refreshed`), and one that moved nothing tells nothing. Unknown here, each page's refresh of its runs in
   // flight dropped every kept answer at the call.

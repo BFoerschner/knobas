@@ -101,6 +101,21 @@ describe("the answer cache", () => {
     expect(asked("docs_outline")).toBe(2);
   });
 
+  it("drops nothing on the runs' counts or the instant green counts from, and never keeps the counts (#2568)", async () => {
+    // Unknown here, the top bar's every refresh and every entry to Builds dropped every kept answer, and a return to
+    // Builds read the pipelines again (the open budget's `builds late` at 113 to 428 ms, against 20 to 30 ms).
+    await ask("pipelines");
+    await ask("run_counts");
+    await ask("builds_in_front", { front: true });
+    await ask("move_seen", { scope: { everything: true, pipelines: [], runs: [] } });
+    await ask("put_back_seen", { seen: {} });
+    await ask("builds_in_front", { front: false });
+    await ask("run_counts");
+    await ask("pipelines");
+    expect(asked("pipelines")).toBe(1);
+    expect(asked("run_counts"), "read fresh each time").toBe(2);
+  });
+
   it("drops nothing on a compare's reads of git and the source, a page at a time or called off", async () => {
     // The compare pass (2026-11-13): a diff of thousands of files reads a file's lines per card, and dropped every kept
     // answer each time; so did the check behind a predicted compare.
