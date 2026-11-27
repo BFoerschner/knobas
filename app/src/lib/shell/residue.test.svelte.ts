@@ -2918,6 +2918,7 @@ const CASES: Case[] = [
             getEntity: () => deferred({ row: { entity_id: "gitea:tidewater/payout-service", title: "tidewater/payout-service" } } as never),
             applyHeldWrite: () => deferred(undefined),
             discardWrite: () => deferred(undefined),
+            readAhead: () => deferred(undefined),
           },
         },
       }),
