@@ -2364,8 +2364,9 @@ async fn no_run_since(state: &SourcesState, id: i64, what: &str) {
 /// The landed write's effects (ADR-0064), each refresh held as it ends:
 /// answers each entity read with the mirror's live payload of each of
 /// `watched` at that moment (`None` for one not live), and lets it go. No
-/// run of the source has begun while any is held. Ends once no effect has
-/// ended for five seconds.
+/// run of the source has begun while any is held. Waits up to 30 s for the
+/// first (a repository's walk on a loaded machine), then ends once no effect
+/// has ended for five seconds.
 async fn effects_held(
     state: &SourcesState,
     heard: &mut tokio::sync::mpsc::UnboundedReceiver<knobas_sync::scheduler::RefreshEnded>,
@@ -2377,8 +2378,11 @@ async fn effects_held(
     std::collections::HashMap<String, Option<serde_json::Value>>,
 )> {
     let mut read = Vec::new();
-    while let Ok(Some(ended)) =
-        tokio::time::timeout(std::time::Duration::from_secs(5), heard.recv()).await
+    while let Ok(Some(ended)) = tokio::time::timeout(
+        std::time::Duration::from_secs(if read.is_empty() { 30 } else { 5 }),
+        heard.recv(),
+    )
+    .await
     {
         assert_eq!(ended.write_id, Some(id), "{ended:?}");
         no_run_since(state, id, &format!("its effect {} ended", ended.entity_id)).await;
