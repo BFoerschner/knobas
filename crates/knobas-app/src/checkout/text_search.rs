@@ -1431,7 +1431,8 @@ mod tests {
             ("rare literal", asked("zqxjkv_none", false, false)),
             ("common literal", asked("return", false, false)),
             ("rare words", asked("zqxjkv none", false, false)),
-            ("common words", asked("return self", false, false)),
+            ("uncommon words", asked("return self", false, false)),
+            ("common words", asked("if return", false, false)),
             ("smart-case literal", asked("Config", false, false)),
             ("pattern", asked(r"fn\s+\w+_new\b|\bstd::\w+", false, true)),
         ];
