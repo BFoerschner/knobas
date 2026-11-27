@@ -976,7 +976,6 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_local_dir,
         commands::entity::entity_local_paths,
         commands::entity::entity_local_file,
-        commands::entity::entity_text_search,
         commands::entity::entity_source_range_diff,
         // The compare pass (PR #2479, 2026-11-13): a range's files first, each file's lines as it is reached,
         // and a read the page no longer wants called off.
@@ -1048,8 +1047,6 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::api::api_send,
         commands::api::api_cancel,
         commands::api::api_answer_body,
-        commands::api::api_answer_piped,
-        commands::api::api_answer_piped_save,
         commands::api::api_sent,
         commands::api::api_hold_secret,
         commands::api::api_held,
@@ -1146,6 +1143,11 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::app::install_firefox_host,
         commands::app::uninstall_firefox_host,
         commands::app::record_browser_bypass,
+        // Spec #2514's text search (#2522, ADR-0062) and an API answer through
+        // the file pipeline (#2533, ADR-0057), appended at the foot (§10.8).
+        commands::entity::entity_text_search,
+        commands::api::api_answer_piped,
+        commands::api::api_answer_piped_save,
     ]
 }
 
