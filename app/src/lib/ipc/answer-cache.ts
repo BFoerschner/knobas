@@ -149,6 +149,10 @@ export const QUIET: ReadonlySet<string> = new Set([
   // (`item:refreshed`), and one that moved nothing tells nothing. Unknown here, each page's refresh of its runs in
   // flight dropped every kept answer at the call.
   "refresh_entity",
+  // A source asked for a run (#2569b): the ask writes nothing a read answers. The run's start drops the status reads and
+  // its end what it changed (`sync:state`). Unknown here, Recent's first draw, which asks every idle CI source at start,
+  // dropped every kept answer and every start-up read on its way.
+  "sync_now",
   "notification_kinds",
   "diff_pipelines",
   "command_steps",
