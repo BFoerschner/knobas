@@ -385,8 +385,9 @@ macro_rules! newest_runs {
 /// its derived `pipeline` (140 ms, growing with the runs); the stored rows
 /// make it the pipelines × twelve, whatever TeamCity's history holds. The
 /// unread failures (#2543) are the one read of the whole history: each
-/// pipeline's range of `item_pipeline_runs_idx`, kept to its failures with
-/// no `knobas.run_read` row ([`crate::failed_runs_of!`]). The
+/// pipeline's range of `item_pipeline_runs_idx`, every run looked at once,
+/// kept to its failures with no `knobas.run_read` row
+/// ([`crate::failed_runs_of!`]); about 3 µs a run. The
 /// pipelines are `materialized` and read once: inlined, a pipeline's
 /// declarations were read for every pair of pipelines the final join
 /// compared (1.35 s against 0.59 s at 400 × 30,000).

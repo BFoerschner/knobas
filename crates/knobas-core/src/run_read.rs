@@ -28,18 +28,26 @@ const READ_RUNS: &str = "select r.entity_id
   where exists (select 1 from knobas.entity e
                  where e.id = r.entity_id and e.deleted_at is null)";
 
-/// The finished failed runs of the pipelines in the relation `$pipelines`
-/// (aliased `t`, with `source_id`, `adapter_kind` and `pkey`), the
-/// declarations `$1` bound: a `from … where …` that selects over `t`, `ip`
-/// (the run's `sync.item_pipeline` row), `i` (its `sync.item`) and `ru`.
-/// Each run by its stored pipeline range (`sync.item_pipeline`, as
-/// `crate::newest_runs!` reads it), and its state and finish as
-/// [`crate::builds`] reads a run: the stored row where the bound declarations
-/// wrote one, the walk where not. Live runs only.
+/// The finished failed runs of the pipelines in the relation `$pipelines`,
+/// the declarations `$1` bound: a `from … where …` that selects over `t` (the
+/// pipeline, with `source_id`, `adapter_kind` and `pkey`), `ip` (its run's
+/// `entity_id`, and `at`, the order every reader draws runs in), `i` (the
+/// run's `sync.item`) and `ru`. Live runs only, each by its stored pipeline
+/// range (`sync.item_pipeline`, as `crate::newest_runs!` reads it), with its
+/// state and finish as [`crate::builds`] reads a run: the stored row where
+/// the bound declarations wrote one, the walk where not.
 ///
 /// One definition for what a pipeline's mark writes ([`MARK_READ`]) and for
 /// the unread failures the Builds list names (`crate::builds::PIPELINES`,
 /// #2543), so the rail's count is what its press marks.
+///
+/// **Its plan** (`builds_list_plan.rs`, `read_plans.rs`): one range of
+/// `item_pipeline_runs_idx` per pipeline, kept a lateral by `offset 0`;
+/// joined, the planner read every pipeline's runs whole, against
+/// `read_plans.rs`'s rule (#2185). A run is live by a scalar probe of
+/// `knobas.entity`: an `exists` became a hash of every entity rebuilt per
+/// pipeline. Moving the run's tests into the lateral too re-read `run_keys`
+/// per run, twice as slow.
 #[macro_export]
 macro_rules! failed_runs_of {
     ($pipelines:literal) => {
@@ -48,13 +56,14 @@ macro_rules! failed_runs_of {
     from ",
             $pipelines,
             " t
-    join sync.item_pipeline ip
-      on ip.source_id = t.source_id and ip.pkey = t.pkey and ip.adapter_kind = t.adapter_kind
+    cross join lateral (select ip.entity_id, ip.at from sync.item_pipeline ip
+                         where ip.source_id = t.source_id and ip.pkey = t.pkey
+                           and ip.adapter_kind = t.adapter_kind
+                        offset 0) ip
     join sync.item i on i.entity_id = ip.entity_id",
             $crate::run_join!("ru", "i"),
             "
-   where exists (select 1 from knobas.entity e
-                  where e.id = ip.entity_id and e.deleted_at is null)
+   where (select e.deleted_at is null from knobas.entity e where e.id = ip.entity_id)
      and ",
             $crate::row_or!("ru", "state", $crate::declared_state!("$1")),
             "->>'tone' = 'err'

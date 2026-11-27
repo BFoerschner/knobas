@@ -125,7 +125,13 @@ async fn the_builds_list_reads_the_runs_once() {
 
 /// Every plan node as `(node type, rows over all its loops)`.
 fn walk(node: &serde_json::Value, out: &mut Vec<(String, f64)>) {
-    let kind = node["Node Type"].as_str().unwrap_or_default().to_owned();
+    let kind = match node["Relation Name"].as_str() {
+        Some(relation) => format!(
+            "{} on {relation}",
+            node["Node Type"].as_str().unwrap_or_default()
+        ),
+        None => node["Node Type"].as_str().unwrap_or_default().to_owned(),
+    };
     let rows = node["Actual Rows"].as_f64().unwrap_or_default()
         * node["Actual Loops"].as_f64().unwrap_or_default();
     out.push((kind, rows));
@@ -143,7 +149,9 @@ const LONG_RUNS: i32 = 10_000;
 /// pipelines. At one pipeline of [`LONG_RUNS`] runs beside [`PIPELINES`]
 /// short ones holding [`RUNS`], one run in seven failing and half the long
 /// one's failures read, no node of the `unread` CTE handles more than twice
-/// the runs. The timing is printed for the PR, not asserted.
+/// the runs, and the runs are read by `item_pipeline_runs_idx` (index-backed,
+/// as `read_plans.rs` holds every read of a pipeline's runs). The timing is
+/// printed for the PR, not asserted.
 #[tokio::test]
 async fn the_unread_failures_read_one_range() {
     let pool = knobas_db::test_util::scratch_database("builds-unread-plan")
@@ -274,9 +282,13 @@ async fn the_unread_failures_read_one_range() {
         *most <= 2.0 * runs,
         "{node} handles {most} rows for {runs} runs: the history is read more than once"
     );
-    println!(
-        "the unread CTE reads item_pipeline by its index: {}",
-        plan.to_string().contains("item_pipeline_runs_idx")
+    let text = plan.to_string();
+    assert!(
+        text.contains("item_pipeline_runs_idx")
+            && !nodes
+                .iter()
+                .any(|(kind, _)| kind == "Seq Scan on item_pipeline"),
+        "each pipeline's runs are one range of item_pipeline_runs_idx: {text}"
     );
 }
 
