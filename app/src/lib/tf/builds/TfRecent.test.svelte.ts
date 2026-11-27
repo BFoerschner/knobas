@@ -105,7 +105,7 @@ interface Drawn {
 
 function draw(
   overrides: Partial<RecentPorts> = {},
-  props: { job?: string | null; first?: RecentRuns; title?: string; pipelines?: readonly string[] | null } = {},
+  props: { job?: string | null; first?: RecentRuns; title?: string; pipelines?: readonly string[] | null; ondrawn?: () => void } = {},
 ): Drawn {
   const drawn: Drawn = { asked: [], next: props.first ?? PAGE, started: [], revision: () => {}, scope: () => {} };
   let revision = $state(0);
@@ -149,6 +149,7 @@ function draw(
       get pipelines() {
         return pipelines;
       },
+      ...(props.ondrawn ? { ondrawn: props.ondrawn } : {}),
     },
   });
   return drawn;
@@ -500,4 +501,14 @@ test("a result chip draws the runs its read answers, never the rows the last fil
   failed.click();
   await settle();
   expect(numbers()).toEqual(["#11"]);
+});
+
+test("Builds hears the first rows drew once they have painted, so the pipeline list it then reads lands in a later frame (#2570)", async () => {
+  let drawnAt = 0;
+  draw({}, { ondrawn: () => (drawnAt += 1) });
+  await turns();
+  expect(numbers(), "the first rows laid").toEqual(["#12", "#11", "#10"]);
+  expect(drawnAt, "not before their frame").toBe(0);
+  await settle();
+  expect(drawnAt).toBe(1);
 });

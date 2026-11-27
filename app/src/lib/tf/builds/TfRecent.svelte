@@ -204,7 +204,10 @@
       heldFor = wanted;
       failed = null;
       inFlightSoon();
-      untrack(() => ondrawn)?.();
+      // Builds reads its pipeline list once the first rows have painted (#2570): heard at once, the list's answer (571 KB
+      // at Björn's scale) and the rail it now draws at every scope could land inside the first rows' frame.
+      if (first) afterPaint(() => untrack(() => ondrawn)?.());
+      else untrack(() => ondrawn)?.();
       // The rest once the first rows have painted: asked at once, its answer came back inside the first rows' render on
       // the scale database at 6x, and the frame then drew all 200 in two passes (merger's review of #2569).
       if (first && next !== null) afterPaint(() => at === reads && void more(RECENT_PAGE - RECENT_FIRST));
@@ -219,10 +222,22 @@
     }
   }
 
+  /** The frame and the task `afterPaint` waits on, cancelled when the page goes. */
+  let paintFrame: number | undefined;
+  let paintTask: ReturnType<typeof setTimeout> | undefined;
+  const painted: (() => void)[] = [];
   /** `run` once the page has painted (as `TfDocs`' `afterPaint`); at once where there are no frames. */
   function afterPaint(run: () => void): void {
     if (typeof requestAnimationFrame !== "function") return run();
-    requestAnimationFrame(() => setTimeout(run, 0));
+    painted.push(run);
+    if (paintFrame !== undefined || paintTask !== undefined) return;
+    paintFrame = requestAnimationFrame(() => {
+      paintFrame = undefined;
+      paintTask = setTimeout(() => {
+        paintTask = undefined;
+        for (const one of painted.splice(0)) one();
+      }, 0);
+    });
   }
 
   /** An older page of `limit` runs, after what is held. */
@@ -531,6 +546,9 @@
   });
 
   onDestroy(() => {
+    painted.length = 0;
+    if (paintFrame !== undefined && typeof cancelAnimationFrame === "function") cancelAnimationFrame(paintFrame);
+    clearTimeout(paintTask);
     clearTimeout(headSoon);
     clearTimeout(inFlightTimer);
     reads += 1;

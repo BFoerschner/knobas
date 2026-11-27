@@ -43,9 +43,14 @@ const QUIET_RECENT = {
   focused: () => false,
 };
 
+/** Frames asked for, run by `settle` (as `TfRecent`'s tests do): jsdom's own come on a 16 ms timer a loaded machine misses. */
+let frames: FrameRequestCallback[] = [];
+
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
+  frames = [];
+  vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) => frames.push(run));
 });
 
 afterEach(() => {
@@ -57,10 +62,16 @@ afterEach(() => {
   sessionValue("builds-place").value = null;
   sessionFilter("builds-group").scope = null;
   sessionValue("builds-group").value = null;
+  vi.unstubAllGlobals();
 });
 
 async function settle() {
-  for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let round = 0; round < 3; round += 1) {
+    for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    // *All pipelines* hears its first rows painted a frame later, and the rail's list is read then (#2570).
+    frames.splice(0).forEach((run) => run(performance.now()));
+  }
   flushSync();
 }
 
