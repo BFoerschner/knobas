@@ -472,6 +472,17 @@ test("Builds: a run opened from a doc page names its pipeline in its hint, as Es
   await until(() => location.hash === pipeline, `Esc went to ${location.hash}`);
 });
 
+test("Docs: a doc page opened from a ticket's page goes up to its space on Esc, by the name its crumb gives it, never back to the ticket (#2559)", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  location.hash = "#/page/confluence%3Asepa";
+  await until(() => shown(".tf-rd-title")?.textContent?.includes("SEPA payout retry design") ?? false, "the doc page never drew");
+  const space = shown(".tf-rd-crumb a[href^='#/docs/space/']");
+  expect(space, "the fixture's page sits in a space").not.toBeNull();
+  await until(() => hint() === `Back to ${space!.textContent!.trim()} Esc`, `the hint said ${hint()}`);
+  key("Escape");
+  await until(() => location.hash === space!.getAttribute("href"), `Esc went to ${location.hash}`);
+});
+
 // ---- the reading column (#2399) ----
 
 /** The page's reading column, beside the card. */
