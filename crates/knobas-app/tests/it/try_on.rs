@@ -366,5 +366,10 @@ async fn a_command_tried_on_pasted_text_reads_it_and_leaves_no_file_and_no_row()
         !history.contains(try_on::TRY_ENTITY),
         "no try in the list of runs: {history}"
     );
+    assert!(
+        runs.rows(None).is_empty() && runs.rows(Some(try_on::TRY_ENTITY)).is_empty(),
+        "no try in the session's list of runs either: {:?}",
+        runs.rows(None)
+    );
     assert_eq!(rows(&pool).await, before, "no row written");
 }

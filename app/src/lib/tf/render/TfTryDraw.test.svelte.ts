@@ -125,3 +125,25 @@ test("bytes that are no text are not drawn as text", async () => {
   await settle();
   expect(stage()?.textContent).toContain("A binary file, not drawn.");
 });
+
+test("a failed step names its input as the Code page's box does", async () => {
+  const failed: PipeRun = { outcome: "failed", failure: { index: 0, name: "Gunzip", error: "not gzip", input: { size: 1, head: "x" } } } as PipeRun;
+  draw({ kind: "text", name: "a.gz", text: "x" }, { pipeline: "gz", pipelines: [{ id: "gz", name: "Gunzip", steps: [{ step: "gunzip" }] }], ports: { piped: async () => failed } });
+  await settle();
+  expect(stage()?.querySelector(".tf-sfcols div:nth-child(2) b")?.textContent).toBe("Its input, the file's bytes, 1 B");
+});
+
+test("a pipeline's bar stands while a chosen file is read, so the stage does not move when it is", async () => {
+  let give!: (bytes: Uint8Array) => void;
+  draw(
+    { kind: "path", path: "/Users/mara/order.json.b64" },
+    { pipeline: "b64", pipelines: [{ id: "b64", name: "Base64 JSON", steps: [{ step: "base64_decode" }] }], ports: { bytes: () => new Promise<Uint8Array>((resolve) => (give = resolve)) } },
+  );
+  expect(stage()?.querySelector("[role=status]")?.textContent).toBe("Reading order.json.b64…");
+  const bar = stage()?.previousElementSibling;
+  expect(bar?.classList.contains("tf-try-stage")).toBe(false);
+  expect(bar?.tagName).not.toBe("HEADER");
+  give(new TextEncoder().encode("eyJhIjoxfQ=="));
+  await settle();
+  expect(stage()?.previousElementSibling).toBe(bar);
+});

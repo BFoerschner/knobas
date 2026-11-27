@@ -37,7 +37,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import { commandIdOf } from "../../render/command";
   import { defaultPipeline, makeDefaultPattern, openWith, withDefault } from "../../render/defaults";
-  import { pipedFile, sized, stepName } from "../../render/pipeline";
+  import { isDelimited } from "../../render/json-sniff";
+  import { inputOf, pipedFile, sized, stepName } from "../../render/pipeline";
   import { allRenderers, type Renderer } from "../../render/registry";
   import { renderPort, type RenderPort } from "../../render/port";
   import { push } from "../../shell/toasts.svelte";
@@ -218,7 +219,7 @@
       {/if}
     </span>
   </header>
-  {#if steps.length > 0 && read.kind === "read"}
+  {#if steps.length > 0}
     <TfFilePipeline
       {steps}
       commands={commandSteps}
@@ -243,7 +244,7 @@
         <b>Step {failure.index + 1}, {failure.name}, failed.</b>
         <div class="tf-sfcols">
           <div><b>What it said</b><pre>{failure.error}</pre></div>
-          <div><b>Its input, {sized(failure.input.size)}</b><pre>{failure.input.head}</pre></div>
+          <div><b>Its input, {inputOf(steps, failure.index, commandSteps)}, {sized(failure.input.size)}</b><pre>{failure.input.head}</pre></div>
         </div>
       </div>
     {:else if drawn === null}
@@ -270,7 +271,7 @@
         {/await}
       {:else if drawAs === "xml" || drawAs === "json"}
         {#await docViewModule() then { default: TfDocView }}
-          <TfDocView text={drawn.text} path={drawn.path} kind={drawAs === "json" ? "json" : "xml"} {render} />
+          <TfDocView text={drawn.text} path={drawn.path} kind={drawAs === "json" ? (isDelimited(drawn.path) ? "jsonl" : "json") : "xml"} {render} />
         {/await}
       {:else if drawAs === "markdown"}
         <div class="tf-rendered"><TfMarkdown text={drawn.text} {render} /></div>

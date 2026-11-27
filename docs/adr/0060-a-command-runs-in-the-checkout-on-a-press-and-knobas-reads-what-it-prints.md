@@ -34,7 +34,7 @@ Björn, on ux55: "The command run doesn't work on a rendered folder. I also can'
 
 - **What reaches an argument.** The chosen folder's own paths as a checkout's: `{root}` the folder, `{file}` and `{relfile}` the chosen file (or the pasted text's throwaway file), `{dir}` and `{reldir}` the folder, `{name}` its name. No git name: a command holding `{sha}`, `{base}`, `{head}` or `{branch}` is refused by name, and a command on a commit or a range is tried on a repository only.
 - **What it runs on.** A command for a file runs on the chosen file or the pasted text's file, on stdin where it reads stdin; one for a folder or a repository on the chosen folder, or on the throwaway folder holding the pasted text. A file's command is refused on a folder.
-- **What rests.** The run is a live read as any other and the dialog shows it, but it is no row in the list of runs (`command-runs/runs.json`), and the throwaway folder is removed when it ends. A place in its output opens no page: no page shows the folder.
+- **What rests.** The run is a live read as any other and the dialog shows it, but it is no row in the list of runs, neither the session's (*Last runs*, the run chip) nor `command-runs/runs.json`; the throwaway folder is removed when it ends, and the run stops when its dialog closes, since nothing else shows it. *Run again* tries it again on the same example. A place in its output opens no page: no page shows the folder.
 
 ## Rejected
 

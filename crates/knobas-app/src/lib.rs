@@ -549,7 +549,7 @@ pub fn manage_app_state<R: tauri::Runtime>(
     try_on::runs().on_moved(move |moved| {
         events::emit(&tried_to, None, events::FOLDER_RENDER, moved);
     });
-    std::thread::spawn(try_on::sweep);
+    std::thread::spawn(try_on::sweep_left);
     // A command's run started or ended (ADR-0060); its files and the list of
     // runs are in a folder of the profile no backup carries.
     let oneoff_to = handle.clone();

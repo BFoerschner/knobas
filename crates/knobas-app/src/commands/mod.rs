@@ -151,8 +151,11 @@ pub(crate) mod mirror {
         found
     }
 
+    /// The main window's grants, which a barrel's plugin command must name.
+    const CAPABILITY: &str = include_str!("../../capabilities/default.json");
+
     /// Both directions: every registered command is invoked, every invoked
-    /// command is registered.
+    /// command is registered (a plugin's, granted).
     pub(crate) fn assert_mirrors(module: &str, mirror: &'static str, barrel: &str, min: usize) {
         let registered = registered(module);
         assert!(
@@ -167,9 +170,20 @@ pub(crate) mod mirror {
                 "{command} is in the handler list but {barrel} has no invoke<..>(\"{command}\" call"
             );
         }
-        // A plugin's own command (`plugin:dialog|open`, #2562) is the plugin's handler, granted by a capability: it is in
-        // no `commands::` module's list.
-        for name in invoked.iter().filter(|name| !name.starts_with("plugin:")) {
+        // A plugin's own command (`plugin:dialog|open`, #2562) is the plugin's handler, in no `commands::` module's list:
+        // it must be granted by its own name in the main window's capability instead, so a ghost one is still caught.
+        for name in &invoked {
+            if let Some(plugin) = name.strip_prefix("plugin:") {
+                let (plugin, command) = plugin
+                    .split_once('|')
+                    .unwrap_or_else(|| panic!("{barrel} invokes {name}, which is no `plugin:<plugin>|<command>`"));
+                let grant = format!("\"{plugin}:allow-{}\"", command.replace('_', "-"));
+                assert!(
+                    CAPABILITY.contains(&grant),
+                    "{barrel} invokes {name}, which capabilities/default.json does not grant as {grant}"
+                );
+                continue;
+            }
             assert!(
                 registered.contains(name),
                 "{barrel} invokes {name}, which is not in the handler list under commands::{module}"

@@ -21,8 +21,10 @@
 //!   stay in memory and whose generated folders go under [`root`]. Pasted
 //!   text a command or an application needs as a file is written there too,
 //!   as a throwaway file, removed when the command ends or the next
-//!   application is tried. [`sweep`] removes the whole folder at bring-up
-//!   and at quit. A command's try is no row in the list of runs.
+//!   application is tried. Each knobas has its own folder there, which
+//!   [`sweep`] removes at quit; [`sweep_left`] removes, at bring-up, what an
+//!   earlier session could not. A command's try is no row in the list of
+//!   runs.
 //! - **The sizes are Code's.** A file is read up to the 50 MiB a renderer is
 //!   handed in Code (`view::BYTES_CAP`), pasted text the same; a folder up to
 //!   what a folder renderer copies from a working tree.
@@ -59,17 +61,36 @@ pub enum TryOn {
     Path { path: String },
 }
 
-/// Where a try's throwaway files and generated folders go: a folder of the
-/// system's temp folder, never the profile.
-#[must_use]
-pub fn root() -> PathBuf {
+/// The folder of the system's temp folder every knobas's tries go under, one
+/// folder per process in it ([`root`]).
+fn tries() -> PathBuf {
     std::env::temp_dir().join("knobas-try")
 }
 
-/// Remove everything a try left (bring-up, quit): nothing under [`root`] is
-/// meant to outlive a session.
+/// Where this knobas's throwaway files and tried generated folders go: its
+/// own folder under the system temp folder's `knobas-try/`, never the
+/// profile. Its own, because another knobas (the other profile, a demo, a
+/// headless one a check started) clears what its session left without
+/// touching this one's.
+#[must_use]
+pub fn root() -> PathBuf {
+    tries().join(std::process::id().to_string())
+}
+
+/// Remove what this knobas's tries left (quit): nothing under [`root`] is
+/// meant to outlive the session.
 pub fn sweep() {
     let _ = std::fs::remove_dir_all(root());
+}
+
+/// At bring-up: [`sweep`], for a process number used before, and what an
+/// earlier session left that it could not remove (a crash), once untouched
+/// for twelve hours, as the folder renders' copies are swept
+/// ([`copy::sweep`]): a knobas still running whose tries have not touched
+/// its folder for that long may lose what they left, as a copy would.
+pub fn sweep_left() {
+    sweep();
+    copy::sweep(&tries());
 }
 
 /// The folder renderers' registry for tries: copies under the same root as
@@ -445,7 +466,7 @@ fn walk(dir: &Path, only: Option<&str>) -> Result<Vec<Item>, String> {
                 format!("{rel}/{name}")
             };
             if meta.is_dir() {
-                if name == ".git" {
+                if name.eq_ignore_ascii_case(".git") {
                     continue;
                 }
                 items.push(Item {
@@ -603,6 +624,21 @@ mod tests {
         assert!(rels.contains(&("hosts", ItemKind::Symlink)));
         let only = walk(dir.path(), Some("top.txt")).unwrap();
         assert_eq!(only.len(), 1, "a chosen file is a folder holding only it");
+    }
+
+    /// Each knobas's tries are in a folder of its own under `knobas-try/`, so another knobas's quit (which removes
+    /// [`root`]) never reaches them. Not swept here: the other tests of this process write under it.
+    #[test]
+    fn each_knobas_tries_in_a_folder_of_its_own() {
+        let mine = root();
+        assert_eq!(mine.parent(), Some(tries().as_path()));
+        assert_eq!(
+            mine.file_name().and_then(|n| n.to_str()),
+            Some(std::process::id().to_string().as_str())
+        );
+        let made = Throwaway::write("test", "own.md", "x").unwrap();
+        assert!(made.dir.starts_with(&mine), "{}", made.dir.display());
+        made.remove();
     }
 
     #[test]

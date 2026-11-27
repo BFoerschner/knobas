@@ -390,7 +390,11 @@ impl Runs {
 
     /// Hold `dir`, a try's throwaway folder, until the run ends; at once when it already has.
     pub fn throwaway(&self, handle: &RunHandle, dir: PathBuf) {
-        if lock(&handle.row).ended.is_some() {
+        // The row stays locked until the folder is held: [`Self::end`] marks the row ended under that lock before it
+        // takes the folder, so a run ending now either finds it held or is seen ended here.
+        let row = lock(&handle.row);
+        if row.ended.is_some() {
+            drop(row);
             let _ = std::fs::remove_dir_all(dir);
         } else {
             *lock(&handle.throwaway) = Some(dir);
@@ -563,6 +567,8 @@ impl Runs {
                 }
             }
         }
+        // A try (#2562) is no row in the list of runs, live or ended: its dialog reads it by its id.
+        rows.retain(|r| r.entity_id != crate::try_on::TRY_ENTITY);
         if let Some(entity) = entity_id {
             rows.retain(|r| r.entity_id == entity);
         }
