@@ -13,7 +13,8 @@
 <script lang="ts">
   import type { ApiAnswer, SentLine } from "../../ipc/api";
   import TfOasBody from "./TfOasBody.svelte";
-  import { statusTone, sizeWords, type BodyView } from "./oas-answer";
+  import { sized } from "../../render/pipeline";
+  import { statusTone, type BodyView } from "./oas-answer";
   import type { Sending } from "./oas.svelte";
 
   let {
@@ -55,7 +56,7 @@
       <span class="tf-oas-code3 tf-{statusTone(ok.status)}">{ok.status}</span>
       <span>{ok.reason}</span>
       <span class="tf-dim">{ok.total_ms.toLocaleString("en")} ms</span>
-      <span class="tf-dim">{sizeWords(ok.bytes)}</span>
+      <span class="tf-dim">{sized(ok.bytes)}</span>
       {#if ok.content_type !== ""}<span class="tf-dim tf-oas-code">{ok.content_type}</span>{/if}
       <span class="tf-trail">
         <span class="tf-seg" role="group" aria-label="Show">

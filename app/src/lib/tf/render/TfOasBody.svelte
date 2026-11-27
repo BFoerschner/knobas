@@ -32,7 +32,7 @@
   import { push } from "../../shell/toasts.svelte";
   import TfFilePipeline from "./TfFilePipeline.svelte";
   import { docViewModule } from "./doc/doc-module";
-  import { answerName, bodyKind, sizeWords, type BodyKind, type BodyView } from "./oas-answer";
+  import { answerName, bodyKind, type BodyKind, type BodyView } from "./oas-answer";
 
   let {
     answer,
@@ -87,7 +87,7 @@
     let live = true;
     refused = null;
     if (steps.length === 0 && !untrack(() => drawable)) {
-      shown = { key, none: `${answer.content_type || "A body"} of ${sizeWords(answer.bytes)}, not drawn here. A pipeline can make text of it.` };
+      shown = { key, none: `${answer.content_type || "A body"} of ${sized(answer.bytes)}, not drawn here. A pipeline can make text of it.` };
       return;
     }
     running = true;
@@ -97,7 +97,7 @@
         : apiAnswerPiped(id, untrack(() => name), steps).then((run): Shown => {
             if (run.outcome === "failed") return { key, failure: run.failure };
             if (run.output.kind === "bytes") return { key, none: `The pipeline made ${sized(run.output.size)} that are not text. Add a step that makes text of them.` };
-            if (run.output.text.length > DRAWN) return { key, none: `The pipeline made ${sizeWords(run.output.text.length)} of text, more than knobas draws here. Save it to Downloads.` };
+            if (run.output.text.length > DRAWN) return { key, none: `The pipeline made ${sized(run.output.text.length)} of text, more than knobas draws here. Save it to Downloads.` };
             return { key, text: run.output.text, name: run.name };
           });
     read.then(

@@ -12,11 +12,6 @@ export function statusTone(status: number): "ok" | "warn" | "err" {
   return status < 300 ? "ok" : status < 400 ? "warn" : "err";
 }
 
-/** A size in words: `512 B`, `2.1 KB`, `3.4 MB`. */
-export function sizeWords(n: number): string {
-  return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** The ending an answer's file takes for its content type. */
 function endingOf(contentType: string): string {
   const t = contentType.split(";")[0]!.trim().toLowerCase();

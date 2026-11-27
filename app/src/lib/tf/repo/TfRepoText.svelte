@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import type { TextFound } from "../../ipc/entity";
-  import { thousands } from "../counted";
+  import { counted, thousands } from "../counted";
   import type { TextSearch } from "./text-search.svelte";
 
   let {
@@ -32,14 +32,10 @@
 
   const found = $derived(search.found);
 
-  function plural(n: number, one: string, many: string): string {
-    return `${thousands(n)} ${n === 1 ? one : many}`;
-  }
-
   /** What was searched and where, in one line. */
   function said(found: TextFound): string {
     const lines = found.files.reduce((sum, file) => sum + file.hits.length + file.more, 0);
-    const what = found.files.length === 0 ? "No line matches" : `${plural(lines, "line", "lines")} in ${plural(found.files.length, "file", "files")}`;
+    const what = found.files.length === 0 ? "No line matches" : `${counted(lines, "line", "lines", thousands)} in ${counted(found.files.length, "file", "files", thousands)}`;
     const where =
       found.from === "working_tree"
         ? "in the working tree"
@@ -94,14 +90,14 @@
         >
       {/each}
       {#if file.more > 0}
-        <p class="tf-txmore">{plural(file.more, "more line", "more lines")} in this file</p>
+        <p class="tf-txmore">{counted(file.more, "more line", "more lines", thousands)} in this file</p>
       {/if}
     {/each}
     {#if found.cut}
       <p class="tf-gonote">The search stopped at its first lines: narrow the words to see the rest.</p>
     {/if}
     {#if found.skipped > 0}
-      <p class="tf-gonote">{plural(found.skipped, "binary or large file was", "binary or large files were")} not searched.</p>
+      <p class="tf-gonote">{counted(found.skipped, "binary or large file was", "binary or large files were", thousands)} not searched.</p>
     {/if}
     {#if found.from === "index"}
       <p class="tf-gonote">No clone on this computer holds this commit, so knobas's copy of the default branch was searched. A clone searches any branch.</p>
