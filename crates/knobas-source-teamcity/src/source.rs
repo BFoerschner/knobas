@@ -3,7 +3,7 @@
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
     ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError, SyncItem,
-    WriteOp, WriteReceipt,
+    UnderAnswer, WriteOp, WriteReceipt,
 };
 
 use crate::client::{HttpRest, Rest, connection_info};
@@ -197,10 +197,11 @@ impl Source for TeamCitySource {
     /// holds the queued build its receipt names before the run after the
     /// write starts.
     ///
-    /// A build configuration is [`RefreshAnswer::NotOffered`]: the one write
-    /// aimed at it, a parameter set, changes nothing its item carries (the
-    /// listing's id, name, project and description), so the run that follows
-    /// the write is all it needs. An entity of another instance is refused,
+    /// A build configuration is [`RefreshAnswer::NotOffered`] here: the one
+    /// write aimed at it, a parameter set, changes nothing its item carries
+    /// (the listing's id, name, project and description), so the run that
+    /// follows the write is all it needs. Its builds are read under it
+    /// ([`Self::refresh_under`]). An entity of another instance is refused,
     /// as a write's target is ([`Self::key_of`]).
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         if !self.key_of(entity)?.starts_with("build:") {
@@ -208,6 +209,33 @@ impl Source for TeamCitySource {
         }
         let id = self.build_id(entity)?;
         sync::refresh(&self.id, &self.base_url, &self.cfg, &self.rest, id).await
+    }
+
+    /// A build configuration read with its newest builds ([`sync::refresh_under`],
+    /// #2564, ADR-0047 as amended 2026-11-27): what ⌘R on a repository's Builds
+    /// tab asks of each of its pipelines, so a build started at TeamCity since
+    /// the last run shows without a run of the source. It writes the builds
+    /// above the watermark and moves no watermark. A build is read by id
+    /// ([`Self::refresh`]) and never asked here.
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<UnderAnswer, SourceError> {
+        if !self.key_of(entity)?.starts_with("buildType:") {
+            return Ok(UnderAnswer::NotOffered);
+        }
+        let config = self.build_config_id(entity)?;
+        let config = crate::ids::config_id(entity, &config)?;
+        sync::refresh_under(
+            &self.id,
+            &self.base_url,
+            &self.cfg,
+            &self.rest,
+            config,
+            cursor,
+        )
+        .await
     }
 
     /// Perform one of the two writes M2 ratified for TeamCity, or the

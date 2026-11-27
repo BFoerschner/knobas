@@ -5877,7 +5877,7 @@ async fn a_queued_build_reads_back_at_once_as_the_sync_emits_it_and_a_deleted_on
     assert!(!item.deleted);
 
     // The sync's in-flight poll emits the same build: the same item.
-    let (items, _) = full(&*source).await;
+    let (items, cursor) = full(&*source).await;
     let synced = items
         .iter()
         .find(|i| i.entity.to_string() == entity)
@@ -5897,6 +5897,30 @@ async fn a_queued_build_reads_back_at_once_as_the_sync_emits_it_and_a_deleted_on
         matches!(config, RefreshAnswer::NotOffered),
         "a build configuration is not offered, not {config:?}"
     );
+
+    // ...but walked for its newest builds (#2564): the queued build is above
+    // the watermark the run held below it, so the walk of its configuration
+    // answers it as the run did, over this server's own locator grammar, and
+    // moves no watermark.
+    let walked = match source
+        .refresh_under(
+            &format!("teamcity:buildType:{QUICK_CONFIGURATION}"),
+            Some(&cursor),
+        )
+        .await
+        .expect("the walk")
+    {
+        knobas_source::UnderAnswer::Walked {
+            items,
+            cursor: None,
+        } => items,
+        other => panic!("the walk of the configuration, not {other:?}"),
+    };
+    let found = walked
+        .iter()
+        .find(|i| i.entity.to_string() == entity)
+        .unwrap_or_else(|| panic!("the walk finds the queued {entity}: {:?}", keys(&walked)));
+    assert_eq!(found.payload, synced.payload, "the walk maps as the run");
 
     // The same build, out of this source's scope: gone, as no run of a
     // source configured so would emit it.

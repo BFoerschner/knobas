@@ -116,6 +116,8 @@
     walk?: (entityId: string) => Promise<EntityRefresh>;
     /** The Builds tab's read of a run in flight at its source (#2558); `refresh_entity` behind, the bridge's when left out. */
     follow?: (runId: string) => Promise<unknown>;
+    /** ⌘R's read of one of the Builds tab's pipelines with its newest runs at its source (#2564); `refresh_entity`, the bridge's when left out. */
+    walkPipeline?: (pipelineId: string) => Promise<unknown>;
     /** *New branch…* and *Commit change…*'s standing (#2241); none refused when left out. */
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
     /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
@@ -1683,6 +1685,7 @@
                   shown={one === slot}
                   listen={ports.listen}
                   follow={ports.follow}
+                  walk={ports.walkPipeline}
                   again={() => (repoId === null ? undefined : readBuilds(repoId, true))}
                 />
               {:else if one === "prs"}

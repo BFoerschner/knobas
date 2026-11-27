@@ -77,6 +77,9 @@ struct Remote {
     /// The keys a walk under REPO-1 answers as deleted: an item under the
     /// parent the source dropped, or the parent itself.
     walk_deleted: Mutex<Vec<&'static str>>,
+    /// Whether the walk leaves the position where it was though it wrote
+    /// rows, as a TeamCity build configuration's walk does (#2564).
+    walk_keeps_position: Mutex<bool>,
     /// BUILD-2 as the source holds it: `None` until a trigger queues it, then
     /// `queued`, `running` or `finished`.
     run_state: Mutex<Option<&'static str>>,
@@ -230,9 +233,10 @@ impl Source for Fake {
                 ..ticket(key, "dropped")
             });
         }
+        let keeps = *self.0.walk_keeps_position.lock().unwrap();
         Ok(knobas_source::UnderAnswer::Walked {
             items,
-            cursor: Some(format!("{} walked", cursor.unwrap_or("none"))),
+            cursor: (!keeps).then(|| format!("{} walked", cursor.unwrap_or("none"))),
         })
     }
 
@@ -409,6 +413,7 @@ async fn fixture(name: &str) -> Fixture {
         syncs_entered: AtomicUsize::new(0),
         walks: Mutex::new(Vec::new()),
         walk_finds: Mutex::new(true),
+        walk_keeps_position: Mutex::new(false),
         walk_deleted: Mutex::new(Vec::new()),
         run_state: Mutex::new(None),
     });
@@ -1377,6 +1382,36 @@ async fn a_refresh_under_a_parent_writes_what_it_walked_and_moves_the_position_w
             ended: RefreshEnd::Refreshed,
         }]
     );
+    f.state.scheduler.shutdown().await;
+}
+
+/// A walk that wrote rows and answered no position (a TeamCity build
+/// configuration's newest builds, #2564, ADR-0047 as amended 2026-11-27)
+/// writes them and leaves the stored position byte for byte: the next run
+/// reads from where it stood.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_walk_that_answers_no_position_writes_its_rows_and_leaves_the_position() {
+    let f = fixture("refresh_under_keeps").await;
+    sqlx::query("update knobas.source_config set cursor = 'c-7' where id = $1")
+        .bind(SOURCE)
+        .execute(&f.state.pool)
+        .await
+        .unwrap();
+    *f.remote.title.lock().unwrap() = "started at the source".to_owned();
+    *f.remote.walk_keeps_position.lock().unwrap() = true;
+
+    let answer = refresh::of_reader(&f.state.scheduler, REPO).await;
+    assert!(
+        matches!(answer, Ok(refresh::EntityRefresh::Refreshed)),
+        "{answer:?}"
+    );
+    assert_eq!(
+        live_title(&f.state.pool, TICKET).await.as_deref(),
+        Some("started at the source"),
+        "what the walk found is written"
+    );
+    assert_eq!(stored_cursor(&f.state.pool).await.as_deref(), Some("c-7"));
+    assert_eq!(finished_runs(&f.state.pool, SOURCE).await, 1, "no run");
     f.state.scheduler.shutdown().await;
 }
 

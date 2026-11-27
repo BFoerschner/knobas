@@ -1895,6 +1895,38 @@ test("⌘R on the Builds tab reads that repository and its runs in flight at the
   expect(verdict()).toBe("Every pipeline that ran on main passed.");
 });
 
+test("⌘R on the Builds tab reads each of that repository's pipelines at its source, one at a time, and draws what it found (#2564)", async () => {
+  const { state, repoPipelines } = runningOnMain();
+  const probe = refreshProbe();
+  const walked: string[] = [];
+  let open = 0;
+  let most = 0;
+  // A pipeline's read at TeamCity finds what the last run had not: Payout_Build's run has finished since.
+  const walkPipeline = async (id: string) => {
+    walked.push(id);
+    open += 1;
+    most = Math.max(most, open);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    open -= 1;
+    if (id === "tc:buildType:Payout_Build") state.done = true;
+    return { outcome: "refreshed" as const };
+  };
+  const follow = async () => ({ outcome: "refreshed" as const });
+  await draw([REPO, "builds", "main"], ports({ getEntity: repoDetail(), refresh: probe.ports, repoPipelines, listen: ears().listen, follow, walkPipeline }));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await settle();
+  expect(walked).toEqual([]);
+
+  pressRefreshKey();
+  await settle();
+  await settle();
+  expect(walked).toEqual(["tc:buildType:Payout_Build", "tc:buildType:Payout_Lint"]);
+  // One source's refreshes take its lock in turn: two at once would find it held, and the second would read nothing.
+  expect(most).toBe(1);
+  expect(probe.synced).toEqual([]);
+  expect(verdict()).toBe("Every pipeline that ran on main passed.");
+});
+
 // ---- The working tree in the branch box (2026-11-21; Björn: "I would like to be able to select the current work tree in
 // the branch selection, not just the branches") ----
 
