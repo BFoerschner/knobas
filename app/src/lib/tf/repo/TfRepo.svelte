@@ -114,6 +114,8 @@
     refresh?: DetailRefreshPorts;
     /** The page's own walk of its repository when shown (the pr-state fix); `refresh_entity` behind, the bridge's when left out. */
     walk?: (entityId: string) => Promise<EntityRefresh>;
+    /** The Builds tab's read of a run in flight at its source (#2558); `refresh_entity` behind, the bridge's when left out. */
+    follow?: (runId: string) => Promise<unknown>;
     /** *New branch…* and *Commit change…*'s standing (#2241); none refused when left out. */
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
     /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
@@ -668,13 +670,16 @@
   let buildsFailed = $state<string | null>(null);
   let buildsFor: string | null = null;
   let buildsReads = 0;
-  /** The repository a read is on its way for: a second ask while it is (a return reads the lists and the tab) is that read. */
+  /**
+   * The repository a read is on its way for: a second ask while it is (a return reads the lists and the tab) is that
+   * read. A `fresh` one is not: a run the tab draws moved after that read was asked (#2558), so it asks again.
+   */
   let buildsAsking: string | null = null;
-  function readBuilds(id: string): void {
-    if (buildsAsking === id) return;
+  function readBuilds(id: string, fresh = false): Promise<void> {
+    if (buildsAsking === id && !fresh) return Promise.resolve();
     buildsAsking = id;
     const at = ++buildsReads;
-    (ports.repoPipelines ?? repoPipelines)(id)
+    return (ports.repoPipelines ?? repoPipelines)(id)
       .then(
         (answer) => {
           if (at !== buildsReads || repoId !== id) return;
@@ -1669,6 +1674,10 @@
                   failed={buildsFailed}
                   runs={ports.pipelineRuns}
                   {refreshed}
+                  shown={one === slot}
+                  listen={ports.listen}
+                  follow={ports.follow}
+                  again={() => (repoId === null ? undefined : readBuilds(repoId, true))}
                 />
               {:else if one === "prs"}
                 <TfRepoPrs {ports} {repoId} rows={shownPrs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
