@@ -1,0 +1,94 @@
+<!doctype html>
+<!--
+  Builds with Recent integrated (#2554, bubbles as #2555 rules them), a clickdummy, 2026-11-27.
+
+  Today Builds has two views behind a *Pipelines / Recent* switch that changes place: the rail with one pipeline's
+  page, or one run table across every pipeline with no rail. Here it is one page. The rail's first row is
+  *All pipelines*; what the rail has selected (everything, a folder, a pipeline) is whose runs the one table on the
+  right lists, newest first. No switch. README.md has the layout, what was weighed, the row, the states, what the
+  backend has to read first and the open questions; alternatives.html draws the layouts that lost.
+
+  Drawn on the app's own stylesheets (tf.css and its parts under app/src/lib/tf/css/, with the app's own fonts).
+  stream.css is the whole addition: its first block is the proposed change to builds.css, its second the yellow bar.
+
+  Open this file from the repository (a static server at its root, or the file itself). The yellow bar at the bottom
+  right is not part of the app: it switches the scope, the state and the theme, plays the live changes a sync brings
+  and replays the first open slowed down. ?scope=all|fold|pipeline, ?state=ready|reading|none|nomatch,
+  ?theme=light|dark and ?away=1 do the same from the address; &bar=0 hides the bar.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Builds with Recent integrated</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../../app/src/lib/tf/tf.css">
+<link rel="stylesheet" href="stream.css">
+</head>
+<body>
+<div class="tf">
+  <header class="tf-top">
+    <span class="tf-brand">knobas</span>
+    <nav class="tf-nav" aria-label="Main">
+      <a href="#" id="nav-tickets">Tickets</a>
+      <a href="#">Inbox <span class="tf-count">10</span></a>
+      <a href="#">Code</a>
+      <a href="#" id="nav-builds" aria-current="page">Builds</a>
+      <a href="#">Docs</a>
+      <a href="#">Monitors <span class="tf-count tf-err">1</span></a>
+      <a href="#">Time</a>
+    </nav>
+    <span class="tf-spacer"></span>
+    <button type="button" class="tf-search" aria-label="Search everything">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>
+      <span class="tf-label">Search</span><kbd>⌘K</kbd>
+    </button>
+  </header>
+
+  <main class="tf-main">
+    <div class="tf-bv">
+      <nav id="rail" class="tf-pl tf-rail" aria-label="Pipelines"></nav>
+      <div class="tf-shost"><section class="tf-scroller tf-bmain" tabindex="-1"><div class="tf-sclip"><div class="tf-sbody">
+        <div id="head"></div>
+        <div id="bar" class="tf-runbar tf-recentbar"></div>
+        <div id="runs" class="tf-runs tf-stream"></div>
+      </div></div></section></div>
+    </div>
+  </main>
+
+  <footer class="tf-status">
+    <a class="tf-sources" href="#">Sources</a>
+    <span class="tf-healthy"><span>Tidewater TeamCity synced 14:31</span></span>
+  </footer>
+  <div class="tf-toasts" id="toasts"></div>
+</div>
+
+<div class="mk" role="group" aria-label="Mockup switches">
+  <b>Mockup</b>
+  <button type="button" data-mk="scope" data-v="all">All pipelines</button>
+  <button type="button" data-mk="scope" data-v="fold">A folder</button>
+  <button type="button" data-mk="scope" data-v="pipeline">A pipeline</button>
+  <i>State</i>
+  <button type="button" data-mk="state" data-v="ready">Read</button>
+  <button type="button" data-mk="state" data-v="reading">Reading</button>
+  <button type="button" data-mk="state" data-v="none">No runs</button>
+  <button type="button" data-mk="state" data-v="nomatch">No match</button>
+  <i>Live</i>
+  <button type="button" data-mk="step">Next change</button>
+  <button type="button" data-mk="play">Play</button>
+  <button type="button" data-mk="replay">Replay the first open</button>
+  <i>Top bar</i>
+  <button type="button" data-mk="away" data-v="0">On Builds</button>
+  <button type="button" data-mk="away" data-v="1">From Tickets</button>
+  <i>Theme</i>
+  <button type="button" data-mk="theme" data-v="light">Light</button>
+  <button type="button" data-mk="theme" data-v="dark">Dark</button>
+  <a href="alternatives.html">What was weighed</a>
+  <span class="mk-said" id="mk-said" aria-live="polite"></span>
+</div>
+
+<script src="data.js"></script>
+<script src="rail.js"></script>
+<script src="main.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
