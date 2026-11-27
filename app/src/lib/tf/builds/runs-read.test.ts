@@ -320,3 +320,28 @@ test("the backend hears a section change once the page has had its turn, the las
     vi.useRealTimers();
   }
 });
+
+test("leaving a visit the backend heard draws its green, yellow and grey gone at once, not once the backend hears", async () => {
+  vi.useFakeTimers();
+  try {
+    let held = countsOf({ [TESTS]: { green: 2, red: 1 }, [LINT]: { grey: 1 } }, { visiting: true, fresh: ["r:pass"] });
+    const inFront = vi.fn(async (front: boolean) => {
+      if (!front) held = countsOf({ [TESTS]: { red: 1 } });
+      return true;
+    });
+    const runs = store({ inFront, counts: vi.fn(async () => held) });
+    runs.settleMs = 600;
+    const came = runs.inFront(true);
+    await vi.advanceTimersByTimeAsync(600);
+    await came;
+    void runs.inFront(false);
+    expect(runs.topBar, "at the leave").toEqual({ ...noCounts(), red: 1 });
+    expect(runs.countsOf(LINT)).toEqual(noCounts());
+    expect(runs.bubble({ entity_id: "r:pass", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:04:00Z", state: { text: "ok", tone: "ok" } })).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(inFront.mock.calls).toEqual([[true], [false]]);
+    expect(runs.topBar, "as the backend answers").toEqual({ ...noCounts(), red: 1 });
+  } finally {
+    vi.useRealTimers();
+  }
+});

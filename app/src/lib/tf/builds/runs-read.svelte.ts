@@ -252,9 +252,22 @@ export class RunsRead {
   inFront(front: boolean): Promise<void> {
     if (front !== this.#front) {
       this.#front = front;
+      // Leaving a visit the backend heard moves the instant to now, so the visit's green, yellow and grey are seen: drawn
+      // gone at once, as the read after the leave will say. Kept, the top bar showed them until the backend heard.
+      if (!front && this.#told === true) this.#seen();
       this.#tell();
     }
     return this.#heard();
+  }
+
+  /** Every pipeline's green, yellow and grey drawn gone: the instant moved past them. */
+  #seen(): void {
+    const counts = this.#counts;
+    if (counts === null) return;
+    const left = (c: BubbleCounts): BubbleCounts => ({ ...c, green: 0, yellow: 0, grey: 0 });
+    const pipelines = counts.pipelines.map((p) => ({ ...p, counts: left(p.counts) })).filter((p) => p.counts.blue + p.counts.red > 0);
+    this.#counts = { ...counts, pipelines, total: left(counts.total), fresh: [] };
+    this.#fresh = new Set();
   }
 
   /**
