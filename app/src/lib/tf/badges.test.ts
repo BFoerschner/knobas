@@ -28,6 +28,7 @@ function answer(total: Partial<BubbleCounts> = {}, visiting = false): RunCounts 
 /** A runs store whose counts come from `counts`, as the window's one reads them. */
 function runsWith(counts: () => Promise<RunCounts>): RunsRead {
   const store = new RunsRead();
+  store.settleMs = 0;
   store.ports = { ...store.ports, counts, inFront: () => Promise.resolve(true) };
   return store;
 }

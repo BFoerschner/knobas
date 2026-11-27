@@ -233,31 +233,72 @@ export class RunsRead {
   }
 
   /**
-   * Builds came in front (`front`), or stopped being in front: the shell's section change. Coming in front, the
-   * backend holds the visit's start; leaving, it moves the instant green counts from. The counts are read again after.
+   * How long after a section change the backend hears it. The page just pressed reads first: told at the press, the
+   * write and the counts' read queued its reads behind them (the open budget, Builds' first open at 6x on a 4K screen,
+   * drawn at 328 to 387 ms against 180). A run that ends inside it counts as before the change.
    */
-  async inFront(front: boolean): Promise<void> {
-    if (front === this.#front) return;
-    this.#front = front;
-    try {
-      await this.ports.inFront(front);
-    } catch {
-      // The instant stays where it was: the next leave moves it.
+  settleMs = 600;
+  /** What the backend last heard, `null` before it heard anything this session. */
+  #told: boolean | null = null;
+  #telling: ReturnType<typeof setTimeout> | null = null;
+  /** Who waits on the backend hearing the latest change. */
+  #waiting: (() => void)[] = [];
+
+  /**
+   * Builds came in front (`front`), or stopped being in front: the shell's section change. The top bar follows at once;
+   * the backend hears it {@link RunsRead.settleMs} later, the last change only. Coming in front, it holds the visit's
+   * start; leaving, it moves the instant green counts from. The counts are read again after. Resolves once it heard.
+   */
+  inFront(front: boolean): Promise<void> {
+    if (front !== this.#front) {
+      this.#front = front;
+      this.#tell();
     }
-    await this.readCounts();
+    return this.#heard();
   }
 
   /**
    * The shell's start, off Builds: a visit a crash left open ends, so its start no longer bounds the counts. On Builds
    * the start is {@link RunsRead.inFront} instead.
    */
-  async started(): Promise<void> {
-    try {
-      await this.ports.inFront(false);
-    } catch {
-      // As above.
+  started(): Promise<void> {
+    this.#front = false;
+    this.#told = null;
+    this.#tell();
+    return this.#heard();
+  }
+
+  /** The window's shell went (unmounted): a change the backend has not heard yet is dropped; the quit leaves Builds itself. */
+  untell(): void {
+    if (this.#telling !== null) clearTimeout(this.#telling);
+    this.#telling = null;
+    for (const resolve of this.#waiting.splice(0)) resolve();
+  }
+
+  /** The backend hears {@link RunsRead.#front} once the page has had its turn; a later change takes the earlier's place. */
+  #tell(): void {
+    if (this.#telling !== null) clearTimeout(this.#telling);
+    this.#telling = setTimeout(() => void this.#flush(), this.settleMs);
+  }
+
+  #heard(): Promise<void> {
+    return this.#telling === null ? Promise.resolve() : new Promise((resolve) => this.#waiting.push(resolve));
+  }
+
+  async #flush(): Promise<void> {
+    this.#telling = null;
+    const front = this.#front;
+    if (front !== this.#told) {
+      this.#told = front;
+      try {
+        await this.ports.inFront(front);
+      } catch {
+        // The instant stays where it was: the next change tells it again.
+        this.#told = null;
+      }
     }
     await this.readCounts();
+    for (const resolve of this.#waiting.splice(0)) resolve();
   }
 
   /** Read the marks once; a second call waits on the first. A read that fails leaves every failure unread. */
@@ -434,6 +475,9 @@ export class RunsRead {
     this.#counts = null;
     this.#fresh = new Set();
     this.#front = false;
+    this.untell();
+    this.#told = null;
+    this.settleMs = 600;
     this.afterOpen = null;
     this.ports = REAL;
   }

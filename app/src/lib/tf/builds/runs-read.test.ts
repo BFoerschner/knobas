@@ -29,6 +29,7 @@ const byId = (runs: string[]): MarkScope => ({ everything: false, pipelines: [],
 
 function store(ports: Partial<RunsReadPorts> = {}): RunsRead {
   const runs = new RunsRead();
+  runs.settleMs = 0;
   runs.ports = {
     read: vi.fn(async () => reading([])),
     mark: vi.fn(async (scope: MarkScope) => reading(scope.runs)),
@@ -297,4 +298,25 @@ test("a folder's Mark all as read clears its pipelines' counts and no other's", 
   expect(runs.countsOf(TESTS)).toEqual(noCounts());
   expect(runs.countsOf(LINT).red).toBe(1);
   await pressed;
+});
+
+test("the backend hears a section change once the page has had its turn, the last change only; the top bar follows at once", async () => {
+  vi.useFakeTimers();
+  try {
+    const inFront = vi.fn(async () => true);
+    const runs = store({ inFront, counts: vi.fn(async () => countsOf({ [TESTS]: { green: 2 } })) });
+    runs.settleMs = 600;
+    await runs.readCounts();
+    void runs.inFront(true);
+    expect(runs.topBar?.green, "at once").toBe(0);
+    void runs.inFront(false);
+    const heard = runs.inFront(true);
+    await vi.advanceTimersByTimeAsync(599);
+    expect(inFront, "the page reads first").not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await heard;
+    expect(inFront.mock.calls).toEqual([[true]]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

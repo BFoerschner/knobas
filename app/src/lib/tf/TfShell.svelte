@@ -696,6 +696,7 @@
       buildsAsked = true;
     });
   });
+  $effect(() => () => runsRead.untell());
   // Which sources' pages open inside knobas (ADR-0050): until they answer, every address opens the browser, as before.
   onReady(ready, () => siteSettings, (list) => siteStore.hold(list));
   // *Sites kept open*, which the native side holds once read.
