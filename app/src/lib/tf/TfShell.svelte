@@ -684,6 +684,19 @@
     void badges.refresh();
     void sharedInbox.refresh();
   };
+  // Builds in front, or not (#2568, ADR-0063): leaving it moves the instant green counts from. The first answer, off
+  // Builds, ends a visit a crash left open.
+  let buildsAsked = false;
+  $effect(() => {
+    if (!lifecycle.ready) return;
+    const front = sectionOf(route) === "builds";
+    untrack(() => {
+      if (!buildsAsked && !front) void runsRead.started();
+      else void runsRead.inFront(front);
+      buildsAsked = true;
+    });
+  });
+  $effect(() => () => runsRead.untell());
   // Which sources' pages open inside knobas (ADR-0050): until they answer, every address opens the browser, as before.
   onReady(ready, () => siteSettings, (list) => siteStore.hold(list));
   // *Sites kept open*, which the native side holds once read.

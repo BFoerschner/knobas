@@ -53,6 +53,21 @@ export function failedRun(run: Pick<RunRow, "finished" | "state">): boolean {
   return run.finished !== null && run.state?.tone === "err";
 }
 
+/** The five bubbles a run can count in (ADR-0063, #2567's ruling), most critical first after blue. */
+export type Bubble = "blue" | "green" | "yellow" | "red" | "grey";
+
+/**
+ * Which bubble `run` would count in, whatever its marks (ADR-0063): the backend's `run_bubble!`. Finished: `ok` green,
+ * `warn` yellow, `err` red, any other tone or none grey. Started and not finished: blue. Neither (queued): none.
+ */
+export function runBubble(run: Pick<RunRow, "started" | "finished" | "state">): Bubble | null {
+  if (run.finished !== null) {
+    const tone = run.state?.tone;
+    return tone === "ok" ? "green" : tone === "warn" ? "yellow" : tone === "err" ? "red" : "grey";
+  }
+  return run.started !== null ? "blue" : null;
+}
+
 /**
  * Whether `run` asks for attention (ux18): finished failed and not among the runs marked read. Before the marks are
  * read (`read` `null`) every failure asks, as it did before there were marks.

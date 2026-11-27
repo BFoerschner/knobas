@@ -1,9 +1,17 @@
 /** The marks a person's runs carry (`runs-read.svelte.ts`, ux18, ADR-0063): one store for the window, every mark drawn at once. */
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { MarkScope, RunMarks, RunRow } from "../../ipc/entity";
+import type { BubbleCounts, MarkScope, RunCounts, RunMarks, RunRow, SeenMove } from "../../ipc/entity";
 import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
-import { RunsRead, type RunsReadPorts } from "./runs-read.svelte";
+import { noCounts, RunsRead, type RunsReadPorts } from "./runs-read.svelte";
+
+/** `run_counts`' answer over `by`, each pipeline's counts. */
+function countsOf(by: Record<string, Partial<BubbleCounts>>, extra: Partial<RunCounts> = {}): RunCounts {
+  const pipelines = Object.entries(by).map(([pipeline, counts]) => ({ pipeline, counts: { ...noCounts(), ...counts } }));
+  const total = noCounts();
+  for (const { counts } of pipelines) for (const key of Object.keys(total) as (keyof BubbleCounts)[]) total[key] += counts[key];
+  return { pipelines, total, visiting: false, fresh: [], ...extra };
+}
 
 function failed(id: string, extra: Partial<RunRow> = {}): Pick<RunRow, "entity_id" | "finished" | "state"> {
   return { entity_id: id, finished: "2026-08-22T10:04:00Z", state: { text: "FAILURE", tone: "err" }, ...extra };
@@ -21,11 +29,16 @@ const byId = (runs: string[]): MarkScope => ({ everything: false, pipelines: [],
 
 function store(ports: Partial<RunsReadPorts> = {}): RunsRead {
   const runs = new RunsRead();
+  runs.settleMs = 0;
   runs.ports = {
     read: vi.fn(async () => reading([])),
     mark: vi.fn(async (scope: MarkScope) => reading(scope.runs)),
     unmark: vi.fn(async (ids: string[]) => ids),
     open: vi.fn(async () => true),
+    counts: vi.fn(async () => countsOf({})),
+    moveSeen: vi.fn(async () => null),
+    putBackSeen: vi.fn(async () => true),
+    inFront: vi.fn(async () => true),
     ...ports,
   };
   return runs;
@@ -214,4 +227,121 @@ test("Mark all as read turns the runs an open pipeline page holds at once, and a
   await runs.markUnread(["teamcity:build:1", "teamcity:build:70", "teamcity:build:71"]);
   void runs.markAll({ runs: [], pipelines: ["teamcity:buildType:A"] });
   expect(runs.unread(failed("teamcity:build:70")), "the page was let go").toBe(true);
+});
+
+// -- the counts by bubble (#2568) ---------------------------------------------
+
+const TESTS = "teamcity:buildType:Payout_Tests";
+const LINT = "teamcity:buildType:Payout_Lint";
+
+test("a folder sums its pipelines, a pipeline with no unread run counts zero, and the top bar holds no green while Builds is in front", async () => {
+  const runs = store({ counts: vi.fn(async () => countsOf({ [TESTS]: { blue: 1, green: 2, red: 1 }, [LINT]: { yellow: 1, grey: 3 } })) });
+  expect(runs.topBar, "nothing until read").toBeNull();
+  await runs.readCounts();
+  expect(runs.countsOf(TESTS, LINT)).toEqual({ blue: 1, green: 2, yellow: 1, red: 1, grey: 3 });
+  expect(runs.countsOf("teamcity:buildType:Other")).toEqual(noCounts());
+  expect(runs.topBar).toEqual({ blue: 1, green: 2, yellow: 1, red: 1, grey: 3 });
+  await runs.inFront(true);
+  expect(runs.topBar).toEqual({ blue: 1, green: 0, yellow: 0, red: 1, grey: 0 });
+  expect(runs.countsOf(TESTS).green, "the rail keeps the visit's green").toBe(2);
+  await runs.inFront(false);
+  expect(runs.topBar?.green).toBe(2);
+});
+
+test("a run's bubble: blue unless marked, red unless read, green, yellow and grey only among the visit's", async () => {
+  const runs = store({
+    read: vi.fn(async () => ({ read: ["r:read"], while_running: ["r:swept"] })),
+    counts: vi.fn(async () => countsOf({}, { visiting: true, fresh: ["r:pass", "r:warn"] })),
+  });
+  await runs.load();
+  await runs.readCounts();
+  const ran = { started: "2026-08-22T10:00:00Z", finished: null, state: null };
+  const ended = (tone: "ok" | "warn" | "err" | "muted") => ({ started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:04:00Z", state: { text: tone, tone } });
+  expect(runs.bubble({ entity_id: "r:run", ...ran })).toBe("blue");
+  expect(runs.bubble({ entity_id: "r:swept", ...ran }), "marked while running").toBeNull();
+  expect(runs.bubble({ entity_id: "r:queued", started: null, finished: null, state: null })).toBeNull();
+  expect(runs.bubble({ entity_id: "r:fail", ...ended("err") })).toBe("red");
+  expect(runs.bubble({ entity_id: "r:read", ...ended("err") })).toBeNull();
+  expect(runs.bubble({ entity_id: "r:swept", ...ended("err") }), "it failed since").toBe("red");
+  expect(runs.bubble({ entity_id: "r:pass", ...ended("ok") })).toBe("green");
+  expect(runs.bubble({ entity_id: "r:warn", ...ended("warn") })).toBe("yellow");
+  expect(runs.bubble({ entity_id: "r:old", ...ended("ok") }), "before the instant").toBeNull();
+  expect(runs.bubble({ entity_id: "r:cancel", ...ended("muted") })).toBeNull();
+});
+
+test("Mark all as read at All pipelines takes every count to zero at once, and Undo brings the same green back", async () => {
+  let held = countsOf({ [TESTS]: { green: 2, red: 1 }, [LINT]: { grey: 1 } });
+  const moved: SeenMove = { to: "2026-11-27T12:00:00Z", everything: true, at: "2026-11-27T08:00:00Z", pipelines: [] };
+  let answer: (marks: RunMarks) => void = () => {};
+  const mark = vi.fn(() => new Promise<RunMarks>((resolve) => (answer = resolve)));
+  const moveSeen = vi.fn(async () => ((held = countsOf({})), moved));
+  const putBackSeen = vi.fn(async () => ((held = countsOf({ [TESTS]: { green: 2 }, [LINT]: { grey: 1 } })), true));
+  const runs = store({ counts: vi.fn(async () => held), mark, moveSeen, putBackSeen });
+  await runs.readCounts();
+  const pressed = runs.markAll({ runs: [], pipelines: [], everything: true });
+  expect(runs.topBar, "drawn at once").toEqual(noCounts());
+  answer(reading(["teamcity:build:9"]));
+  await pressed;
+  await vi.waitFor(() => expect(runs.topBar).toEqual(noCounts()));
+  expect(moveSeen).toHaveBeenCalledWith({ everything: true, pipelines: [], runs: [] });
+  expect(toasts.items.at(-1)?.text, "the row and the instant's three").toBe("Marked 4 runs as read");
+
+  toasts.items.at(-1)?.action?.run();
+  await vi.waitFor(() => expect(runs.topBar).toEqual({ ...noCounts(), green: 2, grey: 1 }));
+  expect(putBackSeen).toHaveBeenCalledWith(moved);
+});
+
+test("a folder's Mark all as read clears its pipelines' counts and no other's", async () => {
+  const runs = store({ counts: vi.fn(async () => countsOf({ [TESTS]: { green: 2 }, [LINT]: { red: 1 } })) });
+  await runs.readCounts();
+  const pressed = runs.markAll({ runs: [], pipelines: [TESTS] });
+  expect(runs.countsOf(TESTS)).toEqual(noCounts());
+  expect(runs.countsOf(LINT).red).toBe(1);
+  await pressed;
+});
+
+test("the backend hears a section change once the page has had its turn, the last change only; the top bar follows at once", async () => {
+  vi.useFakeTimers();
+  try {
+    const inFront = vi.fn(async () => true);
+    const runs = store({ inFront, counts: vi.fn(async () => countsOf({ [TESTS]: { green: 2 } })) });
+    runs.settleMs = 600;
+    await runs.readCounts();
+    void runs.inFront(true);
+    expect(runs.topBar?.green, "at once").toBe(0);
+    void runs.inFront(false);
+    const heard = runs.inFront(true);
+    await vi.advanceTimersByTimeAsync(599);
+    expect(inFront, "the page reads first").not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await heard;
+    expect(inFront.mock.calls).toEqual([[true]]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("leaving a visit the backend heard draws its green, yellow and grey gone at once, not once the backend hears", async () => {
+  vi.useFakeTimers();
+  try {
+    let held = countsOf({ [TESTS]: { green: 2, red: 1 }, [LINT]: { grey: 1 } }, { visiting: true, fresh: ["r:pass"] });
+    const inFront = vi.fn(async (front: boolean) => {
+      if (!front) held = countsOf({ [TESTS]: { red: 1 } });
+      return true;
+    });
+    const runs = store({ inFront, counts: vi.fn(async () => held) });
+    runs.settleMs = 600;
+    const came = runs.inFront(true);
+    await vi.advanceTimersByTimeAsync(600);
+    await came;
+    void runs.inFront(false);
+    expect(runs.topBar, "at the leave").toEqual({ ...noCounts(), red: 1 });
+    expect(runs.countsOf(LINT)).toEqual(noCounts());
+    expect(runs.bubble({ entity_id: "r:pass", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:04:00Z", state: { text: "ok", tone: "ok" } })).toBeNull();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(inFront.mock.calls).toEqual([[true], [false]]);
+    expect(runs.topBar, "as the backend answers").toEqual({ ...noCounts(), red: 1 });
+  } finally {
+    vi.useRealTimers();
+  }
 });

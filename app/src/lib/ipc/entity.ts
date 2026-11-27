@@ -13,7 +13,9 @@ import { viewDate } from "../time/format";
 import type {
   ArchiveIndex,
   MarkScope,
+  RunCounts,
   RunMarks,
+  SeenMove,
   ClassOutline,
   ActionItemTicket,
   CardRows,
@@ -125,8 +127,12 @@ import type { QueuedWrite, WriteOpPayload } from "./sources";
 import type { DayWindow } from "./time";
 
 export type {
+  BubbleCounts,
   MarkScope,
+  PipelineCounts,
+  RunCounts,
   RunMarks,
+  SeenMove,
   ArchiveIndex,
   ClassOutline,
   Lib,
@@ -546,9 +552,30 @@ export function markRunsUnread(runs: string[]): Promise<string[]> {
   return invoke<string[]>("mark_runs_unread", { runs });
 }
 
-/** The top bar's Builds count (ux18, `unread_failing_builds`): pipelines whose newest run failed and is unread. */
-export function unreadFailingBuilds(): Promise<number> {
-  return invoke<number>("unread_failing_builds");
+/**
+ * The unread runs of every pipeline the Builds list draws, by bubble (#2568, ADR-0063, `run_counts`): what the top bar,
+ * the rail and the rows draw. A folder sums its pipelines.
+ */
+export function runCounts(): Promise<RunCounts> {
+  return invoke<RunCounts>("run_counts");
+}
+
+/**
+ * A scope's *Mark all as read* on green, yellow and grey (ADR-0063, `move_seen`): the scope's instant moves to now.
+ * Answers what it moved, for *Undo* ({@link putBackSeen}); `null` for runs by id alone.
+ */
+export function moveSeen(scope: MarkScope): Promise<SeenMove | null> {
+  return invoke<SeenMove | null>("move_seen", { scope });
+}
+
+/** *Undo* of {@link moveSeen} (`put_back_seen`), unless leaving Builds moved the instant since. */
+export function putBackSeen(seen: SeenMove): Promise<boolean> {
+  return invoke<boolean>("put_back_seen", { seen });
+}
+
+/** Builds came in front, or stopped being in front (ADR-0063, `builds_in_front`): leaving moves the green's instant. */
+export function buildsInFront(front: boolean): Promise<boolean> {
+  return invoke<boolean>("builds_in_front", { front });
 }
 
 /** The pipelines on the job of a ticket, by entity id (#850). */

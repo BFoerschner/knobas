@@ -29,7 +29,10 @@ import type {
   PipelineSettings,
   RecentCursor,
   RecentFilter,
+  BubbleCounts,
+  RunCounts,
   RunMarks,
+  SeenMove,
   RunPreset,
   RunRow,
   Setting,
@@ -45,6 +48,7 @@ import { fakeRoleScope } from "./corpus";
 import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { recentOrder } from "../../../tf/builds/recent";
+import { runBubble } from "../../../tf/builds/builds";
 import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -118,6 +122,102 @@ const pins = new Set(["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_
 const readRuns = new Set<string>();
 /** The runs marked while they ran (ADR-0063): out of the blue only. */
 const whileRunningRuns = new Set<string>();
+
+/**
+ * The instants green, yellow and grey count from (#2568, the backend's `builds.seen`): when Builds was last left, each
+ * pipeline's own, and the visit's start while Builds is in front. `at` starts four hours back, so the fixture's
+ * recent passes are green. A run's stamp is its finish, the fixture's one clock.
+ */
+const seen: { at: string; pipelines: Map<string, string>; visit: string | null } = {
+  at: new Date(Date.now() - 4 * 3_600_000).toISOString(),
+  pipelines: new Map(),
+  visit: null,
+};
+
+/** The five counts, all zero. */
+function noCounts(): BubbleCounts {
+  return { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+}
+
+/**
+ * `run_counts` over `pipelines`' runs (the backend's `RUN_COUNTS`), or the five numbers `fake-counts=b,g,y,r,x` names
+ * for the whole, on one pipeline: what a shot of each colour draws.
+ */
+function fakeRunCounts(pipelines: readonly { id: string; runs: readonly RunRow[] }[], override: string | null): RunCounts {
+  const visiting = seen.visit !== null;
+  if (override !== null) {
+    const [blue = 0, green = 0, yellow = 0, red = 0, grey = 0] = override.split(",").map((n) => Number(n) || 0);
+    const counts = { blue, green, yellow, red, grey };
+    const any = blue + green + yellow + red + grey > 0;
+    return { pipelines: any && pipelines[0] ? [{ pipeline: pipelines[0].id, counts }] : [], total: counts, visiting, fresh: [] };
+  }
+  const answer: RunCounts = { pipelines: [], total: noCounts(), visiting, fresh: [] };
+  const visit = seen.visit === null ? Infinity : Date.parse(seen.visit);
+  for (const { id, runs } of pipelines) {
+    const instant = Math.max(Date.parse(seen.at), Date.parse(seen.pipelines.get(id) ?? seen.at));
+    const counts = noCounts();
+    for (const run of new Map(runs.map((one) => [one.entity_id, one])).values()) {
+      const bubble = runBubble(run);
+      if (bubble === null || readRuns.has(run.entity_id)) continue;
+      if (bubble === "blue") {
+        if (!whileRunningRuns.has(run.entity_id)) counts.blue += 1;
+        continue;
+      }
+      if (bubble !== "red") {
+        const at = Date.parse(run.finished ?? "");
+        if (!(at > instant && at <= visit)) continue;
+        if (visiting) answer.fresh.push(run.entity_id);
+      }
+      counts[bubble] += 1;
+    }
+    if (Object.values(counts).some((n) => n > 0)) {
+      answer.pipelines.push({ pipeline: id, counts });
+      for (const key of Object.keys(counts) as (keyof BubbleCounts)[]) answer.total[key] += counts[key];
+    }
+  }
+  return answer;
+}
+
+/** `move_seen`: the scope's instant moved to now; `null` for runs by id alone. */
+function fakeMoveSeen(scope: Partial<MarkScope>): SeenMove | null {
+  const everything = scope.everything === true;
+  if (!everything && (scope.pipelines ?? []).length === 0) return null;
+  const to = new Date().toISOString();
+  const moved: SeenMove = { to, everything, at: everything ? seen.at : null, pipelines: [] };
+  if (everything) seen.at = to;
+  else
+    for (const pipeline of new Set(scope.pipelines)) {
+      moved.pipelines.push({ pipeline, before: seen.pipelines.get(pipeline) ?? null });
+      seen.pipelines.set(pipeline, to);
+    }
+  return moved;
+}
+
+/** `put_back_seen`: each instant the move moved goes back, unless it moved since. */
+function fakePutBackSeen(moved: SeenMove): boolean {
+  let back = false;
+  if (moved.everything && seen.at === moved.to && moved.at !== null) ((seen.at = moved.at), (back = true));
+  for (const { pipeline, before } of moved.pipelines) {
+    if (seen.pipelines.get(pipeline) !== moved.to) continue;
+    if (before === null) seen.pipelines.delete(pipeline);
+    else seen.pipelines.set(pipeline, before);
+    back = true;
+  }
+  return back;
+}
+
+/** `builds_in_front`: coming in front holds the visit's start; leaving moves the instant to now. */
+function fakeBuildsInFront(front: boolean): boolean {
+  if (front) {
+    seen.visit ??= new Date().toISOString();
+    return true;
+  }
+  if (seen.visit === null) return false;
+  seen.visit = null;
+  seen.at = new Date().toISOString();
+  seen.pipelines.clear();
+  return true;
+}
 
 /** Whether a fixture run is a finished failure, the only kind that can be unread. */
 function failedFake(run: RunRow): boolean {
@@ -889,13 +989,21 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       for (const id of gone) (readRuns.delete(id), whileRunningRuns.delete(id));
       return gone;
     },
-    unread_failing_builds: () => {
+    run_counts: (): RunCounts => {
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
-      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk].filter((pipeline) => {
-        const latest = pipeline.recent[0];
-        return latest !== undefined && failedFake(latest) && !readRuns.has(latest.entity_id);
-      }).length;
+      const all = history(new Date());
+      const drawn = fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id));
+      return fakeRunCounts(
+        [
+          ...drawn.map((pipeline) => ({ id: pipeline.entity_id, runs: all.get(configOf(pipeline.entity_id)) ?? pipeline.recent })),
+          ...bulk.map((pipeline) => ({ id: pipeline.entity_id, runs: pipeline.recent })),
+        ],
+        params.get("fake-counts"),
+      );
     },
+    move_seen: (args) => fakeMoveSeen((args["scope"] as Partial<MarkScope> | undefined) ?? {}),
+    put_back_seen: (args) => fakePutBackSeen(args["seen"] as SeenMove),
+    builds_in_front: (args) => fakeBuildsInFront(args["front"] === true),
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");
       if (args["pinned"] === true) pins.add(id);
@@ -983,4 +1091,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(pins, presets, readRuns, whileRunningRuns);
+keepSeed(pins, presets, readRuns, whileRunningRuns, seen);

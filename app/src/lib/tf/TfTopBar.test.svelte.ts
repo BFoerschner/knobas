@@ -168,3 +168,72 @@ test("Zen mode's one button stands after the nav only when the shell gives it, p
   expect(button.getAttribute("aria-pressed")).toBe("true");
   expect(button.title).toBe("Leave Zen mode (Z)");
 });
+
+/** The top bar mounted with Builds' counts `builds`, in place of the bare one. */
+function withBuilds(builds: { blue?: number; green?: number; yellow?: number; red?: number; grey?: number } | null): HTMLElement {
+  if (view) unmount(view);
+  const counts = builds === null ? null : { blue: 0, green: 0, yellow: 0, red: 0, grey: 0, ...builds };
+  view = mount(TfTopBar, {
+    target,
+    props: {
+      current: null,
+      job: null,
+      inbox: { count: 0 },
+      badges: { builds: counts, monitors: null },
+      timer: { current: null, elapsed: null },
+      onsearch: () => {},
+      ontimer: undefined,
+      ontheme: () => {},
+    } as never,
+  });
+  flushSync();
+  return target.querySelector<HTMLElement>('a[data-section="builds"]')!;
+}
+
+test("Builds draws one bubble: the unread total, coloured by the most critical state, red first", () => {
+  const builds = withBuilds({ blue: 1, green: 2, yellow: 1, red: 3, grey: 1 });
+  const bubble = builds.querySelector(".tf-bubble")!;
+  expect(bubble.getAttribute("data-tone")).toBe("red");
+  const total = bubble.querySelector(":scope > .tf-count")!;
+  expect(total.textContent).toBe("8");
+  expect(total.classList.contains("tf-err")).toBe(true);
+  // The expansion: each state above zero, most critical first, blue last.
+  const parts = [...bubble.querySelectorAll(".tf-bubble-more .tf-count")];
+  expect(parts.map((part) => [part.getAttribute("data-bubble"), part.textContent])).toEqual([
+    ["red", "3"],
+    ["yellow", "1"],
+    ["green", "2"],
+    ["grey", "1"],
+    ["blue", "1"],
+  ]);
+  expect(builds.textContent?.replace(/\s+/g, " ")).toContain("unread runs: 3 failed, 1 passed with warnings, 2 passed, 1 cancelled, 1 running");
+});
+
+test("the bubble's colour steps down: yellow, then green, then grey; blue only when nothing finished is unread", () => {
+  const tone = (counts: Parameters<typeof withBuilds>[0]) => withBuilds(counts).querySelector(".tf-bubble")?.getAttribute("data-tone");
+  expect(tone({ yellow: 1, green: 4, blue: 2 })).toBe("yellow");
+  expect(tone({ green: 4, grey: 1, blue: 2 })).toBe("green");
+  expect(tone({ grey: 1, blue: 2 })).toBe("grey");
+  expect(tone({ blue: 2 })).toBe("blue");
+  const grey = withBuilds({ grey: 1, blue: 2 }).querySelector(".tf-bubble > .tf-count")!;
+  expect(grey.className.trim(), "grey is the plain count").toBe("tf-count");
+  const parts = [...withBuilds({ red: 1 }).querySelectorAll(".tf-bubble-more .tf-count")];
+  expect(parts.map((part) => part.getAttribute("data-bubble")), "a state at zero is not drawn").toEqual(["red"]);
+});
+
+test("no bubble at zero, after Mark all as read, or before the counts are read", () => {
+  expect(withBuilds({}).querySelector(".tf-bubble")).toBeNull();
+  expect(withBuilds(null).querySelector(".tf-bubble")).toBeNull();
+  expect(withBuilds({}).querySelector(".tf-count")).toBeNull();
+});
+
+test("the counts by state show on hover over the bubble and on the entry's keyboard focus, lying over the nav", () => {
+  const rules = css("chrome.css");
+  expect(rules).toMatch(/\.tf-bubble:hover > \.tf-bubble-more, \.tf-nav a:focus-visible \.tf-bubble-more \{ display: inline-flex; \}/);
+  const builds = withBuilds({ red: 1, blue: 1 });
+  const more = builds.querySelector<HTMLElement>(".tf-bubble-more")!;
+  expect(getComputedStyle(more).position, "out of the flow: nothing moves").toBe("absolute");
+  expect(getComputedStyle(more).display, "hidden at rest").toBe("none");
+  expect(getComputedStyle(more).pointerEvents, "never in the way of the entry beside it").toBe("none");
+  expect(builds.tabIndex >= 0 || builds.hasAttribute("href"), "the entry takes the keyboard's focus").toBe(true);
+});

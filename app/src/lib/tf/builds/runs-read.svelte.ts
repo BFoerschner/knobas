@@ -19,12 +19,34 @@
  *   activity line, which the Inbox and the top bar re-read on.
  * - Every mark is drawn at once and written behind it; a write that fails puts the marks back and says so. *Mark all as
  *   read* says how many it marked, with *Undo*, which takes back exactly those.
+ * - **The counts by bubble** (#2568, {@link RunsRead.counts}): each pipeline's blue, green, yellow, red and grey, read
+ *   whole by one call ({@link RunsRead.readCounts}) on the events the top bar follows and after every mark. A folder
+ *   sums its pipelines ({@link RunsRead.countsOf}); the top bar draws {@link RunsRead.topBar}. Green, yellow and grey
+ *   count from an instant the backend keeps: when Builds was last left ({@link RunsRead.inFront}), moved by *Mark all as
+ *   read* and put back by its *Undo*. While Builds is in front the backend holds the visit's start, so the visit's
+ *   green stays drawn and a run that ends while you look adds none.
  */
 import { ipcErrorMessage } from "../../ipc";
-import { markRunOpened, markRunsRead, markRunsUnread, readRuns, type MarkScope, type RunMarks, type RunRow } from "../../ipc/entity";
+import {
+  buildsInFront,
+  markRunOpened,
+  markRunsRead,
+  markRunsUnread,
+  moveSeen,
+  putBackSeen,
+  readRuns,
+  runCounts,
+  type BubbleCounts,
+  type MarkScope,
+  type RunCounts,
+  type RunMarks,
+  type RunRow,
+  type SeenMove,
+} from "../../ipc/entity";
+import { coalesce } from "../../shell/coalesce";
 import { push, undoable } from "../../shell/toasts.svelte";
 import { counted } from "../counted";
-import { unreadRun } from "./builds";
+import { runBubble, unreadRun, type Bubble } from "./builds";
 
 /** What the marks are read and written by. */
 export interface RunsReadPorts {
@@ -35,6 +57,14 @@ export interface RunsReadPorts {
   unmark(runs: string[]): Promise<string[]>;
   /** The run's page was shown; answers whether it wrote. */
   open(run: string): Promise<boolean>;
+  /** Every pipeline's unread runs by bubble. */
+  counts(): Promise<RunCounts>;
+  /** A scope's mark on green, yellow and grey: its instant moved; `null` for runs by id alone. */
+  moveSeen(scope: MarkScope): Promise<SeenMove | null>;
+  /** *Undo* of {@link RunsReadPorts.moveSeen}. */
+  putBackSeen(seen: SeenMove): Promise<boolean>;
+  /** Builds came in front, or left it. */
+  inFront(front: boolean): Promise<boolean>;
 }
 
 /** The bridge's, each named only when called, so a suite that mocks the bridge without them still loads this. */
@@ -43,7 +73,26 @@ const REAL: RunsReadPorts = {
   mark: async (scope) => markRunsRead(scope),
   unmark: async (runs) => markRunsUnread(runs),
   open: async (run) => markRunOpened(run),
+  counts: async () => runCounts(),
+  moveSeen: async (scope) => moveSeen(scope),
+  putBackSeen: async (seen) => putBackSeen(seen),
+  inFront: async (front) => buildsInFront(front),
 };
+
+/** The five counts, all zero. */
+export function noCounts(): BubbleCounts {
+  return { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+}
+
+/** `a` and `b` summed. */
+function plus(a: BubbleCounts, b: BubbleCounts): BubbleCounts {
+  return { blue: a.blue + b.blue, green: a.green + b.green, yellow: a.yellow + b.yellow, red: a.red + b.red, grey: a.grey + b.grey };
+}
+
+/** The runs green, yellow and grey count, of `counts`: what moving an instant clears. */
+function seenCount(counts: BubbleCounts): number {
+  return counts.green + counts.yellow + counts.grey;
+}
 
 /**
  * What *Mark all as read* acts on: the unread runs drawn, every run of the pipelines named, and with `everything` every
@@ -78,6 +127,29 @@ export class RunsRead {
   #writes = new Set<Promise<unknown>>();
   /** The runs opened this session, each written once. */
   #opened = new Set<string>();
+  /** Every pipeline's unread runs by bubble, `null` until read. Replaced whole by every read. */
+  #counts = $state.raw<RunCounts | null>(null);
+  /** The runs green, yellow and grey count while Builds is in front, for the rows' dots. */
+  #fresh = $state.raw<ReadonlySet<string>>(new Set());
+  /** Whether Builds is in front, as the shell last said ({@link RunsRead.inFront}). */
+  #front = $state(false);
+  /** The counts by pipeline, as {@link RunsRead.#counts} holds them. */
+  #byPipeline = $derived(new Map((this.#counts?.pipelines ?? []).map((p) => [p.pipeline, p.counts])));
+
+  /**
+   * Read every pipeline's counts again. Coalesced, as the top bar's reads are: any number of events while a read is
+   * out make one more after it. A read that fails keeps the last answer: a count that dropped to nothing on a failed
+   * read would say the trouble was over.
+   */
+  readCounts: () => Promise<void> = coalesce(async () => {
+    try {
+      const counts = await this.ports.counts();
+      this.#counts = counts;
+      this.#fresh = new Set(counts.fresh);
+    } catch {
+      // Keep the last answer; see above.
+    }
+  });
 
   /** `write`, held in {@link RunsRead.settled} until it answers. */
   #writing<T>(write: Promise<T>): Promise<T> {
@@ -125,6 +197,121 @@ export class RunsRead {
   /** Whether `run` is in the blue: started, not finished, and no mark of any kind. Queued is not blue. */
   inBlue(run: Pick<RunRow, "entity_id" | "started" | "finished">): boolean {
     return run.started !== null && run.finished === null && !(this.#read?.has(run.entity_id) ?? false) && !this.#whileRunning.has(run.entity_id);
+  }
+
+  /** Every pipeline's unread runs by bubble, `null` until read. */
+  get counts(): RunCounts | null {
+    return this.#counts;
+  }
+
+  /** One pipeline's unread runs by bubble, or a folder's (its pipelines summed): zero where none. */
+  countsOf(...pipelines: readonly string[]): BubbleCounts {
+    return pipelines.reduce((sum, id) => plus(sum, this.#byPipeline.get(id) ?? noCounts()), noCounts());
+  }
+
+  /**
+   * What the top bar counts, `null` until read: every pipeline's, and with Builds in front no green, yellow or grey,
+   * since you are looking at them.
+   */
+  get topBar(): BubbleCounts | null {
+    const total = this.#counts?.total;
+    if (total === undefined) return null;
+    return this.#front ? { ...total, green: 0, yellow: 0, grey: 0 } : total;
+  }
+
+  /**
+   * Which bubble `run` counts in now (ADR-0063), or `null`: blue running with no mark, red a failure no mark reads, and
+   * green, yellow or grey a run that ended in the visit's window and no mark reads. Those are known only while Builds is
+   * in front, which is where a row draws them.
+   */
+  bubble(run: Pick<RunRow, "entity_id" | "started" | "finished" | "state">): Bubble | null {
+    const bubble = runBubble(run);
+    if (bubble === null || (this.#read?.has(run.entity_id) ?? false)) return null;
+    if (bubble === "blue") return this.#whileRunning.has(run.entity_id) ? null : "blue";
+    if (bubble === "red") return "red";
+    return this.#fresh.has(run.entity_id) ? bubble : null;
+  }
+
+  /**
+   * How long after a section change the backend hears it. The page just pressed reads first: told at the press, the
+   * write and the counts' read queued its reads behind them (the open budget, Builds' first open at 6x on a 4K screen,
+   * drawn at 328 to 387 ms against 180). A run that ends inside it counts as before the change.
+   */
+  settleMs = 600;
+  /** What the backend last heard, `null` before it heard anything this session. */
+  #told: boolean | null = null;
+  #telling: ReturnType<typeof setTimeout> | null = null;
+  /** Who waits on the backend hearing the latest change. */
+  #waiting: (() => void)[] = [];
+
+  /**
+   * Builds came in front (`front`), or stopped being in front: the shell's section change. The top bar follows at once;
+   * the backend hears it {@link RunsRead.settleMs} later, the last change only. Coming in front, it holds the visit's
+   * start; leaving, it moves the instant green counts from. The counts are read again after. Resolves once it heard.
+   */
+  inFront(front: boolean): Promise<void> {
+    if (front !== this.#front) {
+      this.#front = front;
+      // Leaving a visit the backend heard moves the instant to now, so the visit's green, yellow and grey are seen: drawn
+      // gone at once, as the read after the leave will say. Kept, the top bar showed them until the backend heard.
+      if (!front && this.#told === true) this.#seen();
+      this.#tell();
+    }
+    return this.#heard();
+  }
+
+  /** Every pipeline's green, yellow and grey drawn gone: the instant moved past them. */
+  #seen(): void {
+    const counts = this.#counts;
+    if (counts === null) return;
+    const left = (c: BubbleCounts): BubbleCounts => ({ ...c, green: 0, yellow: 0, grey: 0 });
+    const pipelines = counts.pipelines.map((p) => ({ ...p, counts: left(p.counts) })).filter((p) => p.counts.blue + p.counts.red > 0);
+    this.#counts = { ...counts, pipelines, total: left(counts.total), fresh: [] };
+    this.#fresh = new Set();
+  }
+
+  /**
+   * The shell's start, off Builds: a visit a crash left open ends, so its start no longer bounds the counts. On Builds
+   * the start is {@link RunsRead.inFront} instead.
+   */
+  started(): Promise<void> {
+    this.#front = false;
+    this.#told = null;
+    this.#tell();
+    return this.#heard();
+  }
+
+  /** The window's shell went (unmounted): a change the backend has not heard yet is dropped; the quit leaves Builds itself. */
+  untell(): void {
+    if (this.#telling !== null) clearTimeout(this.#telling);
+    this.#telling = null;
+    for (const resolve of this.#waiting.splice(0)) resolve();
+  }
+
+  /** The backend hears {@link RunsRead.#front} once the page has had its turn; a later change takes the earlier's place. */
+  #tell(): void {
+    if (this.#telling !== null) clearTimeout(this.#telling);
+    this.#telling = setTimeout(() => void this.#flush(), this.settleMs);
+  }
+
+  #heard(): Promise<void> {
+    return this.#telling === null ? Promise.resolve() : new Promise((resolve) => this.#waiting.push(resolve));
+  }
+
+  async #flush(): Promise<void> {
+    this.#telling = null;
+    const front = this.#front;
+    if (front !== this.#told) {
+      this.#told = front;
+      try {
+        await this.ports.inFront(front);
+      } catch {
+        // The instant stays where it was: the next change tells it again.
+        this.#told = null;
+      }
+    }
+    await this.readCounts();
+    for (const resolve of this.#waiting.splice(0)) resolve();
   }
 
   /** Read the marks once; a second call waits on the first. A read that fails leaves every failure unread. */
@@ -193,6 +380,7 @@ export class RunsRead {
     this.#with(fresh);
     try {
       this.#wrote(await this.#writing(this.ports.mark({ everything: false, pipelines: [], runs: [...fresh] })), wasRunning);
+      void this.readCounts();
     } catch (cause) {
       this.#with([], fresh, wasRunning);
       push({ text: `Could not mark ${counted(fresh.length, "run", "runs")} as read: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -209,6 +397,7 @@ export class RunsRead {
     for (const id of marked) this.#opened.delete(id);
     try {
       await this.#writing(this.ports.unmark(marked));
+      void this.readCounts();
     } catch (cause) {
       this.#with(read, [], running);
       push({ text: `Could not mark ${counted(marked.length, "run", "runs")} as unread: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -226,27 +415,66 @@ export class RunsRead {
   /**
    * *Mark all as read*: the unread runs drawn, and those an open page of one of `scope.pipelines` holds
    * ({@link RunsRead.hold}), or every page held for `everything`, at once; every run of the scope, older pages
-   * included, by the backend. Says how many it marked, with *Undo*; a press that marked nothing says so.
+   * included, by the backend, and the scope's green, yellow and grey by moving its instant (ADR-0063). The scope's
+   * counts go to zero at once. Says how many it marked, with *Undo*, which takes back the rows and puts the instant
+   * back; a press that marked nothing says so.
    */
   async markAll(scope: MarkAll): Promise<string[]> {
     const everything = scope.everything ?? false;
     const held = everything ? [...this.#held.values()].flat() : scope.pipelines.flatMap((id) => this.#held.get(id) ?? []);
     const drawn = [...new Set([...scope.runs, ...held])].filter((id) => !(this.#read?.has(id) ?? false));
     const wasRunning = drawn.filter((id) => this.#whileRunning.has(id));
+    const reached = everything || scope.pipelines.length > 0;
+    const cleared = !reached ? 0 : everything ? seenCount(this.#counts?.total ?? noCounts()) : seenCount(this.countsOf(...new Set(scope.pipelines)));
     this.#with(drawn);
+    const countsBefore = this.#counts;
+    if (reached) this.#cleared(everything ? null : scope.pipelines);
+    const asked: MarkScope = { everything, pipelines: everything ? [] : [...scope.pipelines], runs: [...drawn] };
     let wrote: RunMarks;
+    let moved: SeenMove | null = null;
     try {
-      wrote = await this.#writing(this.ports.mark({ everything, pipelines: everything ? [] : [...scope.pipelines], runs: [...drawn] }));
+      [wrote, moved] = await this.#writing(
+        Promise.all([
+          this.ports.mark(asked),
+          // A move that fails leaves the green as it was; the rows' mark still stands.
+          reached ? this.ports.moveSeen(asked).catch(() => null) : Promise.resolve(null),
+        ]),
+      );
     } catch (cause) {
       this.#with([], drawn, wasRunning);
+      if (this.#counts !== null && countsBefore !== null) this.#counts = countsBefore;
       push({ text: `Could not mark the runs as read: ${ipcErrorMessage(cause)}`, tone: "err" });
       return [];
     }
     this.#wrote(wrote, wasRunning);
+    void this.readCounts();
     const ids = idsOf(wrote);
-    if (ids.length === 0) push({ text: "No unread runs", subject: "runs-read" });
-    else undoable(`Marked ${counted(ids.length, "run", "runs")} as read`, () => void this.markUnread(ids));
+    const marked = ids.length + (moved === null ? 0 : cleared);
+    if (marked === 0) push({ text: "No unread runs", subject: "runs-read" });
+    else undoable(`Marked ${counted(marked, "run", "runs")} as read`, () => void this.#undoAll(ids, moved));
     return ids;
+  }
+
+  /** *Undo* of {@link RunsRead.markAll}: its rows go, and the instant it moved goes back. */
+  async #undoAll(ids: readonly string[], moved: SeenMove | null): Promise<void> {
+    const rows = ids.length > 0 ? this.markUnread(ids) : Promise.resolve();
+    const seen = moved === null ? Promise.resolve(false) : this.ports.putBackSeen(moved).catch(() => false);
+    await Promise.all([rows, seen]);
+    void this.readCounts();
+  }
+
+  /** A scope's counts drawn cleared at once, `null` for every pipeline: the read after the mark says the rest. */
+  #cleared(pipelines: readonly string[] | null): void {
+    const counts = this.#counts;
+    if (counts === null) return;
+    if (pipelines === null) {
+      this.#counts = { ...counts, pipelines: [], total: noCounts(), fresh: [] };
+      this.#fresh = new Set();
+      return;
+    }
+    const gone = new Set(pipelines);
+    const kept = counts.pipelines.filter((p) => !gone.has(p.pipeline));
+    this.#counts = { ...counts, pipelines: kept, total: kept.reduce((sum, p) => plus(sum, p.counts), noCounts()) };
   }
 
   /** Back to nothing read and the real IPC, for a test. */
@@ -257,6 +485,12 @@ export class RunsRead {
     this.#held.clear();
     this.#writes.clear();
     this.#opened.clear();
+    this.#counts = null;
+    this.#fresh = new Set();
+    this.#front = false;
+    this.untell();
+    this.#told = null;
+    this.settleMs = 600;
     this.afterOpen = null;
     this.ports = REAL;
   }

@@ -1028,7 +1028,6 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::read_runs,
         commands::entity::mark_runs_read,
         commands::entity::mark_runs_unread,
-        commands::entity::unread_failing_builds,
         // The JAR view (PR #2479, ux19), appended at the foot (§10.8).
         commands::entity::archive_open,
         commands::entity::archive_nested,
@@ -1151,6 +1150,13 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // Opening a run reads it (spec #2566, ADR-0063, `0105`), appended at
         // the foot (§10.8).
         commands::entity::mark_run_opened,
+        // The counts by bubble and the instants green counts from (spec
+        // #2566, #2568, ADR-0063, `0106`), appended at the foot (§10.8); they
+        // replace `unread_failing_builds`.
+        commands::entity::run_counts,
+        commands::entity::move_seen,
+        commands::entity::put_back_seen,
+        commands::entity::builds_in_front,
     ]
 }
 
@@ -1190,6 +1196,11 @@ fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(passwords) = app.try_state::<passwords::PasswordsState>() {
         passwords.quit();
     }
+    // The quit while Builds is in front leaves it (ADR-0063), while the
+    // database still answers. Spelled from `crate::`: a line starting
+    // `commands::entity::` reads as a command to the handler list's mirror
+    // test (`commands::mirror::registered`).
+    crate::commands::entity::leave_builds_at_quit(app);
     sources::shutdown(app);
     backup::shutdown(app);
     shutdown_database(app);

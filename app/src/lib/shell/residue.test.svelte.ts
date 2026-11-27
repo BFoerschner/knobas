@@ -1244,7 +1244,8 @@ const CASES: Case[] = [
             listen: () => Promise.resolve(() => {}),
           }),
           badges: createBadges({
-            failingBuilds: () => deferred(0),
+            readBuilds: () => deferred(undefined),
+            builds: () => null,
             monitorsDown: () => deferred(0),
             listen: (event, handler) => mockedListen(event, handler),
           }),

@@ -606,6 +606,8 @@ test("a Builds folder's Mark N runs as read marks its pipelines' unread failures
   const marked: [string[], string[]][] = [];
   const unmarked: string[][] = [];
   runsRead.ports = {
+    // The counts and the instants as the bridge answers them (#2568): not what this case reads.
+    ...runsRead.ports,
     read: async () => ({ read: [], while_running: [] }),
     mark: async ({ runs, pipelines }) => (marked.push([[...runs], [...pipelines]]), { read: [...runs], while_running: [] }),
     unmark: async (runs) => (unmarked.push([...runs]), [...runs]),

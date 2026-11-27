@@ -359,6 +359,31 @@ is_default: boolean,
 pull: PullHead | null, };
 
 /**
+ * How many runs stand in each of the five bubbles (ADR-0063), unread.
+ */
+export type BubbleCounts = { 
+/**
+ * Running, no mark of any kind.
+ */
+blue: number, 
+/**
+ * Passed, ended after the instant, no mark reads it.
+ */
+green: number, 
+/**
+ * Passed with warnings, as green.
+ */
+yellow: number, 
+/**
+ * Failed, no mark reads it, however long ago.
+ */
+red: number, 
+/**
+ * Cancelled, or an end no tone names, as green.
+ */
+grey: number, };
+
+/**
  * One half of the uncommitted diff, as a diff block carries it.
  *
  * Issue #824.
@@ -3785,6 +3810,20 @@ export type PipeStep = { "step": "base64_decode" } | { "step": "base64_encode" }
 export type PipeWhy = "error" | "too_large" | "timed_out";
 
 /**
+ * One pipeline's unread runs by bubble. A pipeline with none is not
+ * answered.
+ */
+export type PipelineCounts = { 
+/**
+ * The pipeline's entity id.
+ */
+pipeline: string, 
+/**
+ * Its runs in each bubble.
+ */
+counts: BubbleCounts, };
+
+/**
  * Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
  * link set (#866) joins as one more arm without changing these.
  *
@@ -3853,6 +3892,19 @@ pinned: boolean, web_url: string | null, recent: Array<RunRow>,
  * counts, and what a mark of the pipeline writes as the list was read.
  */
 unread: Array<string>, };
+
+/**
+ * A pipeline's own instant before a mark moved it.
+ */
+export type PipelineSeen = { 
+/**
+ * The pipeline's entity id.
+ */
+pipeline: string, 
+/**
+ * Its own instant before, `None` where it had none.
+ */
+before: string | null, };
 
 /**
  * A pipeline's settings, read live (#851).
@@ -4442,6 +4494,32 @@ detail: string | null, };
 export type RuleTicket = { entity_id: string, title: string, mine: boolean, };
 
 /**
+ * The unread runs of every pipeline the Builds list draws, by bubble
+ * ([`run_counts`]): what the top bar, the rail and the rows draw. A folder
+ * is the sum of its pipelines; everything is [`RunCounts::total`].
+ */
+export type RunCounts = { 
+/**
+ * Each pipeline with an unread run, by entity id.
+ */
+pipelines: Array<PipelineCounts>, 
+/**
+ * Every pipeline's summed.
+ */
+total: BubbleCounts, 
+/**
+ * Whether Builds is in front ([`builds_in_front`]): then green, yellow
+ * and grey count only the runs that ended before it came in front, the
+ * visit's (question 2 on #2554), and [`RunCounts::fresh`] names them.
+ */
+visiting: boolean, 
+/**
+ * While [`RunCounts::visiting`], the runs green, yellow and grey count,
+ * so a row can draw its dot; empty otherwise.
+ */
+fresh: Array<string>, };
+
+/**
  * A range of a run's log (#854).
  */
 export type RunLog = { 
@@ -4631,6 +4709,28 @@ truncated: boolean, };
  *   text box would flatten.
  */
 export type SectionRefusal = "table" | "code" | "macro" | "formatting";
+
+/**
+ * What a scope's mark did to the instants ([`move_seen`]), which its *Undo*
+ * hands back to [`put_back_seen`].
+ */
+export type SeenMove = { 
+/**
+ * The instant it moved them to.
+ */
+to: string, 
+/**
+ * Whether it moved the one instant, `at` ([`MarkScope::everything`]).
+ */
+everything: boolean, 
+/**
+ * `at` before, where `everything`.
+ */
+at: string | null, 
+/**
+ * Each pipeline's own before, for [`MarkScope::pipelines`].
+ */
+pipelines: Array<PipelineSeen>, };
 
 /**
  * One named value of a [`Block::Settings`].

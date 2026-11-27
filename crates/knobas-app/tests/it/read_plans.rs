@@ -797,6 +797,13 @@ async fn assert_reads_plan_without_estimates(
     })
     .await;
     let mut runs_reads = vec![("builds list", builds)];
+    // The counts by bubble (#2568): the same range per pipeline, the marks
+    // and the stamps probed by key, refreshed on every run's move.
+    let counts = explain(&pool, knobas_core::run_read::RUN_COUNTS, |q| {
+        q.bind(declared.clone()).bind(fillers.clone())
+    })
+    .await;
+    runs_reads.push(("run counts", counts));
     for pipeline in ["ci:buildType:Cfg_7", "ci:buildType:Cfg_129"] {
         let plan = explain(&pool, knobas_core::builds::planned_pipeline_runs(), |q| {
             q.bind(declared.clone()).bind(pipeline).bind(100_i64)
