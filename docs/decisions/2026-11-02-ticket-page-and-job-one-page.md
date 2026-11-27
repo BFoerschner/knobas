@@ -31,6 +31,19 @@ against. *Resume work*, *Work on this* and a `#/job/…` address still choose, n
 job they replaced. The Tickets preview's rows are now the card's own (F-109), which is the later ticket
 this ruling left open.
 
+**Amended 2026-11-27 (#2559, Björn's ruling).** "`Esc` goes up one level (from the page to its opener, else
+Tickets; at home, nowhere)" no longer stands. `Esc` goes one level up the page's own section, whatever opened it, and
+never back to the page that opened it in another section: a ticket's page goes to Tickets (to the saved view it was
+opened from, where it was Tickets that opened it), and home still goes nowhere. A run, a repository or a doc page
+opened from a ticket's page goes up its own section, not back to the ticket. Back (the mouse's button, `⌘[`) steps
+through history. Every section's chain is written down in `parentOf` (`app/src/lib/tf/route.ts`): Tickets: ticket →
+Tickets; Code: file → repository → Code, commit → the repository's Commits tab → Code, pull request → its repository;
+Builds: run → pipeline → Builds; Docs: page → space → Docs; Secrets, Monitors, Assets, Link sets: a place → the
+section; Settings: a source's page → Sources, an application's, a command's or a folder renderer's page → its section,
+a child section → its parent. A section's own page and its tabs go nowhere, Settings' sections and Time's tabs
+included; so do an item's and a note's page. On a site the second `Esc` goes to the page knobas holds for where the
+site stands, else for the item it was opened at.
+
 ## Why
 
 The two pages looked almost the same and differed in the wrong things. To see which build failed

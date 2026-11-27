@@ -20,7 +20,7 @@ import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
 import { sessionFilter, sessionValue } from "./filter/filter-state.svelte";
 import { scopedTicket } from "./job/scoped.svelte";
-import { goAcross, goLaunched, goVisiting, goWithoutOpener, replaceAddress } from "./opener";
+import { goAcross, goLaunched, goWithoutOpener, replaceAddress } from "./opener";
 import type { SettingsPorts } from "./settings/ports";
 import { NAV, SECTION_NAME } from "./route";
 import { chosenJob } from "./job/chosen.svelte";
@@ -431,7 +431,7 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   }
 });
 
-test("Esc on a detail page reached with no opener goes to its structural parent; deeper inside a section, to the section's top page", async () => {
+test("Esc on a detail page reached with no opener goes to its parent in its own section (#2559)", async () => {
   start();
   const parents: [string, string][] = [
     ["#/build/pipe-1/run-4812", "#/builds/pipe-1"],
@@ -439,8 +439,10 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
     ["#/pr/gh:pr-12/files", "#/code"],
     ["#/repo/gh:repo-1", "#/code"],
     ["#/repo/gh:repo-1/branches", "#/code"],
-    // A commit opens under its repository's Commits tab: its parent is the repository's page.
-    ["#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1"],
+    // A commit opens under its repository's Commits tab, and goes up to it (#2559).
+    ["#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1/commits"],
+    // A pipeline picked on Builds goes up to Builds' own page (#2559).
+    ["#/builds/pipe-1", "#/builds"],
     // A branch or commit address the shell has not placed under a repository yet.
     ["#/branch/gh:b-1", "#/code"],
     ["#/commit/gh:c-9", "#/code"],
@@ -459,34 +461,65 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
   }
 });
 
+// #2559 (Björn, 2026-11-27): `Esc` is not Back. One page per section, opened from a page in another section: `Esc` goes
+// up the page's own section, or nowhere where it is the section's page, never back to what opened it.
+test.each([
+  ["Tickets", "#/inbox", "#/ticket/jira:PAY-240", "#/tickets"],
+  ["Code: a repository's tab", "#/ticket/jira%3APAY-231", "#/repo/gh:repo-1/commits", "#/code"],
+  ["Code: a commit", "#/ticket/jira%3APAY-231", "#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1/commits"],
+  ["Code: a pull request", "#/inbox", "#/pr/gh:pr-12", "#/code"],
+  ["Builds", "#/ticket/jira%3APAY-231", "#/builds/pipe-1", "#/builds"],
+  ["Docs", "#/ticket/jira%3APAY-231", "#/docs/space/ENG", "#/docs"],
+  ["Secrets", "#/ticket/jira%3APAY-231", "#/secrets/entry/e-1", "#/secrets"],
+  ["Monitors", "#/inbox", "#/monitors/at/kuma%3A3", "#/monitors"],
+  ["Assets", "#/ticket/jira%3APAY-231", "#/route/assets:route-1", "#/assets"],
+  ["Link sets", "#/ticket/jira%3APAY-231", "#/sets/set-1", "#/sets"],
+  ["Settings: a source's page", "#/code", "#/settings/source/jira", "#/settings/sources"],
+  ["Settings: a section", "#/code", "#/settings/appearance", null],
+  ["Inbox: a tab", "#/ticket/jira%3APAY-231", "#/inbox/mentions", null],
+  ["Time: the week", "#/ticket/jira%3APAY-231", "#/time/week", null],
+  ["an item's page", "#/ticket/jira%3APAY-231", "#/item/mock%3Arole-1", null],
+] as const)("%s, opened from another section, goes up its own section on Esc (#2559)", async (_, from, page, up) => {
+  start({ nav: windowNav });
+  await at(from);
+  await at(page);
+  press("Escape");
+  await settle();
+  expect(location.hash, `Esc on ${page} opened from ${from}`).toBe(up ?? page);
+});
+
 /** The window's own history, so `Esc` stepping back and `⌘]` going forward move the address for real. */
 const windowNav = { back: () => history.back(), forward: () => history.forward() };
 
-test("a run opened from a ticket page: Esc returns to the ticket page, and the hint said Back to its key (spec #2396)", async () => {
+test("Builds: a run opened from a ticket page goes up to its pipeline, never back to the ticket (#2559)", async () => {
   start({ nav: windowNav });
   await at("#/ticket/jira%3APAY-231/builds");
   await at("#/build/pipe-1/run-4812");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231/builds");
+  expect(location.hash).toBe("#/builds/pipe-1");
+  // Back is the way to the ticket: it steps through history.
+  press("[", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/build/pipe-1/run-4812");
 });
 
-test("a job's row opens a run by its bare id; the address the run page puts in its place keeps the ticket page as opener", async () => {
+test("a job's row opens a run by its bare id; once the run page puts its pipeline in the address, Esc goes up to that pipeline", async () => {
   start({ nav: windowNav });
   await at("#/ticket/jira%3APAY-231");
   await at("#/build/run-4812");
   // What Builds does once it knows the run's pipeline.
   replaceAddress("#/build/pipe-1/run-4812");
   await settle();
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash).toBe("#/builds/pipe-1");
 });
 
 // Björn, 2026-11-25: "exit to the current page of the web version if I browsed inside knobas then go back with double esc".
-test("a site browsed to another page knobas holds: Esc twice lands on that page in the site's place, and its Esc goes to what opened the site", async () => {
+test("a site browsed to another page knobas holds: Esc twice lands on that page in the site's place, and its Esc goes up Docs, never to what opened the site (#2559)", async () => {
   start({ nav: windowNav });
   await at("#/ticket/jira%3APAY-231");
   await at("#/site/wiki");
@@ -502,7 +535,7 @@ test("a site browsed to another page knobas holds: Esc twice lands on that page 
   expect(history.length, "the page took the site's entry").toBe(depth);
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash).toBe("#/docs");
   siteStore.reset();
 });
 
@@ -516,22 +549,22 @@ test("a run opened from the Builds list: Esc returns to the Builds list", async 
   expect(location.hash).toBe("#/builds/pipe-1");
 });
 
-test("a run opened from another run's link: Esc returns to that run, and a second Esc to that run's own opener", async () => {
+test("a run opened from another run's link goes up to its pipeline, then to Builds, never back along the links (#2559)", async () => {
   start({ nav: windowNav });
   await at("#/ticket/jira%3APAY-231");
   await at("#/build/pipe-1/run-4811");
   await at("#/build/pipe-1/run-4812");
-  expect(escHint()).toMatch(/^Back to Run\b/);
+  expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/build/pipe-1/run-4811");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(location.hash).toBe("#/builds/pipe-1");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash).toBe("#/builds");
+  expect(escHint()).toBeNull();
 });
 
-test("an application's page and a folder renderer's, opened from their list: Esc steps back to the list, not to the page Settings was opened from (2026-11-17)", async () => {
+test("an application's page and a folder renderer's, opened from their list: Esc steps back to the list, and the list goes nowhere (2026-11-17, #2559)", async () => {
   // Björn, ux17: "After adding a new application for open in it opens another page instead of going back to the checkouts and open…".
   // Settings was one page to the opener, so its pages kept the opener Settings had: Save, Cancel and Esc all went to Code.
   start({ nav: windowNav });
@@ -541,6 +574,7 @@ test("an application's page and a folder renderer's, opened from their list: Esc
     ["#/settings/checkouts", "#/settings/checkouts/add"],
     ["#/settings/renderers", "#/settings/renderers/folder/folder-listing"],
   ] as const) {
+    await at("#/code");
     await at(list);
     const before = history.length;
     await at(page);
@@ -554,35 +588,35 @@ test("an application's page and a folder renderer's, opened from their list: Esc
     press("Escape");
     await settle();
     await settle();
-    expect(location.hash, `Esc on ${list}`).toBe("#/code");
+    expect(location.hash, `Esc on ${list}`).toBe(list);
   }
 });
 
-test("a launcher jump says where it came from, to a detail and to a top page, and ends a trip (F-047)", async () => {
+test("a launcher jump goes up the page's own section on Esc, a top page nowhere, and ends a trip (F-047, #2559)", async () => {
   start({ nav: windowNav });
   await at("#/settings/keyboard");
   goLaunched("#/ticket/jira%3APAY-240");
   await settle();
-  expect(escHint()).toBe("Back to Keyboard Esc");
+  expect(escHint()).toBe("Back to Tickets Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/settings/keyboard");
+  expect(location.hash).toBe("#/tickets");
 
   await at("#/code");
   goLaunched("#/settings/sources");
   await settle();
-  expect(escHint()).toBe("Back to Code Esc");
+  expect(escHint()).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/code");
+  expect(location.hash).toBe("#/settings/sources");
 
   await at("#/builds");
   goLaunched("#/tickets");
   await settle();
-  expect(escHint()).toBe("Back to Builds Esc");
+  expect(escHint()).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/tickets");
 
   await at(TICKET);
   scopedTicket.open("code", ENTITY);
@@ -623,20 +657,22 @@ test("a pull request opened from Code, switched to its Files tab: Esc returns to
   expect(location.hash).toBe("#/code/repos");
 });
 
-test("after an Esc that stepped back, ⌘] goes forward to the detail again", async () => {
+test("after an Esc that stepped back to the parent that opened the page, ⌘] goes forward to the detail again", async () => {
   start({ nav: windowNav });
-  await at("#/ticket/jira%3APAY-231");
+  await at("#/builds/pipe-1");
   await at("#/build/pipe-1/run-4812");
+  const depth = history.length;
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash).toBe("#/builds/pipe-1");
   press("]", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/build/pipe-1/run-4812");
-  expect(escHint(), "the entry kept its own opener").toBe("Back to PAY-231 Esc");
+  expect(history.length, "Esc stepped back, it pushed nothing").toBe(depth);
+  expect(escHint()).toBe("Back to Builds Esc");
 });
 
-test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry's own opener", async () => {
+test("after ⌘[ and ⌘] through history, Esc on an entry goes up its own section, whatever opened it (#2559)", async () => {
   start({ nav: windowNav });
   await at("#/builds");
   await at("#/build/pipe-1/run-4811");
@@ -653,10 +689,10 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
   press("]", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/build/pipe-1/run-4812");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash).toBe("#/builds/pipe-1");
 });
 
 // ---- the way back is a chain, and a card row's narrowing goes with it (F-005, F-034, F-520, F-522) ----
@@ -664,7 +700,7 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
 const TICKET = "#/ticket/jira%3APAY-231";
 const ENTITY = "jira:PAY-231";
 
-test("a card row's trip through a repository's tab ends where it began: the bar and This job on the section, then the ticket", async () => {
+test("a card row's trip through a repository's tab: Esc goes up to Code with This job on it, and stops there; Back is the way to the ticket (#2559)", async () => {
   start({ nav: windowNav });
   await at(TICKET);
   scopedTicket.open("code", ENTITY);
@@ -674,15 +710,15 @@ test("a card row's trip through a repository's tab ends where it began: the bar 
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/code");
-  expect(escHint(), "the opener's own opener came back with it").toBe("Back to PAY-231 Esc");
+  expect(escHint(), "Code's own page goes nowhere, whatever opened it").toBeNull();
   expect(scopedTicket.section).toBe("code");
-  press("Escape");
+  const event = press("Escape");
   await settle();
-  expect(location.hash).toBe(TICKET);
-  expect(scopedTicket.section, "on the ticket the trip is over").toBeNull();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/code");
 });
 
-test("a detail in another section keeps the row's narrowing, so the way back finds the list as it was", async () => {
+test("a detail in another section keeps the row's narrowing, so Back finds the list as it was", async () => {
   start({ nav: windowNav });
   await at(TICKET);
   scopedTicket.open("monitors", ENTITY);
@@ -691,13 +727,14 @@ test("a detail in another section keeps the row's narrowing, so the way back fin
   expect(scopedTicket.section, "the detail is part of the trip").toBe("monitors");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/monitors");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
-  expect(sessionFilter("monitors").scope).toBe("job");
-  press("Escape");
+  // An asset sits in Assets, whatever opened it (#2559): the trip's section is left for the asset's own.
+  expect(location.hash).toBe("#/assets");
+  press("[", { metaKey: true });
   await settle();
-  expect(location.hash).toBe(TICKET);
-  expect(scopedTicket.section).toBeNull();
+  press("[", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/monitors");
+  expect(sessionFilter("monitors").scope).toBe("job");
 });
 
 test("⌘[ and ⌘] put a trip's narrowing back as each entry had it, and its bar with it", async () => {
@@ -713,7 +750,7 @@ test("⌘[ and ⌘] put a trip's narrowing back as each entry had it, and its ba
   await settle();
   expect(location.hash).toBe("#/builds");
   expect(scopedTicket.section).toBe("builds");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(escHint(), "Builds' own page goes nowhere on Esc (#2559)").toBeNull();
 });
 
 test("a nav entry or the launcher ends a trip, wherever it had got to, and stepping back to the trip brings it again", async () => {
@@ -745,7 +782,8 @@ test("Sub-tasks: a sub-task and back keeps the narrowing; a saved view ends it",
   await settle();
   expect(location.hash).toBe("#/tickets");
   expect(scopedTicket.subtasksOf).toBe(ENTITY);
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  // Tickets itself goes nowhere on Esc (#2559): what the hint names is the narrowing, a panel `Esc` closes first.
+  expect(escHint()).toBe("Back to All tickets Esc");
   await at("#/tickets/view-1");
   expect(scopedTicket.section).toBeNull();
 });
@@ -765,57 +803,47 @@ test("narrowing ended in place leaves the entry saying so: a detail and back doe
   expect(scopedTicket.section).toBeNull();
 });
 
-test("a top page opened to come back from says where it came from, and a set opened from it returns through it", async () => {
+test("Link sets: a set opened from a ticket's page goes up to Link sets, which goes nowhere (#2559)", async () => {
   start({ nav: windowNav });
   await at(TICKET);
-  goVisiting("#/sets");
-  await settle();
-  expect(escHint()).toBe("Back to PAY-231 Esc");
   await at("#/sets/set-1");
+  expect(escHint()).toBe("Back to Link sets Esc");
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/sets");
-  expect(escHint(), "the set's Esc put the visit back").toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe(TICKET);
+  expect(location.hash).toBe("#/sets");
 });
 
-test("a jump across the tree is an opening, a walk is not: Esc comes back to the asset being read, then to what opened the tree", async () => {
+test("Assets: an asset opened from a ticket's page, or by a jump across the tree, goes up to Assets (#2559)", async () => {
   start({ nav: windowNav });
   await at(TICKET);
   await at("#/asset/asset%3Aa");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBe("Back to Assets Esc");
   goAcross("#/asset/asset%3Ab");
   await settle();
-  expect(escHint(), "the jump's opener is the asset it left").toMatch(/^Back to (?!PAY-231)/);
-  // A walk through the columns from there keeps it, and the way back is not the entry before.
   await at("#/asset/asset%3Ac");
+  expect(escHint()).toBe("Back to Assets Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/asset/asset%3Aa");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe(TICKET);
+  expect(location.hash).toBe("#/assets");
 });
 
-test("a press from a repository's tab to another of its tabs is an opening named for that tab, and Esc comes back to it (F-259, F-065)", async () => {
+test("a press from a repository's tab to another of its tabs is no level: Esc on either goes up to Code (F-259, F-065, #2559)", async () => {
   const REPO = "#/repo/mock%3Atidewater%2Fpayout-service";
   start({ nav: windowNav });
   await at("#/code");
   await at(`${REPO}/branches`);
-  const opener = escHint();
-  // A press on the tab row is no opening: the page's opener stays.
   await at(`${REPO}/commits`);
-  expect(escHint()).toBe(opener);
+  expect(escHint()).toBe("Back to Code Esc");
   goAcross(`${REPO}/compare/spike%2Fsepa-instant`, "Commits");
   await settle();
-  expect(escHint()).toBe("Back to Commits Esc");
+  expect(escHint()).toBe("Back to Code Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe(`${REPO}/commits`);
-  expect(escHint()).toBe(opener);
+  expect(location.hash).toBe("#/code");
 });
 
 test("a nav entry returns to the tab the section was left on, opened by nothing, so Esc stays", async () => {
@@ -885,7 +913,7 @@ test("a row brings back the run left by a nav press, once, on one entry; Esc goe
   const event = press("Escape");
   await settle();
   expect(event.defaultPrevented).toBe(true);
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/p");
   // Used once.
   await row("#/build/p/1");
   expect(location.hash).toBe("#/build/p/1");
@@ -911,7 +939,7 @@ test("a link from another section, and a jump by address, open the item left at 
   expect(location.hash, "no press on the page asked for it").toBe("#/pr/9");
 });
 
-test("the cog and ⌘, come back to the section of Settings, keep their opener, and on a source's page go to Sources (F-661, F-076)", async () => {
+test("the cog and ⌘, come back to the section of Settings, and on a source's page go to Sources (F-661, F-076)", async () => {
   start({ nav: windowNav });
   const cog = () => target.querySelector<HTMLAnchorElement>(".tf-top [aria-label='Settings']")!;
   await at("#/settings/appearance");
@@ -920,15 +948,15 @@ test("the cog and ⌘, come back to the section of Settings, keep their opener, 
   cog().click();
   await settle();
   expect(location.hash).toBe("#/settings/appearance");
-  expect(escHint(), "Esc leaves Settings for where the cog was pressed").toBe("Back to Inbox Esc");
-  // A press on the section you are on moves nothing and keeps the way out.
+  expect(escHint(), "Settings' own page goes nowhere on Esc, wherever the cog was pressed (#2559)").toBeNull();
+  // A press on the section you are on moves nothing.
   cog().click();
   await settle();
   expect(location.hash).toBe("#/settings/appearance");
-  expect(escHint()).toBe("Back to Inbox Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/inbox");
+  expect(location.hash).toBe("#/settings/appearance");
+  await at("#/inbox");
   press(",", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/settings/appearance");
@@ -1204,7 +1232,7 @@ test("a tab the page does not have is not what its nav entry comes back to", asy
 
 test("back to a page: the row that opened the detail has focus again, and the page's scroll is what it was", async () => {
   start({ nav: windowNav });
-  await at("#/inbox");
+  await at("#/code/prs");
   const main = target.querySelector<HTMLElement>(".tf-main")!;
   const kept = target.querySelector<HTMLElement>(".tf-kept:not([hidden])")!;
   const link = document.createElement("a");
@@ -1217,7 +1245,7 @@ test("back to a page: the row that opened the detail has focus again, and the pa
   main.scrollTop = 0;
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/inbox");
+  expect(location.hash).toBe("#/code/prs");
   await vi.waitFor(() => expect(document.activeElement).toBe(link));
   expect(main.scrollTop).toBe(80);
 });
@@ -1264,7 +1292,7 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   // A section of Settings has no parent: the place above it would be a sibling.
   expect(escHint()).toBeNull();
   // A child of a section is a section of Settings too (the subtrees ruling, 2026-11-21): its crumbs name its parent,
-  // and Esc leaves Settings as from any section.
+  // and Esc goes up to it (#2559).
   await reached("#/settings/appearance/code-colours");
   crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector("strong")?.textContent).toBe("Code colours");
@@ -1272,7 +1300,7 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
     ["Settings", "#/settings"],
     ["Appearance", "#/settings/appearance"],
   ]);
-  expect(escHint()).toBeNull();
+  expect(escHint()).toBe("Back to Appearance Esc");
 });
 
 test("a commit's page with no opener names its repository's page as the breadcrumb's map calls it, until the page has its title", async () => {
@@ -2401,7 +2429,7 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent an
   expect(location.hash).toBe(item);
 });
 
-test("a note's page has no parent: with no opener Esc does nothing and no hint names it; opened from a ticket page, it returns there", async () => {
+test("a note's page has no parent: Esc does nothing and no hint names it, opened from a ticket page or not (#2559)", async () => {
   start({ nav: windowNav });
   await at("#/ticket/jira%3APAY-231");
   await reached("#/note/note-1");
@@ -2413,10 +2441,10 @@ test("a note's page has no parent: with no opener Esc does nothing and no hint n
 
   await at("#/ticket/jira%3APAY-231");
   await at("#/note/note-1");
-  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(escHint()).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+  expect(location.hash).toBe("#/note/note-1");
 });
 
 // #1415: a window opened on an old address (a bookmark, a notification) lands

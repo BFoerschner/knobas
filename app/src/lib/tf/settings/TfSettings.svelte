@@ -77,6 +77,7 @@
   let {
     rest,
     back = null,
+    came = null,
     ready,
     ports = realSettingsPorts,
     sectionPorts = realSectionPorts,
@@ -91,6 +92,8 @@
     rest: string[];
     /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing (#2228). */
     back?: EscTarget | null;
+    /** The page this entry was opened from, which a sub-page's *Save* and *Cancel* hand back to (#2559); else {@link back}. */
+    came?: (EscTarget & { opened: true }) | null;
     /** Whether the database answers yet. */
     ready: boolean;
     ports?: SettingsPorts;
@@ -329,7 +332,7 @@
         <TfPerformanceSection ports={sectionPorts} />
       {:else if place.section === "renderers" && folderAt !== null}
         {#key rest.join("/")}
-          <TfFolderRendererPage at={folderAt} {back} />
+          <TfFolderRendererPage at={folderAt} back={came ?? back} />
         {/key}
       {:else if place.section === "renderers"}
         <TfRenderersSection {...sectionPorts.renderers ? { ports: sectionPorts.renderers } : {}} />
@@ -343,13 +346,13 @@
         <TfUpdatesSection {layers} />
       {:else if place.section === "commands" && commandAt !== null}
         {#key rest.join("/")}
-          <TfCommandPage at={commandAt} {back} />
+          <TfCommandPage at={commandAt} back={came ?? back} />
         {/key}
       {:else if place.section === "commands"}
         <TfCommandsSection />
       {:else if place.section === "checkouts" && appAt !== null}
         {#key rest.join("/")}
-          <TfAppPage at={appAt} {back} />
+          <TfAppPage at={appAt} back={came ?? back} />
         {/key}
       {:else if place.section === "checkouts"}
         <TfCheckoutsSection {layers} />

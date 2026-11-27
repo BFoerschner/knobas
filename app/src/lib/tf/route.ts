@@ -12,7 +12,7 @@
  * a deep address belongs to. The asset tree is *Assets*, a section with its own entry after Monitors
  * (Björn, 2026-11-19: `docs/decisions/2026-11-19-assets-has-a-nav-entry-again.md`).
  */
-import { repoHash } from "./repo/repo";
+import { fileHash, readRepoRoute, repoHash } from "./repo/repo";
 
 /** A place in the main navigation, or Settings, which has its cog instead. */
 export type Section =
@@ -293,49 +293,69 @@ export function isTopPage(route: TfRoute): boolean {
 }
 
 /**
- * Where a detail page sits under (spec #2227, story 29), as an address, or
- * `null` for a top page, an item's page, a note's page and an unknown
- * address, which have none. Listed first, the pages whose parent is not their
- * section's top page; everything else inside a section goes to that top page.
+ * Where a page sits in its own section (spec #2227, story 29; #2559), as an address, or `null` where `Esc` goes
+ * nowhere. `Esc` is not Back (Björn, 2026-11-27, #2559): it goes one level up this chain, whatever opened the page.
+ * Each section's chain, the one place it is written down (the page's own `parentPage` only names a step the address
+ * cannot, never another):
  *
- * - a run (`#/build/<pipeline>/<run>`) → its pipeline;
- * - a pipeline, a section's own tab → none: they are the section's page;
- * - a pull request or a repository, any tab of it → Code (a pull request's page says its repository, `parentPage`);
- * - a commit, which opens under its repository's Commits tab
- *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → Assets' own page (an asset's page says its holder);
- * - a ticket page, any tab of it → Tickets.
- *
- * A branch opens on its repository's Branches tab, so its parent is the
- * repository's (Code). `#/branch/<id>` and `#/commit/<id>` themselves name no
- * repository until their page has read the item and replaced the address
- * (`code-row/`), so until then their parent is Code too.
- *
- * A ticket page's tab is not here: it is the `Esc` ladder's own rung.
+ * - **Tickets**: a ticket's page, any tab of it → Tickets. Tickets with a saved view and home (`#/job`) → nowhere.
+ * - **Inbox, Time**: their tabs (Time's day, week and standup, a week picked in it) are the section's page → nowhere.
+ * - **Code**: a file in a repository (and its line, place, folder render and generated folder) → the repository
+ *   (`#/repo/<id>`, its Files tab); a file's edit → the file; a commit → the repository's Commits tab; a repository on
+ *   any tab, a pick in it included (Compare's branches, Builds' branch and pipeline) → Code (its Repositories); a pull
+ *   request → its repository (the page says which, `parentPage`), else Code; a diff → its repository (the page says);
+ *   a bare branch or commit address, until its page names the repository → Code. Code's own tabs → nowhere.
+ * - **Builds**: a run → its pipeline; a pipeline, any tab of it → Builds (`#/builds`, Recent). Builds → nowhere.
+ * - **Docs**: a page → its space (the page says, `parentPage`), else Docs; a space, a search → Docs.
+ * - **Secrets**: a folder, a source, an entry → Secrets.
+ * - **Monitors**: a marked monitor → Monitors. Its tabs → nowhere.
+ * - **Assets**: an asset → its holder (the page says), else Assets; a route → Assets.
+ * - **Link sets**: a set → Link sets.
+ * - **Settings**: a source's page and *Add a source* → Sources; an application's page → Checkouts; a command's page →
+ *   Commands; a folder renderer's page → Renderers; a child section (Appearance › Fonts) → its parent section. A
+ *   section at the top of its rail is the Settings page's own → nowhere.
+ * - An item's page, a note's page, a site and an unknown address have no section → nowhere (a site has its own rung,
+ *   `escape.ts`).
  */
 export function parentOf(route: TfRoute): string | null {
   if (route.view === "ticket") return sectionHash("tickets");
   if (route.view !== "full" || isTopPage(route)) return null;
-  if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
-    return repoHash(route.rest[0]);
-  }
+  if (route.head === "repo") return repoParent(route.rest);
   // A run sits under its pipeline. A bare run's address names none yet.
   if (route.head === "build" && route.rest[0] && route.rest[1]) return `#/builds/${encodeURIComponent(route.rest[0])}`;
+  // A pipeline picked on Builds, any tab of it, sits under Builds' own page, the recent runs (#2559).
+  if (route.head === "builds") return sectionHash("builds");
   // A monitor's mark sits on Monitors' own page: leaving it is the page with no mark.
   if (route.head === "monitors" && route.rest[0] === MONITOR_AT) return sectionHash("monitors");
-  // A section's own tabs, and a pipeline picked on Builds, are the section's page: its parent would be a sibling.
+  // A section's own tabs are the section's page: its parent would be a sibling.
   if (TABBED_HEADS.has(route.head)) return null;
-  // A source's page sits under Sources, an application's under Checkouts, a folder renderer's under Renderers; every other section of Settings is a tab of it.
-  if (route.head === "settings") {
-    if (route.rest[0] === "source" || (route.rest[0] === "sources" && route.rest[1] === "add")) return "#/settings/sources";
-    if (route.rest[0] === "renderers" && route.rest[1] === "folder") return "#/settings/renderers";
-    return route.rest[0] === "checkouts" && route.rest.length > 1 ? "#/settings/checkouts" : null;
-  }
+  if (route.head === "settings") return settingsUp(route.rest);
   return sectionHash(route.section);
 }
 
+/** A repository's address's parent (#2559): a place inside a tab → the tab with nothing open, a tab → Code. */
+function repoParent(rest: readonly string[]): string {
+  const at = readRepoRoute(rest);
+  if (at.repoId === null) return sectionHash("code");
+  if (at.commit !== null) return repoHash(at.repoId, "commits");
+  if (at.tab === "edit" && at.path !== null) return fileHash(at.repoId, at.path);
+  if (at.tab === "files" && (at.path !== null || at.render !== undefined || at.rendered !== undefined)) return repoHash(at.repoId);
+  return sectionHash("code");
+}
+
+/** A Settings address's parent: a page under a section → that section, a child section → its parent, else nowhere. */
+function settingsUp(rest: readonly string[]): string | null {
+  const [head, arg] = rest;
+  if (head === "source" || (head === "sources" && arg === "add")) return "#/settings/sources";
+  if (arg === undefined) return null;
+  if (head === "renderers" && arg === "folder") return "#/settings/renderers";
+  if (head === "checkouts" || head === "commands") return `#/settings/${head}`;
+  // A child section (the subtrees ruling, 2026-11-21): `#/settings/appearance/fonts` sits under Appearance.
+  return head === undefined ? null : `#/settings/${encodeURIComponent(head)}`;
+}
+
 /** The sections whose deeper addresses are their own page's tabs or a pick in its rail. */
-const TABBED_HEADS: ReadonlySet<string> = new Set(["builds", "code", "time", "monitors", "inbox"]);
+const TABBED_HEADS: ReadonlySet<string> = new Set(["code", "time", "monitors", "inbox"]);
 
 function decode(segment: string): string {
   try {

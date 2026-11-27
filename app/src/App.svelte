@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { goLaunched, goVisiting, goWithoutOpener } from "./lib/tf/opener";
+  import { goLaunched, goWithoutOpener } from "./lib/tf/opener";
   import { askForSecret, reenterSourceOf } from "./lib/tf/settings/secret-prompt.svelte";
   import { listen } from "@tauri-apps/api/event";
 
@@ -132,9 +132,9 @@
     dismiss,
     undoable,
     complain,
-    // A top page opened from somewhere to come back from: *Back to* and `Esc` return to where the stop was (F-140).
+    // Time's own page, opened as a press would: `Esc` there does nothing, Back returns to where the stop was (#2559).
     onday: () => {
-      if (location.hash !== "#/time") goVisiting("#/time");
+      if (location.hash !== "#/time") location.hash = "#/time";
     },
   });
 

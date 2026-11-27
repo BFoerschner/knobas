@@ -330,6 +330,7 @@
   import { holdSlot, NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
   import { parentPage } from "../page-name.svelte";
+  import { parentOf } from "../route";
   import { itemHash } from "../job/job";
   import { jumpAcross } from "../opener";
   import { withPrStates } from "../pr/pr-state.svelte";
@@ -1452,8 +1453,13 @@
     }
     return [code, repo === null ? { name: "Repository" } : { name: repo.title, code: true }];
   });
-  // A commit sits under its repository, by the title its crumb gives it.
-  parentPage(() => (route.commit !== null && repoId !== null && repo !== null ? { hash: repoHash(repoId), name: repo.title } : null));
+  // Where the address sits in Code (`parentOf`, #2559), named as the crumb names it: the repository by its title, a
+  // file being edited by its name. Code's own page is the address's to name.
+  parentPage(() => {
+    const up = parentOf({ view: "full", section: "code", head: "repo", rest });
+    if (up === null || repoId === null || repo === null || !up.startsWith(repoHash(repoId))) return null;
+    return { hash: up, name: route.tab === "edit" && route.path !== null ? (route.path.split("/").pop() ?? repo.title) : repo.title };
+  });
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
