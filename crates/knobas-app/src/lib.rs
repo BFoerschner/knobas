@@ -1197,8 +1197,10 @@ fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         passwords.quit();
     }
     // The quit while Builds is in front leaves it (ADR-0063), while the
-    // database still answers.
-    commands::entity::leave_builds_at_quit(app);
+    // database still answers. Spelled from `crate::`: a line starting
+    // `commands::entity::` reads as a command to the handler list's mirror
+    // test (`commands::mirror::registered`).
+    crate::commands::entity::leave_builds_at_quit(app);
     sources::shutdown(app);
     backup::shutdown(app);
     shutdown_database(app);
