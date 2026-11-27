@@ -310,6 +310,8 @@ const LOGO_AFTER =
   "iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAIAAABiouoDAAAAW0lEQVR42u3YIREAIBBE0UtCRDTByITBIAhAAYYA3Jv5ctWTG7uHHiEABAgQIECA/gUqrV4ba17LtgcECBAgQIAAAQIECBAgQIAAAfoNyCXmUQQECBAgQICSdgCzYkA8nT/7cAAAAABJRU5ErkJggg==";
 const renderedDiffOn = () => new URLSearchParams(globalThis.location?.search).has("fake-rendered-diff");
 const bytesOf = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+/** The README's logo before and after its change, for `?fake-working-png`'s binary file in the working tree's compare. */
+export const logoSides = (): [before: Uint8Array, after: Uint8Array] => [PAYOUT_IMAGES["docs/img/logo.png"]!(), bytesOf(LOGO_AFTER)];
 
 /** `?fake-rendered-diff`'s files on the newest commit's diff. */
 function renderedDiffFiles(): DiffFile[] {
