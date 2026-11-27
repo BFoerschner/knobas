@@ -12,6 +12,8 @@ import { invoke } from "./invoke";
 import { viewDate } from "../time/format";
 import type {
   ArchiveIndex,
+  MarkScope,
+  RunMarks,
   ClassOutline,
   ActionItemTicket,
   CardRows,
@@ -123,6 +125,8 @@ import type { QueuedWrite, WriteOpPayload } from "./sources";
 import type { DayWindow } from "./time";
 
 export type {
+  MarkScope,
+  RunMarks,
   ArchiveIndex,
   ClassOutline,
   Lib,
@@ -514,17 +518,27 @@ export function setPipelinePinned(pipelineId: string, pinned: boolean): Promise<
   return invoke<boolean>("set_pipeline_pinned", { pipelineId, pinned });
 }
 
-/** The live runs marked read (ux18, `read_runs`): a finished failed run not among them is unread. */
-export function readRuns(): Promise<string[]> {
-  return invoke<string[]>("read_runs");
+/** The live runs that carry a mark (ux18, ADR-0063, `read_runs`): those it reads, and those marked while they ran. */
+export function readRuns(): Promise<RunMarks> {
+  return invoke<RunMarks>("read_runs");
 }
 
 /**
- * Mark runs read (ux18, `mark_runs_read`): `runs` by id, and every finished failed run of each of `pipelines`. Answers
- * the ids it wrote, which a run already read is not among: what *Undo* hands back to {@link markRunsUnread}.
+ * Mark runs read by scope (ADR-0063, `mark_runs_read`): every run, the runs of some pipelines, runs by id. Of a
+ * pipeline's runs it takes each running one out of the blue and reads each failure; a run by id is marked whatever its
+ * state. Answers the marks it wrote, which a run already read is not among: what *Undo* hands back to
+ * {@link markRunsUnread}.
  */
-export function markRunsRead(runs: string[], pipelines: string[] = []): Promise<string[]> {
-  return invoke<string[]>("mark_runs_read", { runs, pipelines });
+export function markRunsRead(scope: MarkScope): Promise<RunMarks> {
+  return invoke<RunMarks>("mark_runs_read", { scope });
+}
+
+/**
+ * The run's page was shown (ADR-0063, `mark_run_opened`): its mark becomes *opened*, which reads it whatever it does
+ * after, and a failed run's Inbox line goes with it. Answers whether it wrote: not when a mark already read the run.
+ */
+export function markRunOpened(run: string): Promise<boolean> {
+  return invoke<boolean>("mark_run_opened", { run });
 }
 
 /** Mark runs unread (ux18, `mark_runs_unread`), taking back each one's Inbox *Done*. Answers the ids that were read. */

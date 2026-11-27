@@ -108,7 +108,6 @@
     sync,
     switcher,
     syncRevision = 0,
-    everyPipeline = [],
     ondrawn,
   }: {
     ready: boolean;
@@ -122,8 +121,6 @@
     switcher: Snippet;
     /** Moves when a sync ended: the head is read again. */
     syncRevision?: number;
-    /** Every pipeline's id, for *Mark all as read* with nothing narrowing it. */
-    everyPipeline?: readonly string[];
     /** Its first page has drawn: the Builds list is read behind it, so a run opens at once. */
     ondrawn?: () => void;
   } = $props();
@@ -422,7 +419,7 @@
   );
   function markAllRead() {
     if (narrowed) void runsRead.markAll({ runs: placed.rows.filter((one) => failedRun(one.run)).map((one) => one.run.entity_id), pipelines: [] });
-    else void runsRead.markAll({ runs: [], pipelines: [...everyPipeline] });
+    else void runsRead.markAll({ runs: [], pipelines: [], everything: true });
   }
 
   // -- open, keys, the way back --------------------------------------------------

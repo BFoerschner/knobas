@@ -3205,6 +3205,27 @@ export type LoggedBy = {
 author: string, seconds: number, };
 
 /**
+ * What a *Mark … as read* covers (ADR-0063): every run, the runs of a set of
+ * pipelines, runs by id, or any union of them. *Everything* needs no list
+ * from the page, so a press before the pipeline list has loaded marks what
+ * it says (#2555).
+ */
+export type MarkScope = { 
+/**
+ * Every run of every live pipeline.
+ */
+everything: boolean, 
+/**
+ * The live pipelines whose runs it covers, by entity id.
+ */
+pipelines: Array<string>, 
+/**
+ * Runs by entity id, whatever their state: a live run named here is
+ * marked.
+ */
+runs: Array<string>, };
+
+/**
  * One artifact's Maven coordinates, found inside the archive.
  */
 export type Maven = { group: string, artifact: string, version: string, 
@@ -4437,6 +4458,22 @@ steps: Array<LogStep>,
  * How many lines the whole log has.
  */
 total: number, };
+
+/**
+ * The marks a person's runs carry, split by what each does (ADR-0063): what
+ * the window holds as its set, and what a mark answers it wrote.
+ */
+export type RunMarks = { 
+/**
+ * The runs a mark reads: opened, or marked after they finished. A failed
+ * one is not red, a passed one not green, a running one not blue.
+ */
+read: Array<string>, 
+/**
+ * The runs marked while they ran: out of the blue, and red again if
+ * they fail.
+ */
+while_running: Array<string>, };
 
 /**
  * One preset, as `save_run_preset` takes it and `run_presets` answers it.

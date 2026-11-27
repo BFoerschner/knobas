@@ -1539,18 +1539,19 @@ function fakeMarks(held: string[] = []) {
   const marked = new Set(held);
   const calls: { mark: [string[], string[]][]; unmark: string[][] } = { mark: [], unmark: [] };
   runsRead.ports = {
-    read: async () => [...marked],
-    mark: async (runs, pipelines) => {
+    read: async () => ({ read: [...marked], while_running: [] }),
+    mark: async ({ runs, pipelines }) => {
       calls.mark.push([runs, pipelines]);
       const wrote = [...runs, ...(pipelines.length > 0 ? ["teamcity:build:900"] : [])].filter((id) => !marked.has(id));
       for (const id of wrote) marked.add(id);
-      return wrote;
+      return { read: wrote, while_running: [] };
     },
     unmark: async (runs) => {
       calls.unmark.push(runs);
       for (const id of runs) marked.delete(id);
       return runs;
     },
+    open: async () => false,
   };
   return calls;
 }

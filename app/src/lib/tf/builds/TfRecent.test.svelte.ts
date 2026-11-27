@@ -318,3 +318,23 @@ test("a CI source's run that changed something reads the head again; one that ch
   expect(drawn.asked.length).toBe(reads + 1);
   expect(numbers()[0]).toBe("#13");
 });
+
+test("Mark all as read with nothing narrowing asks for every run, so a press before the pipeline list answers marks every failure (#2555)", async () => {
+  const scopes: unknown[] = [];
+  runsRead.ports = {
+    read: async () => ({ read: [], while_running: [] }),
+    mark: async (scope) => (scopes.push(scope), { read: ["tc:build:11", "tc:build:3"], while_running: [] }),
+    unmark: async (runs) => runs,
+    open: async () => false,
+  };
+  await runsRead.load();
+  draw();
+  await settle();
+  expect(rows()[1]!.querySelector(".tf-unread")).not.toBeNull();
+  target.querySelector<HTMLButtonElement>("button[aria-label='Mark all as read']")!.click();
+  flushSync();
+  expect(rows()[1]!.querySelector(".tf-unread"), "the failure drawn read at once").toBeNull();
+  await settle();
+  expect(scopes).toEqual([{ everything: true, pipelines: [], runs: ["tc:build:11"] }]);
+  expect(runsRead.read?.has("tc:build:3"), "and what the backend wrote past the page").toBe(true);
+});

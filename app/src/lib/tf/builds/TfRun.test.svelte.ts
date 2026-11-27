@@ -1460,37 +1460,42 @@ test("a run's view knobas held draws at once under a line saying from when; a so
 
 // -- Mark builds as read (ux18) -----------------------------------------------
 
-test("a failed run's header offers Mark as read and m toggles it; opening it reads nothing; a passed run offers neither", async () => {
+test("opening a failed run reads it, once, and its header then offers Mark as unread, which m toggles; a passed run offers neither", async () => {
   const asked: string[] = [];
   runsRead.ports = {
-    read: async () => [],
-    mark: async (runs) => (asked.push(`read ${runs.join()}`), runs),
+    read: async () => ({ read: [], while_running: [] }),
+    mark: async ({ runs }) => (asked.push(`read ${runs.join()}`), { read: runs, while_running: [] }),
     unmark: async (runs) => (asked.push(`unread ${runs.join()}`), runs),
+    open: async (run) => (asked.push(`open ${run}`), true),
   };
+  let refreshed = 0;
+  runsRead.afterOpen = () => (refreshed += 1);
   await runsRead.load();
   draw();
   await settle();
-  expect(asked, "opening the run marks nothing").toEqual([]);
+  expect(asked, "opening the run reads it").toEqual(["open teamcity:build:1187"]);
+  expect(refreshed, "and the counts are read again").toBe(1);
   expect(target.querySelector("h1")!.hasAttribute("data-failed")).toBe(true);
-  button("Mark as read")!.click();
-  flushSync();
-  expect(button("Mark as unread")).toBeDefined();
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  button("Mark as unread")!.click();
   flushSync();
   expect(button("Mark as read")).toBeDefined();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(button("Mark as unread")).toBeDefined();
   await settle();
-  expect(asked).toEqual(["read teamcity:build:1187", "unread teamcity:build:1187"]);
+  expect(asked).toEqual(["open teamcity:build:1187", "unread teamcity:build:1187", "read teamcity:build:1187"]);
   unmount(page!);
   page = null;
   draw("teamcity:build:1186");
   await settle();
+  expect(asked.at(-1), "every run's page reads it").toBe("open teamcity:build:1186");
   expect(button("Mark as read")).toBeUndefined();
   expect(button("Mark as unread")).toBeUndefined();
   const passed = new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true });
   window.dispatchEvent(passed);
   await settle();
   expect(passed.defaultPrevented, "a passed run leaves m alone").toBe(false);
-  expect(asked).toHaveLength(2);
+  expect(asked).toHaveLength(4);
 });
 
 // -- a run in flight moves on (the TeamCity run fix, 2026-11-25) ------------------

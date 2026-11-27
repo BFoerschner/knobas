@@ -679,6 +679,11 @@
   onReady(ready, () => ports.docsChoices, (choices) => heldDocsChoices.hold(choices));
   // The runs marked read (ux18): until they answer, every failed run asks, as before there were marks.
   onReady(ready, () => () => runsRead.load(), () => {});
+  // Opening a run reads it and writes no activity line (ADR-0063): the counts that follow marks are read again here.
+  runsRead.afterOpen = () => {
+    void badges.refresh();
+    void sharedInbox.refresh();
+  };
   // Which sources' pages open inside knobas (ADR-0050): until they answer, every address opens the browser, as before.
   onReady(ready, () => siteSettings, (list) => siteStore.hold(list));
   // *Sites kept open*, which the native side holds once read.

@@ -22,12 +22,14 @@ import { SCALE_HISTORY } from "../fake-scale";
 import type {
   ChainStepRow,
   JobPipeline,
+  MarkScope,
   ParameterSpec,
   PipelineReason,
   PipelineRow,
   PipelineSettings,
   RecentCursor,
   RecentFilter,
+  RunMarks,
   RunPreset,
   RunRow,
   Setting,
@@ -112,8 +114,10 @@ const CONFIGURATIONS: Record<string, string[]> = {
 
 /** prototype-6's `S.pins`: pinned until the session unpins them (#849). */
 const pins = new Set(["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_Staging"].map((c) => `${SOURCE}:buildType:${c}`));
-/** The runs marked read (ux18): none at load, as on a database before `0098`. */
+/** The runs a mark reads (ux18, ADR-0063): none at load, as on a database before `0098`. */
 const readRuns = new Set<string>();
+/** The runs marked while they ran (ADR-0063): out of the blue only. */
+const whileRunningRuns = new Set<string>();
 
 /** Whether a fixture run is a finished failure, the only kind that can be unread. */
 function failedFake(run: RunRow): boolean {
@@ -847,20 +851,42 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
       return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk.map((p) => ({ ...p, unread: unreadOf(p.recent) }))];
     },
-    // Mark builds as read (ux18): the fixture's own set, as `knobas.run_read` holds them.
-    read_runs: () => [...readRuns],
-    mark_runs_read: (args) => {
-      const runs = (args["runs"] as string[] | undefined) ?? [];
-      const pipelines = (args["pipelines"] as string[] | undefined) ?? [];
+    // Mark builds as read (ux18, ADR-0063): the fixture's own sets, as `knobas.run_read` holds them.
+    read_runs: (): RunMarks => ({ read: [...readRuns], while_running: [...whileRunningRuns] }),
+    mark_runs_read: (args): RunMarks => {
+      const scope = (args["scope"] as Partial<MarkScope> | undefined) ?? {};
       const all = history(new Date());
-      const failed = pipelines.flatMap((id) => [...(all.get(configOf(id)) ?? []), ...(bulkById.get(id)?.recent ?? [])].filter(failedFake).map((run) => run.entity_id));
-      const wrote = [...new Set([...runs, ...failed])].filter((id) => !readRuns.has(id));
-      for (const id of wrote) readRuns.add(id);
+      const every = [...all.values()].flat().concat(bulk.flatMap((p) => p.recent));
+      const runsOf = (id: string) => [...(all.get(configOf(id)) ?? []), ...(bulkById.get(id)?.recent ?? [])];
+      const inScope = scope.everything === true ? every : (scope.pipelines ?? []).flatMap(runsOf);
+      const scoped = inScope.filter((run) => failedFake(run) || (run.started !== null && run.finished === null));
+      const known = new Map(every.map((run) => [run.entity_id, run]));
+      const wrote: RunMarks = { read: [], while_running: [] };
+      const named = (scope.runs ?? []).map((id) => known.get(id) ?? { entity_id: id, finished: "", started: null });
+      for (const run of new Map([...scoped, ...named].map((one) => [one.entity_id, one])).values()) {
+        if (readRuns.has(run.entity_id)) continue;
+        if (run.finished === null) {
+          if (whileRunningRuns.has(run.entity_id)) continue;
+          whileRunningRuns.add(run.entity_id);
+          wrote.while_running.push(run.entity_id);
+        } else {
+          whileRunningRuns.delete(run.entity_id);
+          readRuns.add(run.entity_id);
+          wrote.read.push(run.entity_id);
+        }
+      }
       return wrote;
     },
+    mark_run_opened: (args) => {
+      const id = String(args["run"] ?? "");
+      if (id === "" || readRuns.has(id)) return false;
+      whileRunningRuns.delete(id);
+      readRuns.add(id);
+      return true;
+    },
     mark_runs_unread: (args) => {
-      const gone = ((args["runs"] as string[] | undefined) ?? []).filter((id) => readRuns.has(id));
-      for (const id of gone) readRuns.delete(id);
+      const gone = ((args["runs"] as string[] | undefined) ?? []).filter((id) => readRuns.has(id) || whileRunningRuns.has(id));
+      for (const id of gone) (readRuns.delete(id), whileRunningRuns.delete(id));
       return gone;
     },
     unread_failing_builds: () => {
@@ -957,4 +983,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(pins, presets, readRuns);
+keepSeed(pins, presets, readRuns, whileRunningRuns);

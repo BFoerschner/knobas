@@ -758,14 +758,15 @@ function marks(held: string[]) {
   const asked: [string[], string[]][] = [];
   const marked = new Set(held);
   runsRead.ports = {
-    read: async () => [...marked],
-    mark: async (runs, pipelines) => {
+    read: async () => ({ read: [...marked], while_running: [] }),
+    mark: async ({ runs, pipelines }) => {
       asked.push([runs, pipelines]);
       const wrote = runs.filter((id) => !marked.has(id));
       for (const id of wrote) marked.add(id);
-      return wrote;
+      return { read: wrote, while_running: [] };
     },
     unmark: async (runs) => runs,
+    open: async () => false,
   };
   return asked;
 }

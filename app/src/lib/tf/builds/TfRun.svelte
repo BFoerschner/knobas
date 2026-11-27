@@ -457,9 +457,15 @@
     );
   });
 
+  // Opening a run reads it (ADR-0063), whichever way the page was reached: once per run, whatever it does after.
+  $effect(() => {
+    const wanted = runId;
+    untrack(() => void runsRead.opened(wanted));
+  });
+
   /**
    * `m` on the run page (ux18): *Mark as read* or *Mark as unread* on this run, when it finished failed. Opening it
-   * reads nothing: only a mark does. Not in a field, a dialog, or a page a keep-alive holds hidden.
+   * read it, so `m` here first takes that back. Not in a field, a dialog, or a page a keep-alive holds hidden.
    */
   const runShown = pageVisible();
   // Shown again or the window back: a run in flight read at the source, at most once in 5 s.

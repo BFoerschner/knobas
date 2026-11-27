@@ -838,7 +838,6 @@
         {sync}
         switcher={viewSwitch}
         {syncRevision}
-        everyPipeline={all?.map((p) => p.entity_id) ?? []}
         ondrawn={() => (recentDrawn = true)}
       />
     {:else if head === "build" && selected !== null && rest.length >= 2}
