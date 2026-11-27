@@ -35,7 +35,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use knobas_app::sources::Registry;
-use knobas_app::sources::live::LiveSources;
+use knobas_app::sources::live::{GRANTS_FRESH, LiveSources};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_source::view::Block;
@@ -314,9 +314,11 @@ async fn a_file_opened_from_the_tree_costs_at_most_two_requests() {
 }
 
 /// **Grants once per repository** (#2241): *New branch…* and *Commit
-/// change…* asked together probe Gitea; asked again they are the cache's,
-/// asked once behind the answer, for the same cost again and no more. The
-/// seeded token may write, so nothing is refused.
+/// change…* asked together probe Gitea; asked again within [`GRANTS_FRESH`]
+/// they are the cache's and Gitea is not asked at all (the ux13 Windows pass,
+/// 2026-11-15); asked once the kept answer is that old, they are still the
+/// cache's, asked once behind the answer, for the same cost again and no
+/// more. The seeded token may write, so nothing is refused.
 #[tokio::test]
 #[ignore = "needs the testenv Gitea: just gitea-live"]
 async fn a_repositorys_grants_are_asked_once_and_then_behind() {
@@ -331,9 +333,14 @@ async fn a_repositorys_grants_are_asked_once_and_then_behind() {
     assert!(first_sent >= 1, "the probe is counted: {first_sent}");
     assert!(first.is_empty(), "the seeded token writes: {first:?}");
     let (again, again_sent) = app.refused(&asks).await;
-    println!("grants again: {again_sent} requests (behind the answer)");
+    println!("grants again: {again_sent} requests (kept, within a minute)");
     assert_eq!(again, first);
-    assert_eq!(again_sent, first_sent, "one ask behind, not more");
+    assert_eq!(again_sent, 0, "taken as kept, not read behind");
+    app.live.age_reads(GRANTS_FRESH);
+    let (later, later_sent) = app.refused(&asks).await;
+    println!("grants later: {later_sent} requests (behind the answer)");
+    assert_eq!(later, first);
+    assert_eq!(later_sent, first_sent, "one ask behind, not more");
 }
 
 /// **Stale, then fresh** (#2242): a second branch-list read answers from the
