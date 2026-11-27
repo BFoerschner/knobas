@@ -27,6 +27,17 @@
   background: var(--rule); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
 .tf-count.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-count.tf-ok { background: var(--ok-bg); color: var(--ok); }
+.tf-count.tf-warn { background: var(--warn-bg); color: var(--warn); }
+.tf-count.tf-info { background: var(--info-bg); color: var(--info); }
+/* Builds' one bubble (#2568): the total, coloured by the most critical state; on hover, or with its entry focused from
+   the keyboard, the counts by state lie over it and the entries after it, on the sheet, so nothing moves. */
+.tf-bubble { position: relative; display: inline-flex; }
+.tf-bubble-more {
+  position: absolute; left: -2px; top: 50%; transform: translateY(-50%); z-index: 1; display: none; gap: 2px; padding: 2px;
+  border-radius: 11px; background: var(--sheet); box-shadow: 0 0 0 1px var(--rule), 0 2px 6px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+.tf-bubble:hover > .tf-bubble-more, .tf-nav a:focus-visible .tf-bubble-more { display: inline-flex; }
 /* A tab row whose counts come and go holds two figures' room for each (the nothing-moves pass, `TfRepo`). */
 .tf-countroom .tf-count { box-sizing: border-box; min-width: calc(2ch + 12px); text-align: center; vertical-align: baseline; }
 /* Zen mode's one button (Z1), in Code only: after the nav, where the spacer gives it room and nothing left of it moves. */

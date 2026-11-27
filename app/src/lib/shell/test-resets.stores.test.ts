@@ -230,19 +230,21 @@ test("timer.reset drops the running timer and what the reader has in front, and 
   expect(timerOff).toHaveBeenCalledTimes(1);
 });
 
-test("badges.reset forgets the counts and unsubscribes", async () => {
+test("badges.reset forgets the counts and unsubscribes; Builds' are the runs store's, which forgets its own", async () => {
   const off = vi.fn();
+  let builds: { blue: number; green: number; yellow: number; red: number; grey: number } | null = null;
   const badges = createBadges({
-    failingBuilds: async () => 2,
+    readBuilds: async () => void (builds = { blue: 0, green: 0, yellow: 0, red: 2, grey: 0 }),
+    builds: () => builds,
     monitorsDown: async () => 3,
     listen: async () => off,
   });
   badges.start();
   await badges.refresh();
   await flush();
-  expect([badges.builds, badges.monitors]).toEqual([2, 3]);
+  expect([badges.builds?.red, badges.monitors]).toEqual([2, 3]);
   badges.reset();
-  expect([badges.builds, badges.monitors]).toEqual([null, null]);
+  expect(badges.monitors).toBeNull();
   expect(off).toHaveBeenCalledTimes(2);
 });
 

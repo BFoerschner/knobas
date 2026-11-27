@@ -1463,6 +1463,8 @@ test("a run's view knobas held draws at once under a line saying from when; a so
 test("opening a failed run reads it, once, and its header then offers Mark as unread, which m toggles; a passed run offers neither", async () => {
   const asked: string[] = [];
   runsRead.ports = {
+    // The counts and the instants as the bridge answers them (#2568): not what this case reads.
+    ...runsRead.ports,
     read: async () => ({ read: [], while_running: [] }),
     mark: async ({ runs }) => (asked.push(`read ${runs.join()}`), { read: runs, while_running: [] }),
     unmark: async (runs) => (asked.push(`unread ${runs.join()}`), runs),

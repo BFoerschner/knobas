@@ -758,6 +758,8 @@ function marks(held: string[]) {
   const asked: [string[], string[]][] = [];
   const marked = new Set(held);
   runsRead.ports = {
+    // The counts and the instants as the bridge answers them (#2568): not what this case reads.
+    ...runsRead.ports,
     read: async () => ({ read: [...marked], while_running: [] }),
     mark: async ({ runs, pipelines }) => {
       asked.push([runs, pipelines]);

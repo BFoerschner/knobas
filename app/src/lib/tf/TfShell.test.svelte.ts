@@ -332,7 +332,8 @@ function start(
       inbox: { count: 3 },
       health: over.health ?? { all: [health("jira", "ok"), health("teamcity", "unauthorized")] },
       badges: createBadges({
-        failingBuilds: () => Promise.resolve(2),
+        readBuilds: () => Promise.resolve(),
+        builds: () => ({ blue: 0, green: 0, yellow: 0, red: 2, grey: 0 }),
         monitorsDown: () => Promise.resolve(over.monitorsDown ?? 0),
         listen: () => Promise.resolve(() => {}),
       }),
@@ -1373,7 +1374,7 @@ test("a forced theme leaves <html> with the shell", async () => {
   expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
 });
 
-test("badges: inbox and failing builds in err tone; nothing drawn at zero", async () => {
+test("badges: inbox, and builds' bubble red for its failures; nothing drawn at zero", async () => {
   start();
   await settle();
   const counts = Object.fromEntries(
@@ -2377,7 +2378,8 @@ test("an item of a custom-role source opens its block view, and the role gets no
 
   const nav = target.querySelector('nav[aria-label="Main"]')!;
   const entries = [...nav.querySelectorAll("a")];
-  expect(entries.map((a) => a.textContent?.replace(/\d+$/, "").trim())).toEqual(NAV.map((section) => SECTION_NAME[section]));
+  // Each entry's name, before its count or Builds' bubble with its words.
+  expect(entries.map((a) => a.firstChild?.textContent?.trim())).toEqual(NAV.map((section) => SECTION_NAME[section]));
   expect(nav.textContent).not.toMatch(/survey/i);
   expect(entries.filter((a) => a.getAttribute("aria-current") === "page")).toEqual([]);
 });

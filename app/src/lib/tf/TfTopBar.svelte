@@ -6,13 +6,18 @@
   A badge is drawn only once its read has answered and only above zero.
   Prototype-6 always has something to count; an empty inbox drawing `0` is a
   place for the eye to keep checking, which is the rooms strip's rule too.
+
+  Builds draws one bubble (Björn on #2568, 2026-11-27): the unread runs,
+  coloured by the most critical state among them, which expands over the nav
+  on hover, or while its entry has the keyboard's focus, to the counts by
+  state. The expansion overlays the entries after it, so nothing moves.
 -->
 <script lang="ts">
   import type { Inbox } from "../inbox/inbox.svelte";
   import type { Timer } from "../shell/timer.svelte";
   import { targetReading } from "../shell/timer";
   import { keyHint } from "../shell/platform";
-  import type { Badges } from "./badges.svelte";
+  import { buildsBubble, type Badges } from "./badges.svelte";
   import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
   import { updates as sharedUpdates, type Updates } from "./update.svelte";
   import { cogTitle, marked } from "./settings/updates";
@@ -61,19 +66,19 @@
     onnav(section, navHref(section), event.isTrusted);
   }
 
-  /** A badge's number and tone, or `null` where none is drawn. */
+  /** A badge's number and tone, or `null` where none is drawn. Builds draws its bubble instead ({@link bubble}). */
   function badge(section: Section): { n: number; err: boolean } | null {
-    const n =
-      section === "inbox"
-        ? inbox.count
-        : section === "builds"
-          ? badges.builds
-          : section === "monitors"
-            ? badges.monitors
-            : null;
+    const n = section === "inbox" ? inbox.count : section === "monitors" ? badges.monitors : null;
     if (n === null || n <= 0) return null;
-    return { n, err: section === "builds" || section === "monitors" };
+    return { n, err: section === "monitors" };
   }
+
+  /** Each state's colour class, as the theme's tones name them; grey is the plain count's. */
+  const TONE = { red: "tf-err", yellow: "tf-warn", green: "tf-ok", grey: "", blue: "tf-info" } as const;
+
+  const bubble = $derived(buildsBubble(badges.builds));
+  /** The counts in words, most critical first: the hidden text and the title. */
+  const bubbleWords = $derived(bubble === null ? "" : bubble.parts.map((part) => `${part.n} ${part.word}`).join(", "));
 
   /** Prototype-6 draws the clock as `H:MM:SS` from the first second. */
   const clock = $derived.by(() => {
@@ -111,6 +116,16 @@
         {SECTION_NAME[section]}
         {#if count}
           <span class="tf-count {count.err ? 'tf-err' : ''}">{count.n}</span>
+        {:else if section === "builds" && bubble !== null}
+          <span class="tf-bubble" title="Unread runs: {bubbleWords}" data-tone={bubble.tone}>
+            <span class="tf-count {TONE[bubble.tone]}" aria-hidden="true">{bubble.total}</span>
+            <span class="tf-bubble-more" aria-hidden="true">
+              {#each bubble.parts as part (part.bubble)}
+                <span class="tf-count {TONE[part.bubble]}" data-bubble={part.bubble}>{part.n}</span>
+              {/each}
+            </span>
+            <span class="tf-sr">, unread runs: {bubbleWords}</span>
+          </span>
         {/if}
       </a>
     {/each}

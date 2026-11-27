@@ -1539,6 +1539,8 @@ function fakeMarks(held: string[] = []) {
   const marked = new Set(held);
   const calls: { mark: [string[], string[]][]; unmark: string[][] } = { mark: [], unmark: [] };
   runsRead.ports = {
+    // The counts and the instants as the bridge answers them (#2568): not what this case reads.
+    ...runsRead.ports,
     read: async () => ({ read: [...marked], while_running: [] }),
     mark: async ({ runs, pipelines }) => {
       calls.mark.push([runs, pipelines]);

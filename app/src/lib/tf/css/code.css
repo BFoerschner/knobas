@@ -40,7 +40,6 @@
 }
 
 /* ---------- Repository page (#838, R-8.3 to R-8.5, R-8.7) ---------- */
-.tf-count.tf-warn { background: var(--warn-bg); color: var(--warn); }
 /* The tabs in two groups (#2257, mockups/code-area `.tf-tabs .grp`): the repository at a ref | work in flight. */
 .tf-tabs .tf-tabgrp { flex: none; align-self: center; width: 1px; height: 18px; background: var(--rule); margin: 0 8px; }
 /* The branch picker in the header is a control: chrome.css, *the branch box*. */

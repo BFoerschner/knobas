@@ -342,6 +342,7 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfUpdatesSection.svelte  words(box.first.label, FIRST_WORDS)": "named small: the two words the update box's first button ever says, stacked so it keeps the longest's width",
   "tf/settings/TfUpdatesSection.svelte  words(box.second.label, SECOND_WORDS)": "named small: the six words the update box's second button ever says, stacked so it keeps the longest's width",
   "tf/settings/TfUpdatesSection.svelte  asking ?? []": "named small: the three things a restart for an update can lose (drafts, a site's unsaved changes, a timer)",
+  "tf/TfTopBar.svelte  bubble.parts": "named small: the five states a run counts in (ADR-0063), each drawn once at most",
   "tf/tickets/StatusMenu.svelte  items": "named small: the statuses one ticket's workflow offers from where it stands, or a column's statuses (a handful)",
   "tf/oneoff/TfRunDialog.svelte  views": "a handful by what it is: a run's views, its result, Output and Problems",
   "tf/oneoff/TfRunMenu.svelte  takes": "named small: the commands a person saved in Settings › Commands that take one thing (a handful)",

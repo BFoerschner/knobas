@@ -322,6 +322,8 @@ test("a CI source's run that changed something reads the head again; one that ch
 test("Mark all as read with nothing narrowing asks for every run, so a press before the pipeline list answers marks every failure (#2555)", async () => {
   const scopes: unknown[] = [];
   runsRead.ports = {
+    // The counts and the instants as the bridge answers them (#2568): not what this case reads.
+    ...runsRead.ports,
     read: async () => ({ read: [], while_running: [] }),
     mark: async (scope) => (scopes.push(scope), { read: ["tc:build:11", "tc:build:3"], while_running: [] }),
     unmark: async (runs) => runs,
