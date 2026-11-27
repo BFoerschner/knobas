@@ -29,6 +29,21 @@ async function started({ host, tabs = fakeTabs({ 1: "about:blank" }), storage = 
   return { router, host, tabs, storage, clock };
 }
 
+/**
+ * `promise` with whether it has settled yet. With `setTimeout` faked (`t.mock.timers`), an answer that comes at a
+ * timeout settles only on a `tick`, and one that comes on its own port settles within a few event-loop `turns`: the
+ * two are told apart by the clock the router's timers run on, not by wall time, which a loaded machine stretches (#2582).
+ */
+function watched(promise) {
+  const w = { settled: false, value: undefined };
+  promise.then((v) => Object.assign(w, { settled: true, value: v }));
+  return w;
+}
+/** Lets the fake host's `setImmediate` replies and the router's promise chains run. */
+async function turns(n = 50) {
+  for (let i = 0; i < n; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
 test("a matching link in a new tab is handed to knobas and the tab closes", async () => {
   const { router, host, tabs } = await started({ host: fakeHost({ answer: knobas([JIRA], opened) }) });
   const answer = await router.onBeforeRequest(nav(PAY, { tabId: 1 }));
@@ -174,22 +189,30 @@ test("with knobas closed the page loads, and so it does when the host is missing
     assert.equal(router.onBeforeRequest(nav(PAY)), undefined);
     assert.equal(router.status().knobas, "no_host");
   });
-  await t.test("host never answers", async () => {
+  await t.test("host never answers", async (t) => {
     const host = fakeHost({ answer: knobas([JIRA], opened) });
     const { router, tabs } = await started({ host });
     host.answer = () => "hang";
-    const t0 = Date.now();
-    assert.ok(loads(await router.onBeforeRequest(nav(PAY, { tabId: 1 }))));
-    assert.ok(Date.now() - t0 >= 70, "waited for the handoff timeout");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const answer = watched(router.onBeforeRequest(nav(PAY, { tabId: 1 })));
+    await turns();
+    t.mock.timers.tick(79);
+    await turns();
+    assert.equal(answer.settled, false, "still waiting short of the handoff timeout");
+    t.mock.timers.tick(1);
+    await turns();
+    assert.ok(answer.settled && loads(answer.value), "the page loads at the handoff timeout");
     assert.deepEqual(tabs.removed, []);
   });
-  await t.test("host drops mid-request, and the next request reconnects", async () => {
+  await t.test("host drops mid-request, and the next request reconnects", async (t) => {
     const host = fakeHost({ answer: knobas([JIRA], opened) });
-    const { router, tabs } = await started({ host, timeouts: { rules: 50, handoff: 5000 } });
+    const { router, tabs } = await started({ host });
     host.answer = () => "disconnect";
-    const t0 = Date.now();
-    assert.ok(loads(await router.onBeforeRequest(nav(PAY, { tabId: 1 }))));
-    assert.ok(Date.now() - t0 < 1000, "a dropped port answers at once, not at the timeout");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const answer = watched(router.onBeforeRequest(nav(PAY, { tabId: 1 })));
+    await turns();
+    assert.ok(answer.settled && loads(answer.value), "a dropped port answers at once, not at the timeout");
+    t.mock.timers.reset();
     assert.deepEqual(tabs.removed, []);
     host.answer = knobas([JIRA], opened);
     assert.deepEqual(await router.onBeforeRequest(nav(PAY, { tabId: 1 })), { cancel: true });
@@ -197,7 +220,7 @@ test("with knobas closed the page loads, and so it does when the host is missing
   });
 });
 
-test("a handoff never queues in the host behind a request that timed out, so it cannot open after the page loaded", async () => {
+test("a handoff never queues in the host behind a request that timed out, so it cannot open after the page loaded", async (t) => {
   // The host stamps a request when it gets to it, and knobas acts within 1.5 s
   // of that stamp: a handoff stuck behind a hung frame would be stamped late.
   const host = fakeHost({ answer: knobas([JIRA], opened) });
@@ -205,9 +228,13 @@ test("a handoff never queues in the host behind a request that timed out, so it 
   const { router, tabs } = await started({ host, clock });
   host.answer = (m) => (m.type === "get_rules" ? "hang" : knobas([JIRA], opened)(m));
   clock.advance(60_000); // stale: this navigation reads the rules first, and that read hangs
-  const t0 = Date.now();
-  assert.deepEqual(await router.onBeforeRequest(nav(PAY, { tabId: 1 })), { cancel: true });
-  assert.ok(Date.now() - t0 < 125, "answered on its own port, not at the handoff timeout behind the hung read");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const answer = watched(router.onBeforeRequest(nav(PAY, { tabId: 1 })));
+  await turns();
+  t.mock.timers.tick(50); // the rules read times out; the handoff's own 80 ms never pass
+  await turns();
+  assert.ok(answer.settled, "answered on its own port, not at the handoff timeout behind the hung read");
+  assert.deepEqual(answer.value, { cancel: true });
   assert.deepEqual(tabs.removed, [1]);
   assert.equal(host.ports[0].closed, true, "the port whose request timed out is closed");
   assert.equal(host.connects, 2);
