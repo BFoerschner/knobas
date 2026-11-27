@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Not shipped: makes node read src/ and test/ as ES modules for `just extension-test`."
+}

@@ -9,7 +9,10 @@
  */
 import { dropPrMove, heardRefresh, notePrMove } from "../pr/pr-state.svelte";
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filters rank through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type {
   BranchPull,
@@ -765,7 +768,47 @@ test("Commits lists sha, message and who and when; the filter narrows; a mirrore
   field.value = "jonas";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+  await settle();
   expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
+});
+
+/** Types `words` into the tab's filter and waits for the ranking's answer. */
+async function filterBy(words: string) {
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = words;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await settle();
+}
+const marked = (el: Element | null) => [...(el?.querySelectorAll("mark") ?? [])].map(text);
+
+test("Commits ranks its words through the app's ranking, letters in order, marks them, and keeps the branch's order (#2532)", async () => {
+  await draw([REPO, "commits"]);
+  // No substring holds "bmpdps"; its letters stand in order in "Bump deps".
+  await filterBy("bmpdps");
+  const rows = [...target.querySelectorAll(".tf-cbody tbody tr")];
+  expect(rows.map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
+  expect(marked(rows[0]!).join("").toLowerCase()).toBe("bmpdps");
+  // Two kept stay newest first, as the branch lists them, whichever the ranking put first: a range reads their places.
+  await filterBy("a");
+  expect([...target.querySelectorAll(".tf-cbody tbody tr")].map((tr) => text(tr.querySelector(".tf-mono")))).toEqual(["c90d11a2b3", "a41f2c0000"]);
+});
+
+test("Branches and Pull requests rank their words through the app's ranking and mark the matched letters (#2532)", async () => {
+  await draw([REPO, "branches"]);
+  await filterBy("ftsepa");
+  const branches = [...target.querySelectorAll(".tf-rbranches tbody tr[data-place]")];
+  expect(branches.map((tr) => text(tr.querySelector("td")))).toEqual(["feature/PAY-231-sepa-retry"]);
+  expect(marked(branches[0]!.querySelector("td")).join("").toLowerCase()).toBe("ftsepa");
+  unmount(view!);
+  view = null;
+  target.replaceChildren();
+
+  await draw([REPO, "prs"]);
+  await filterBy("sprtry");
+  const prs = [...target.querySelectorAll(".tf-cbody tbody tr")];
+  expect(prs.map((tr) => text(tr.querySelector("td")))).toEqual(["#142"]);
+  expect(marked(prs[0]!).join("").toLowerCase()).toBe("sprtry");
 });
 
 test("Commits' Author: Mine keeps the commits whose declared author is mine (#973)", async () => {
@@ -1904,4 +1947,57 @@ test("on a working tree whose branch the forge lacks, New pull request is off un
   branchSelect().dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
   expect(primary().tagName).toBe("A");
+});
+
+test("first open keeps the active branch selected and spacing intact when live branches replace the mirror placeholder (#2523)", async () => {
+  let releaseBranches!: () => void;
+  const branchesGate = new Promise<void>((resolve) => (releaseBranches = resolve));
+  const base = ports({
+    entityCheckout: async () => ({
+      ...checkout("/Users/mara/src/payout-service"),
+      tree: { status: "read", branch: "main", head: HEAD, upstream: null, ahead: 1, behind: 0, changed: 1, untracked: 0, conflicted: 0 },
+    }),
+  });
+  const staged = {
+    ...base,
+    getEntity: async (id: string) => {
+      const detail = await base.getEntity(id);
+      return id === REPO ? ({ ...detail, default_branch: "main" } as EntityDetail) : detail;
+    },
+    entityView: async (id: string, sectionId: string | null) => {
+      if (id === REPO && sectionId === "branches") await branchesGate;
+      return base.entityView(id, sectionId);
+    },
+  };
+
+  await draw([REPO], staged);
+  // Before live branches arrive, the mirror default is selected as the placeholder option after Working tree + <hr>.
+  expect(branchSelect().value).toBe("main");
+  const activeOptionBefore = branchSelect().selectedOptions[0];
+  expect(activeOptionBefore?.value).toBe("main");
+  expect(branchSelect().querySelectorAll("hr").length).toBe(1);
+
+  // Live branches arrive and replace the placeholder: the active branch must stay selected without unmounting its <option> or jumping to Working tree.
+  releaseBranches();
+  await settle();
+  expect(branchSelect().value).toBe("main");
+  expect(branchSelect().selectedOptions[0]).toBe(activeOptionBefore);
+  expect(branchSelect().selectedOptions[0]?.textContent).toBe("main");
+  expect(branchValues()).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  expect(branchSelect().querySelectorAll("hr").length).toBe(1);
+
+  // A second open of the same repository matches the first open identically.
+  const firstSnapshot = {
+    value: branchSelect().value,
+    options: [...branchSelect().options].map((o) => [o.value, o.textContent, o.disabled]),
+    hrs: branchSelect().querySelectorAll("hr").length,
+  };
+  unmount(view!);
+  view = null;
+  await draw([REPO], base);
+  expect({
+    value: branchSelect().value,
+    options: [...branchSelect().options].map((o) => [o.value, o.textContent, o.disabled]),
+    hrs: branchSelect().querySelectorAll("hr").length,
+  }).toEqual(firstSnapshot);
 });

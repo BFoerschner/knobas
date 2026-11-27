@@ -45,10 +45,16 @@ const refreshed = vi.hoisted(() => [] as string[]);
 
 /** The sites' settings as `site_settings` answers, when a test turns them on; the bridge's own read otherwise. */
 const siteReads = vi.hoisted(() => ({ on: false, n: 0, sources: [] as string[] }));
+/** Every `site_do` the shell asked for, as `source act` (#2528). */
+const siteActs = vi.hoisted(() => [] as string[]);
 vi.mock("../ipc/site", async (importOriginal) => {
   const real = await importOriginal<typeof import("../ipc/site")>();
   return {
     ...real,
+    siteDo: (source: string, act: string) => {
+      siteActs.push(`${source} ${act}`);
+      return Promise.resolve({ done: true, asks: null });
+    },
     siteSettings: () => {
       if (!siteReads.on) return real.siteSettings();
       siteReads.n += 1;
@@ -79,6 +85,43 @@ vi.mock("../ipc/sources", async (importOriginal) => ({
     refreshed.push(id);
     return new Promise(() => {});
   },
+}));
+
+// The Secrets page (#2515, ADR-0056) reads `passwords_held` and `password_entry`.
+vi.mock("../ipc/passwords", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc/passwords")>()),
+  passwordsHeld: () =>
+    Promise.resolve({
+      sources: [
+        {
+          id: "pw",
+          name: "Team vault",
+          account: "mara",
+          by_hand: true,
+          never_synced: false,
+          synced_at: "2026-11-22T10:22:00Z",
+          down_at: null,
+          skipped_root: null,
+          adapter_name: "Pleasant Password Server",
+          offers: {
+            one_time_codes: false,
+            expiry: false,
+            usage_comments: false,
+            audit_log: false,
+            history: null,
+            attachments: false,
+            access_requests: false,
+            marks_protected_fields: false,
+            writes: [],
+          },
+          web: null,
+        },
+      ],
+      folders: [{ id: "pw:f1", source: 0, parent: null, name: "Prod", comment_read: false, can_add: false }],
+      entries: [["pw:e1", 0, "pw:f1", "payout db", "payout_svc", "https://pay.example", null, 0, null, []]],
+      recent: [],
+    }),
+  passwordsEntry: () => Promise.resolve(null),
 }));
 
 // The Day tab reads the real bridge; its one read here is an open stretch.
@@ -1345,7 +1388,7 @@ test("badges: inbox and failing builds in err tone; nothing drawn at zero", asyn
     Code: null,
     Builds: "2 err",
     Docs: null,
-    Passwords: null,
+    Secrets: null,
     Monitors: null,
     Assets: null,
     "Link sets": null,
@@ -1359,7 +1402,7 @@ test("the nav reads Tickets first and the rest in order, with no Job entry (spec
   start();
   await at("#/job");
   const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
-  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Passwords", "Monitors", "Assets", "Link sets", "Time"]);
+  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Secrets", "Monitors", "Assets", "Link sets", "Time"]);
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 
@@ -1756,6 +1799,49 @@ test("history keys leave a text field's own keys, Ctrl+arrows, ⌥ with Ctrl and
   expect(nav.back).not.toHaveBeenCalled();
   press("[", { metaKey: true, altKey: true });
   expect(nav.back, "⌥ with ⌘ is a layout typing the bracket").toHaveBeenCalledOnce();
+});
+
+// #2528: over the site's bar the mouse's back is the site's back first, as ⌘[ is; over its page Rust decides the same.
+test("on a site's page the mouse's back and forward step in the site while it can, then in knobas", async () => {
+  const nav = { back: vi.fn(), forward: vi.fn() };
+  start({ nav });
+  await at("#/site/wiki");
+  const status = (can_back: boolean, can_forward: boolean) =>
+    siteStore.update({
+      source: "wiki",
+      phase: "live",
+      url: "https://wiki.example/x",
+      title: "X",
+      own: true,
+      loading: false,
+      can_back,
+      can_forward,
+      shown: true,
+      keyboard: "shell",
+      asks_origin: null,
+      failure: null,
+      esc_again_ms: 500,
+      fill: false,
+    });
+  const mouse = (button: 3 | 4) => window.dispatchEvent(new MouseEvent("mouseup", { button, bubbles: true, cancelable: true }));
+  try {
+    siteActs.length = 0;
+    status(true, true);
+    mouse(3);
+    mouse(4);
+    expect(siteActs).toEqual(["wiki back", "wiki forward"]);
+    expect(nav.back).not.toHaveBeenCalled();
+    expect(nav.forward).not.toHaveBeenCalled();
+    siteActs.length = 0;
+    status(false, false);
+    mouse(3);
+    mouse(4);
+    expect(siteActs, "the site has nowhere to go").toEqual([]);
+    expect(nav.back).toHaveBeenCalledOnce();
+    expect(nav.forward).toHaveBeenCalledOnce();
+  } finally {
+    siteStore.reset();
+  }
 });
 
 test("history stays put while a dialog is open, keys and mouse alike, and moves again once it closes", () => {
@@ -2757,4 +2843,33 @@ test("Zen mode: Z typed in a field is a letter, and a dialog over the page keeps
   press("z");
   expect(zen.on).toBe(true);
   zen.on = false;
+});
+
+test("Secrets: #/passwords/... redirects cleanly, / and Mod+/ open launcher with #s , and Mod+F focuses the local filter (#2515)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/passwords");
+  expect(location.hash).toBe("#/secrets");
+  expect(navEntry("Secrets").getAttribute("aria-current")).toBe("page");
+  expect(target.querySelector(".tf-pw-page h1")?.textContent).toBe("Secrets");
+  await at("#/passwords/entry/pw%3Ae1");
+  expect(location.hash).toBe("#/secrets/entry/pw%3Ae1");
+  // `/` outside a text input is not swallowed by TfPasswords and opens the launcher seeded with `#s `.
+  press("/");
+  expect(onsearch).toHaveBeenLastCalledWith("#s ");
+  // The real Secrets filter input rendered by TfPasswords: jsdom lacks layout, so stub `getClientRects` for `shownBox()`.
+  const field = target.querySelector<HTMLInputElement>(".tf-pw-filter input")!;
+  expect(field).not.toBeNull();
+  field.getClientRects = () => [{ width: 120, height: 24 }] as unknown as DOMRectList;
+  // `Mod+/` opens the launcher seeded with `#s ` even from inside the filter input.
+  field.focus();
+  onsearch.mockClear();
+  press("/", { metaKey: true });
+  expect(onsearch).toHaveBeenLastCalledWith("#s ");
+  field.blur();
+  // `Mod+F` focuses the real local filter box instead of opening the launcher.
+  onsearch.mockClear();
+  press("f", { metaKey: true });
+  expect(document.activeElement).toBe(field);
+  expect(onsearch).not.toHaveBeenCalled();
 });

@@ -17,6 +17,7 @@
   import { savedText } from "../builds/run-reads";
   import { formatBytes } from "../../sources/diagnostics";
   import { chainOf, commentFolder, expiry, isWeb, type Model } from "./model";
+  import { nameParts } from "../path";
   import { PASSWORD, type PasswordPorts } from "./ports";
   import { stampLabel } from "../../time/format";
 
@@ -119,7 +120,7 @@
     <div class="tf-pw-etitle">
       <div class="tf-pw-epath">
         {#if chain.length === 0}Not in a folder{/if}
-        {#each chain as node, i (node.id)}{#if i > 0}<span class="tf-pw-sl">/</span>{/if}<a href="#/passwords/{node.top ? `source/${encodeURIComponent(node.id.slice(4))}` : `in/${encodeURIComponent(node.id)}`}">{node.name}</a>{/each}
+        {#each chain as node, i (node.id)}{#if i > 0}<span class="tf-pw-sl">/</span>{/if}<a href="#/secrets/{node.top ? `source/${encodeURIComponent(node.id.slice(4))}` : `in/${encodeURIComponent(node.id)}`}">{node.name}</a>{/each}
       </div>
       <h2>{entry.title}</h2>
     </div>
@@ -197,9 +198,13 @@
       <div class="tf-pw-fv tf-pw-wide">
         <div class="tf-pw-files">
           {#each files as file (file.id)}
+            {@const cut = nameParts(file.name)}
             <div class="tf-pw-file">
               <span class="tf-tkkind" aria-hidden="true">{attachmentKind({ name: file.name, mime: null })}</span>
-              <span class="tf-pw-filename"><span class="tf-t">{file.name}</span>{#if file.size !== null}<span class="tf-rsub">{formatBytes(file.size)}</span>{/if}</span>
+              <span class="tf-pw-filename"
+                ><span class="tf-t tf-path" title={file.name}
+                  >{#if cut.head !== ""}<span class="tf-path-head">{cut.head}</span>{/if}<span class="tf-path-tail">{cut.tail}</span></span
+                >{#if file.size !== null}<span class="tf-rsub">{formatBytes(file.size)}</span>{/if}</span>
               <span class="tf-pw-fa">
                 <button type="button" class="tf-btn tf-sm" disabled={down || blocked} title={down ? `${source.name} does not answer` : undefined} onclick={() => (viewing = file)}>Open</button>
                 <button type="button" class="tf-btn tf-sm" disabled={down || blocked || saving === file.id} title={down ? `${source.name} does not answer` : undefined} onclick={() => void save(file)}>{saving === file.id ? "Saving…" : "Save"}</button>

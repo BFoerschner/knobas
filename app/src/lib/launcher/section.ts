@@ -16,6 +16,7 @@ const FILTER: Partial<Record<Section, string>> = {
   code: "#rp ",
   builds: "#b ",
   docs: "#d ",
+  secrets: "#s ",
   monitors: "#m ",
 };
 

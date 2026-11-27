@@ -1513,6 +1513,11 @@ async fn a_run_started_here_is_read_on_until_it_finishes() {
         "{:?}",
         moved.elapsed()
     );
+    // The row and the event are two effects of one read: under load the event lands after the row (#2538).
+    until("the run's refresh is heard", || async {
+        !heard_after(&f, RUN).is_empty()
+    })
+    .await;
     assert_eq!(heard_after(&f, RUN), [RefreshEnd::Refreshed]);
 
     *f.remote.run_state.lock().unwrap() = Some("finished");

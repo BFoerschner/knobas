@@ -7,6 +7,10 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filter ranks through the app's ranking (#2532): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+const { ranked } = await import("../filter/test-fuzzy");
+
 import type { FolderRenderer } from "../../ipc/app";
 import type { DiffFile } from "../../ipc/entity";
 import { laneOf } from "../../render/folder-compare.svelte";
@@ -100,6 +104,36 @@ test("with Rendered on and both sides kept, the rail lists the folder, its band 
   expect(target.querySelector(".tf-dfend")!.textContent!.trim()).toBe("9 generated files are the same on both sides and are not listed.");
   expect(target.querySelectorAll(".tf-dunder .tf-diff").length).toBe(2);
   expect(fake.asked.every((a) => a.ask === "look"), "a look starts nothing").toBe(true);
+});
+
+test("the filter ranks the real files flat and keeps a grouped folder's matching generated files under its row; cleared, the tree (#2532)", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("lib/x.rs"), file("lib/alert.rs"), file("docs/index.md"), file("docs/steps/03-retry.md")], fake);
+  await settle();
+  const tree = rail();
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='Filter changed files']")!;
+  input.value = "alert";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  // The real file by its whole path, no directory over it; the folder keeps only its generated file that matched.
+  expect(rail()).toEqual(["lib/alert.rs", "<docs>", "band: Made by Low-code siteReal files", "made steps/04-alert.md"]);
+  expect([...target.querySelectorAll(".tf-flist .tf-dmade mark")].map((m) => m.textContent).join("")).toBe("alert");
+  // A folder kept by its own name stays, with no generated file under it.
+  input.value = "docs";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  expect(rail()).toEqual(["<docs>", "band: Made by Low-code siteReal files"]);
+  input.value = "";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  expect(rail()).toEqual(tree);
 });
 
 test("without a checkout no folder is offered: no glyph, no group", async () => {
@@ -315,4 +349,23 @@ test("a generated file's last line break ends its last line: no empty line after
     [...target.querySelectorAll<HTMLElement>(".tf-flist button.tf-dmade")].find((b) => b.querySelector(".tf-fname")!.textContent === name)!.querySelector(".tf-n")!.textContent!.trim();
   expect(counts("index.md")).toBe("+1 −1");
   expect(counts("steps/04-alert.md")).toBe("+1 −0");
+});
+
+test("grouped folders and renderer-marked directories in the diff rail collapse on click without firing the renderer glyph", async () => {
+  const fake = fakeCompareBackend();
+  fake.keep(laneOf(SHA), "a");
+  fake.keep(laneOf(WT), "b");
+  fake.answers.set("a\nb", DIFFERS);
+  rendering.set(true);
+  draw([file("lib/x.rs"), file("docs/index.md")], fake);
+  await settle();
+  const grouped = target.querySelector<HTMLButtonElement>(".tf-flist button.tf-dgdir")!;
+  expect(grouped.getAttribute("aria-expanded")).toBe("true");
+  grouped.click();
+  flushSync();
+  expect(grouped.getAttribute("aria-expanded")).toBe("false");
+  expect(rail()).toEqual(["<docs>", "[lib]", "x.rs"]);
+  grouped.click();
+  flushSync();
+  expect(rail()).toEqual(["<docs>", "band: Made by Low-code siteReal files", "made index.md", "made steps/04-alert.md", "[lib]", "x.rs"]);
 });

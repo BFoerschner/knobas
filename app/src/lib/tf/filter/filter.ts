@@ -122,8 +122,17 @@ export function words(text: string): string[] {
 
 /** Whether every word typed appears in `haystack`, in any order, ignoring case (R-2.3). */
 export function matchesAll(haystack: string, text: string): boolean {
-  const lower = haystack.toLowerCase();
-  return words(text).every((word) => lower.includes(word));
+  return matcherOf(text)(haystack);
+}
+
+/** {@link matchesAll} for one text over many rows, its words read once (#2532: a key's fallback over 10,000 rows). */
+export function matcherOf(text: string): (haystack: string) => boolean {
+  const typed = words(text);
+  return (haystack) => {
+    const lower = haystack.toLowerCase();
+    for (const word of typed) if (!lower.includes(word)) return false;
+    return true;
+  };
 }
 
 /** A run of drawn text, and whether a typed word matched it. */
@@ -143,6 +152,51 @@ export function marks(text: string, typed: string): Mark[] {
   return markNeedles(text, words(typed));
 }
 
+/** {@link marks} as pairs of start and end (#2532): what a ranked list's rows mark where the ranking did not answer. */
+export function wordPairs(text: string, typed: string): number[] {
+  return runPairs(marks(text, typed));
+}
+
+/**
+ * Fields joined into the one text a filter's ranking reads (#2532, #2535), and where each stands in it, so the
+ * ranking's marks cut back onto the cells that draw each field. One join makes both: a separator changed or a field
+ * added moves every place after it in step.
+ */
+export interface Joined {
+  readonly text: string;
+  /**
+   * `pairs` over {@link text}, or over a longer text that starts with it, cut onto field `i` and rebased onto it;
+   * `from` and `length` narrow the cut to part of the field.
+   */
+  cut(pairs: readonly number[], i: number, from?: number, length?: number): number[];
+}
+
+/** `fields` joined by `sep` (a space), as {@link Joined}. */
+export function joined(fields: readonly string[], sep = " "): Joined {
+  const at: number[] = [];
+  let next = 0;
+  for (const field of fields) {
+    at.push(next);
+    next += field.length + sep.length;
+  }
+  const text = fields.join(sep);
+  return {
+    text,
+    cut: (pairs, i, from = 0, length = (fields[i]?.length ?? 0) - from) => sliceMarks(pairs, (at[i] ?? text.length) + from, length),
+  };
+}
+
+/** Runs cut from one text, as the UTF-16 pairs of start and end of the marked ones: what the ranking answers. */
+export function runPairs(runs: readonly Mark[]): number[] {
+  const pairs: number[] = [];
+  let at = 0;
+  for (const run of runs) {
+    if (run.hit) pairs.push(at, at + run.text.length);
+    at += run.text.length;
+  }
+  return pairs;
+}
+
 /** {@link marks} for needles already read (lowercased); a needle may hold spaces, as a phrase does. */
 export function markNeedles(text: string, needles: readonly string[]): Mark[] {
   const hit = new Array<boolean>(text.length).fill(false);
@@ -160,6 +214,41 @@ export function markNeedles(text: string, needles: readonly string[]): Mark[] {
     else runs.push({ text: text[at]!, hit: hit[at]! });
   }
   return runs.length === 0 ? [{ text, hit: false }] : runs;
+}
+
+/**
+ * Clips UTF-16 `[start, end, ...]` mark pairs from `frizbee` (`FuzzyRanked.marks`)
+ * to the field slice `[from, from + length)` and rebases them to `0..length` (#2520).
+ */
+export function sliceMarks(pairs: readonly number[], from: number, length = Infinity): number[] {
+  if (pairs.length < 2 || length <= 0) return [];
+  const limit = from + length;
+  const out: number[] = [];
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    const start = Math.max(pairs[i]!, from);
+    const end = Math.min(pairs[i + 1]!, limit);
+    if (end > start) out.push(start - from, end - from);
+  }
+  return out;
+}
+
+/**
+ * Splits `text` into plain and matched runs from UTF-16 `[start, end, ...]` pairs
+ * (`frizbee`), optionally shifted by `from` code units into a longer haystack (#2520).
+ */
+export function markPairs(text: string, pairs: readonly number[], from = 0): Mark[] {
+  const runs: Mark[] = [];
+  let at = 0;
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    const start = Math.max(at, pairs[i]! - from);
+    const end = Math.min(text.length, pairs[i + 1]! - from);
+    if (end <= start) continue;
+    if (start > at) runs.push({ text: text.slice(at, start), hit: false });
+    runs.push({ text: text.slice(start, end), hit: true });
+    at = end;
+  }
+  if (at < text.length || runs.length === 0) runs.push({ text: text.slice(at), hit: false });
+  return runs;
 }
 
 /** The result count (R-2.1): "8 of 75 tickets", or "75 tickets" when nothing filters. */

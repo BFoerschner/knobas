@@ -16,6 +16,7 @@ import { refTarget, type OpRow, type PageAnswer, type Prop, type Resolved, type 
 import { factsOf, firstOpen, groupsOf, hasInside, namedSchema, pathTree, refName, type Dir, type Group, type RailMode } from "../../render/openapi-view";
 import type { SpecSession } from "../../render/openapi-port";
 import type { RequestDraft } from "../../render/openapi-request";
+import { collectDescendants, TREE_EXPAND_CAP } from "../tree-alt";
 
 /** A send as the request column draws it: running, answered or failed, refused before it went. */
 export type Sending =
@@ -217,6 +218,19 @@ export class OasState {
     this.folds = next;
   }
 
+  /** Opens or shuts a Paths directory fold and every nested directory beneath it (Alt+click). */
+  foldDir(dir: Dir, open?: boolean): void {
+    const rootKey = `p:${dir.path}`;
+    const want = open ?? !this.folds.has(rootKey);
+    const next = new Set(this.folds);
+    for (const d of collectDescendants([dir], (x) => x.dirs, TREE_EXPAND_CAP)) {
+      const k = `p:${d.path}`;
+      if (want) next.add(k);
+      else next.delete(k);
+    }
+    this.folds = next;
+  }
+
   /** The operation a place names, of the spec's operations or its webhooks. */
   opAt(place: Place): OpRow | null {
     const index = this.index;
@@ -334,10 +348,10 @@ export class OasState {
   }
 
   /** The example made for choice `choice` of the part at `key`, asked once (a switch over the top `oneOf`). */
-  async sampleChoice(key: string, base: string, node: unknown, direction: "request" | "response" | "any", choice: number): Promise<void> {
+  async sampleChoice(key: string, base: string, node: unknown, direction: "request" | "response" | "any", choice: number, media?: string): Promise<void> {
     const at = `${key}|${choice}`;
     if (this.samples.has(at)) return;
-    this.samples.set(at, await this.session.sample(base, node, direction, choice));
+    this.samples.set(at, await this.session.sample(base, node, direction, choice, media));
   }
 
   /** Opens or shuts the caret at `key`. */

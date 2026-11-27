@@ -17,6 +17,7 @@ import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { runPairs } from "../../../tf/filter/filter";
 import { fuzzyRank } from "../../../tf/filter/fuzzy";
 import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
 
@@ -667,15 +668,7 @@ function manyProjects(): { key: string; value: string; detail: string }[] {
  */
 export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { index: number; loose: boolean; marks: number[] }[] {
   const indexed = haystacks.map((haystack, index) => ({ haystack, index }));
-  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => {
-    const marks: number[] = [];
-    let at = 0;
-    for (const run of runs) {
-      if (run.hit) marks.push(at, at + run.text.length);
-      at += run.text.length;
-    }
-    return { index: option.index, loose: false, marks };
-  });
+  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => ({ index: option.index, loose: false, marks: runPairs(runs) }));
 }
 
 /**
@@ -684,12 +677,13 @@ export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { ind
  * Rust's (frizbee reads 40,000 names in about a millisecond), so the probes time the page's own part of a key, not
  * the letters-in-order matcher the view editor uses, which takes about 45 ms over 5,000 texts.
  */
-export function fakeHeldRank(text: string, haystacks: readonly string[]): { index: number; loose: boolean; marks: number[] }[] {
+export function fakeHeldRank(text: string, haystacks: readonly string[], lowered?: readonly string[]): { index: number; loose: boolean; marks: number[] }[] {
   const words = text.toLowerCase().split(/\s+/).filter((w) => w !== "");
   if (words.length === 0) return [];
   const out: { index: number; loose: boolean; marks: number[]; at: number }[] = [];
   haystacks.forEach((haystack, index) => {
-    const lower = haystack.toLowerCase();
+    // A held list's texts are lowercased once, as it is held (#2532): a key over 10,000 lowercased none again.
+    const lower = lowered?.[index] ?? haystack.toLowerCase();
     const marks: number[] = [];
     for (const w of words) {
       const at = lower.indexOf(w);
@@ -701,28 +695,29 @@ export function fakeHeldRank(text: string, haystacks: readonly string[]): { inde
   return out.sort((a, b) => a.at - b.at || a.index - b.index).map(({ index, loose, marks }) => ({ index, loose, marks }));
 }
 
-/** The fake's held lists (`fuzzy_hold`), the least lately used first. */
-const fakeHeld = new Map<string, string[]>();
+/** The fake's held lists (`fuzzy_hold`), the least lately used first, each with its texts lowercased. */
+const fakeHeld = new Map<string, { texts: string[]; lower: string[] }>();
 keepSeed(fakeHeld);
 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   longFiles = params.has("fake-long-paths");
   return {
     fuzzy_rank: (args) => fakeFuzzyRank(String(args["text"] ?? ""), (args["haystacks"] as string[] | undefined) ?? []),
-    // Held lists (ux31): the same ranking over texts sent once, four at most, the least lately used dropped.
+    // Held lists (ux31, #2520): the same ranking over texts sent once, 32 at most, the least lately used dropped.
     fuzzy_hold: (args) => {
       const id = String(args["id"] ?? "");
       fakeHeld.delete(id);
-      fakeHeld.set(id, (args["haystacks"] as string[] | undefined) ?? []);
-      while (fakeHeld.size > 4) fakeHeld.delete(fakeHeld.keys().next().value!);
+      const texts = (args["haystacks"] as string[] | undefined) ?? [];
+      fakeHeld.set(id, { texts, lower: texts.map((text) => text.toLowerCase()) });
+      while (fakeHeld.size > 32) fakeHeld.delete(fakeHeld.keys().next().value!);
     },
     fuzzy_rank_held: (args) => {
       const id = String(args["id"] ?? "");
-      const texts = fakeHeld.get(id);
-      if (texts === undefined) throw { code: "not_found", message: `No list ${id} is held.` };
+      const held = fakeHeld.get(id);
+      if (held === undefined) throw { code: "not_found", message: `No list ${id} is held.` };
       fakeHeld.delete(id);
-      fakeHeld.set(id, texts);
-      return fakeHeldRank(String(args["text"] ?? ""), texts);
+      fakeHeld.set(id, held);
+      return fakeHeldRank(String(args["text"] ?? ""), held.texts, held.lower);
     },
     fuzzy_drop: (args) => void fakeHeld.delete(String(args["id"] ?? "")),
     // The launcher board (#504): the recent items alone since #2421 and

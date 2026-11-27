@@ -3,6 +3,7 @@
  * menu stays only in a field, its keys and its closing, and what each pick sends, through fake ports.
  */
 import { flushSync, mount, tick, unmount } from "svelte";
+import { takeAsked } from "../repo/text-search.svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { CheckoutSettings, CheckoutView, EntityDetail } from "../../ipc/entity";
@@ -13,6 +14,7 @@ import { createApps, type Apps } from "../openin/apps.svelte";
 import TfContextMenu from "./TfContextMenu.svelte";
 import type { MenuPorts } from "./ports";
 import { menuThing } from "./thing";
+import { runsRead } from "../builds/runs-read.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 
@@ -395,6 +397,35 @@ test("selected words: Copy is the document's own copy, Search opens the launcher
   expect(searched).toEqual(["retry the payout"]);
 });
 
+test("Search in repository on a diff's selection hands the words to the repository's Files tab and goes there", async () => {
+  location.hash = "#/pr/gitea%3Aacme%2Fpay%2312/files";
+  await draw(`<div class="tf-diff" data-search-repo="gitea:acme/pay"><span class="words">retry_on</span></div>`);
+  const words = page.querySelector(".words")!;
+  const range = document.createRange();
+  range.selectNodeContents(words);
+  getSelection()!.removeAllRanges();
+  getSelection()!.addRange(range);
+  rightClick(words);
+  expect(rows()).toEqual(["copy-sel", "search-sel", "search-repo"]);
+  row("search-repo").click();
+  expect(calls["go"]).toEqual([["#/repo/gitea%3Aacme%2Fpay/files"]]);
+  expect(takeAsked("gitea:acme/pay")).toBe("retry_on");
+});
+
+test("Search in repository on the repository's own file stays on the file", async () => {
+  location.hash = "#/repo/gitea%3Aacme%2Fpay/files/src/a.rs";
+  await draw(`<div class="tf-fileview"><div class="tf-l" data-n="1"><span class="words">retry_on</span></div></div>`);
+  const words = page.querySelector(".words")!;
+  const range = document.createRange();
+  range.selectNodeContents(words);
+  getSelection()!.removeAllRanges();
+  getSelection()!.addRange(range);
+  rightClick(words);
+  row("search-repo").click();
+  expect(calls["go"]).toBeUndefined();
+  expect(takeAsked("gitea:acme/pay")).toBe("retry_on");
+});
+
 test("a tagged row: a monitor with an open alert offers Acknowledge, with Undo on its toast", async () => {
   await draw(`<table><tr class="m"><td>payout-api</td></tr></table>`);
   menuThing(() => ({ kind: "monitor", id: "kuma:7", hash: "#/monitors/at/kuma%3A7", alerting: true }))(page.querySelector(".m")!);
@@ -569,4 +600,33 @@ test.each(Array.from({ length: 60 }, (_, index) => index + 1))("right-click spam
     expect(layers.open, steps.join(" ")).toHaveLength(0);
     expect(page.querySelectorAll("[data-ctx-on]"), steps.join(" ")).toHaveLength(0);
   });
+});
+
+test("a Builds folder's Mark N runs as read marks its pipelines' unread failures, drawn at once, with Undo on its toast (#2543)", async () => {
+  const marked: [string[], string[]][] = [];
+  const unmarked: string[][] = [];
+  runsRead.ports = {
+    read: async () => [],
+    mark: async (runs, pipelines) => (marked.push([[...runs], [...pipelines]]), [...runs]),
+    unmark: async (runs) => (unmarked.push([...runs]), [...runs]),
+  };
+  try {
+    await runsRead.load();
+    await draw(`<details><summary class="f">Payout</summary></details>`);
+    menuThing(() => ({ kind: "pipeline-folder", name: "Payout", unread: ["tc:9", "tc:3"], pipelines: ["tc:Pay", "tc:Rel"] }))(page.querySelector(".f")!);
+    rightClick(page.querySelector(".f")!);
+    expect(rows()).toEqual(["read-runs", "copy-name"]);
+    expect(row("read-runs").textContent).toContain("Mark 2 runs as read");
+    row("read-runs").click();
+    expect(runsRead.read, "drawn read before the backend answers").toEqual(new Set(["tc:9", "tc:3"]));
+    await settle();
+    expect(marked, "the runs drawn, and every failed run of the folder's pipelines").toEqual([[["tc:9", "tc:3"], ["tc:Pay", "tc:Rel"]]]);
+    const toast = toasts.items.find((one) => one.action?.label === "Undo")!;
+    expect(toast.text).toBe("Marked 2 runs as read");
+    toast.action!.run();
+    await settle();
+    expect(unmarked).toEqual([["tc:9", "tc:3"]]);
+  } finally {
+    runsRead.forget();
+  }
 });

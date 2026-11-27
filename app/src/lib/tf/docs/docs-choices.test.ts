@@ -65,14 +65,12 @@ test("a read a write overtook holds nothing", async () => {
 
 const space = (source: string, key: string, name: string): DocSpace => ({ source_id: source, source_name: source === "a" ? "Wiki A" : "Wiki B", key, name, pages: [] });
 
-test("the rail's spaces: the hidden ones apart, both kept to the words by name, source where shared, and key", () => {
+test("the rail's spaces: the hidden ones apart, each in the order given", () => {
   const spaces = [space("a", "ENG", "Engineering"), space("a", "OPS", "Operations"), space("b", "ENG2", "Engineering"), space("a", "ARC", "Archive")];
   const names = (list: DocSpace[]) => list.map((s) => `${s.source_id}/${s.key}`);
-  const all = railSpaces(spaces, new Set(["a/ARC"]), "");
+  const all = railSpaces(spaces, new Set(["a/ARC"]));
   expect(names(all.shown)).toEqual(["a/ENG", "a/OPS", "b/ENG2"]);
   expect(names(all.hidden)).toEqual(["a/ARC"]);
-  expect(names(railSpaces(spaces, new Set(), "ops").shown), "by key").toEqual(["a/OPS"]);
-  expect(names(railSpaces(spaces, new Set(), "engineering wiki b").shown), "every word, the shared name's source too").toEqual(["b/ENG2"]);
-  const narrowed = railSpaces(spaces, new Set(["a/ARC"]), "ARCH");
-  expect([names(narrowed.shown), names(narrowed.hidden)]).toEqual([[], ["a/ARC"]]);
+  const ranked = railSpaces([spaces[3]!, spaces[2]!, spaces[0]!], new Set(["a/ARC"]));
+  expect([names(ranked.shown), names(ranked.hidden)], "the ranking's order kept").toEqual([["b/ENG2", "a/ENG"], ["a/ARC"]]);
 });

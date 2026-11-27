@@ -11,6 +11,7 @@ import {
   mirrorStanding,
   ancestors,
   branchOptions,
+  selectBranches,
   buildsHash,
   withMade,
   readAllRows,
@@ -48,6 +49,8 @@ import {
   shaOf,
   underRepoHash,
   visibleRepoPrs,
+  repoPrText,
+  commitText,
   viewRows,
   visibleViewRows,
 } from "./repo";
@@ -182,6 +185,19 @@ test("a branch this session made is offered after the listed ones until a read l
   expect(withMade(listed, [])).toEqual(listed);
 });
 
+test("selectBranches yields the placeholder branch before live branches arrive and hands back live options once known (#2523)", () => {
+  const live = [
+    { name: "main", entityId: "m", isDefault: true },
+    { name: "feature/x", entityId: "x", isDefault: false },
+  ];
+  expect(selectBranches(null, "main", false)).toEqual([{ name: "main", entityId: null, isDefault: true }]);
+  expect(selectBranches(null, "main", true)).toEqual([]);
+  expect(selectBranches(null, null, false)).toEqual([]);
+  expect(selectBranches(null, "", false)).toEqual([]);
+  expect(selectBranches(live, "main", false)).toBe(live);
+  expect(selectBranches([], "main", false)).toEqual([]);
+});
+
 const file = (path: string, old_path: string | null = null): DiffFile => ({
   path,
   old_path,
@@ -281,8 +297,10 @@ test("the repository's pull requests are those whose parent is it, in its source
   ];
   const mine = repoPrs(rows, repo);
   expect(mine.map((r) => r.title)).toEqual(["Retry", "Old fix"]);
-  expect(visibleRepoPrs(mine, ["Merged"], "").map((r) => r.title)).toEqual(["Old fix"]);
-  expect(visibleRepoPrs(mine, [], "#142").map((r) => r.title)).toEqual(["Retry"]);
+  expect(visibleRepoPrs(mine, ["Merged"]).map((r) => r.title)).toEqual(["Old fix"]);
+  expect(visibleRepoPrs(mine, []).map((r) => r.title)).toEqual(["Retry", "Old fix"]);
+  // The typed words rank the number and the title (#2532).
+  expect(mine.map(repoPrText)).toEqual(["#142 Retry", "#139 Old fix"]);
 });
 
 test("a branch or commit is under the repository its declared parent names, in its source (#1440)", () => {
@@ -303,14 +321,13 @@ test("a branch lands on its repository's Branches tab, a commit on its page unde
   expect(underRepoHash("commit", "mock:9f2c1ab", REPO)).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/commits/mock%3A9f2c1ab");
 });
 
-test("a view's rows filter on every word typed across chip, title and meta", () => {
+test("a commit row is ranked by its chip, title and meta, a space between each (#2532)", () => {
   const rows = [
     { entity_id: null, title: "PAY-231: jitter", meta: "mara · 2 hours ago", tone: null, chip: "c90d11", url: null },
-    { entity_id: null, title: "Bump deps", meta: "jonas · 3 days ago", tone: null, chip: "a41f2c", url: null },
+    { entity_id: null, title: "Bump deps", meta: null, tone: null, chip: null, url: null },
   ];
-  expect(visibleViewRows(rows, "jonas").map((r) => r.chip)).toEqual(["a41f2c"]);
-  expect(visibleViewRows(rows, "c90 jitter").map((r) => r.chip)).toEqual(["c90d11"]);
-  expect(visibleViewRows(rows, "")).toHaveLength(2);
+  expect(rows.map(commitText)).toEqual(["c90d11 PAY-231: jitter mara · 2 hours ago", " Bump deps "]);
+  expect(visibleViewRows(rows)).toBe(rows);
 });
 
 // ---- Branches, compare and edit (#839, #840, #845) ----
@@ -415,9 +432,8 @@ test("the Branches filter keeps by name, by No PR and by Merged, the default bra
     { name: "chore/bump-tokio", entityId: "y", isDefault: false, meta: null, standing: branchStanding(branchView({ ahead: "0" })), ...by("jonas") },
     { name: "unread", entityId: null, isDefault: false, meta: null, standing: null, ...by(null) },
   ];
-  const names = (show: string[], text = "") => visibleBranches(rows, show, text).map((row) => row.name);
+  const names = (show: string[]) => visibleBranches(rows, show).map((row) => row.name);
   expect(names([])).toEqual(["main", "feature/PAY-231-sepa-retry", "spike/sepa-instant", "chore/bump-tokio", "unread"]);
-  expect(names([], "sepa")).toEqual(["feature/PAY-231-sepa-retry", "spike/sepa-instant"]);
   expect(names(["No PR"])).toEqual(["spike/sepa-instant", "chore/bump-tokio"]);
   expect(names(["Merged"])).toEqual(["chore/bump-tokio"]);
   expect(names(["No PR", "Merged"])).toEqual(["chore/bump-tokio"]);
@@ -433,8 +449,8 @@ test("Commits' Author: Mine keeps the rows whose declared author is mine, not th
     { entity_id: null, title: "Unmirrored", meta: "mara · 4 days ago", tone: null, chip: "0b1c2d", url: null },
   ];
   const mine = new Set([`${REPO}@c90d11`]);
-  expect(visibleViewRows(rows, "", mine).map((r) => r.chip)).toEqual(["c90d11"]);
-  expect(visibleViewRows(rows, "", null)).toHaveLength(3);
+  expect(visibleViewRows(rows, mine).map((r) => r.chip)).toEqual(["c90d11"]);
+  expect(visibleViewRows(rows, null)).toHaveLength(3);
 });
 
 test("the header reads team, language, then the last push, as prototype-6's repoHead (#973)", () => {

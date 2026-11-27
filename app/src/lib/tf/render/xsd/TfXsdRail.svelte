@@ -21,6 +21,7 @@
   import { KIND_WORD, railRows, type RailMode, type RailRow } from "../../../render/xsd-view";
   import TfXsdOcc from "./TfXsdOcc.svelte";
   import type { XsdState } from "./xsd.svelte";
+  import { isAltClick } from "../../tree-alt";
 
   let {
     st,
@@ -235,7 +236,11 @@
           aria-expanded={row.row.kids ? row.open : undefined}
           title={row.row.again ? "It holds itself: it does not open again" : undefined}
           onclick={(e) => {
-            if ((e.target as Element).closest(".tf-oas-caret") !== null && row.row.kids) {
+            if (isAltClick(e) && row.row.kids) {
+              e.preventDefault();
+              st.cursor = row.k;
+              void st.foldAll(row.k);
+            } else if ((e.target as Element).closest(".tf-oas-caret") !== null && row.row.kids) {
               st.cursor = row.k;
               void st.fold(row.k);
             } else press(row);

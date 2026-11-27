@@ -14,7 +14,7 @@ import { ageLabel, dayHeadingLabel, secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
 import { refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
 import type { WriteSource } from "../../shell/queued-toast";
-import { matchesAll } from "../filter/filter";
+import { joined, type Joined } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
 import { echoWrite, type Echo } from "../queued.svelte";
 import { credentialFix, secretNoun } from "../settings/settings";
@@ -319,9 +319,33 @@ export function triggerLabel(run: RunRow): string {
   return who;
 }
 
-/** Where the Runs filter stands. */
+/**
+ * What the Runs filter ranks a run by (#2535): its number, branch, commit, how it started and who started it, in the
+ * order the row draws the first three cells, so {@link runMarks} can cut the ranking's marks onto them.
+ */
+export function runText(run: RunRow): string {
+  return runFields(run).text;
+}
+
+function runFields(run: RunRow): Joined {
+  return joined([`#${run.number ?? ""}`, run.branch ?? "", run.revision ?? "", triggerLabel(run), run.started_by ?? ""]);
+}
+
+/** A run's matched letters on each cell the row draws them in, each rebased onto that cell's text. */
+export interface RunMarks {
+  number: readonly number[];
+  branch: readonly number[];
+  trigger: readonly number[];
+}
+
+/** The ranking's `pairs` over {@link runText} (and anything after it) cut onto the run's cells. A queued run draws no number. */
+export function runMarks(run: RunRow, pairs: readonly number[]): RunMarks {
+  const fields = runFields(run);
+  return { number: run.number === null ? [] : fields.cut(pairs, 0), branch: fields.cut(pairs, 1), trigger: fields.cut(pairs, 3) };
+}
+
+/** Where the Runs filter's chips and scope stand; the typed words rank {@link runText} through the app. */
 export interface RunFilter {
-  text: string;
   /**
    * `job` keeps the runs on the job's branches, `mine` the runs the reader
    * started; anything else keeps all.
@@ -331,15 +355,9 @@ export interface RunFilter {
   branch: string | null;
 }
 
-/**
- * The runs the filter keeps, in their order: the words over the run's
- * number, branch, commit and who or what started it, the scope, any of the
- * result chips, and the branch.
- */
+/** The runs the scope, any of the result chips and the branch keep, in their order. */
 export function keptRuns(runs: readonly RunRow[], filter: RunFilter, jobBranches: readonly string[]): RunRow[] {
   return runs.filter((run) => {
-    const words = `#${run.number ?? ""} ${run.branch ?? ""} ${run.revision ?? ""} ${triggerLabel(run)} ${run.started_by ?? ""}`;
-    if (!matchesAll(words, filter.text)) return false;
     if (filter.scope === "job" && !(run.branch !== null && jobBranches.includes(run.branch))) return false;
     if (filter.scope === "mine" && !run.started_by_me) return false;
     if (filter.results.length > 0) {

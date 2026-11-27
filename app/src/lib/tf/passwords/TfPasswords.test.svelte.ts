@@ -1,12 +1,16 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// The filter ranks through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+
 import type { AttachmentAnswer, Held, PwEntry, PwRow, ReadAnswer, SecretRef, WriteAnswer } from "../../ipc/passwords";
 import TfPasswords from "./TfPasswords.svelte";
 import { forgetHeld } from "./held.svelte";
 import { forgetComment, type PasswordPorts } from "./ports";
 import { resetClip } from "./clip.svelte";
 import { siteStore } from "../site/site.svelte";
+import { onMac } from "../../shell/platform";
 import type { SiteSetting } from "../../ipc/site";
 
 /** The password source's site, as Settings holds it (ux30): it opens inside and signs in with the source's credential. */
@@ -120,7 +124,7 @@ test("the tree lists the folders under the skipped root, with their totals and t
   expect(text(".tf-pw-node .tf-pw-nm")).toEqual(["All entries", "Payments", "Platform"]);
   expect(text(".tf-pw-node .tf-pw-n")).toEqual(["10", "9", "1"]);
   expect(target.querySelectorAll(".tf-pw-node .tf-pw-mark")).toHaveLength(1);
-  expect(target.querySelector("h1")?.textContent).toBe("Passwords");
+  expect(target.querySelector("h1")?.textContent).toBe("Secrets");
   expect(target.querySelector(".tf-sub")?.textContent).toContain("10 entries in 3 folders. Synced by hand at");
 });
 
@@ -196,7 +200,7 @@ test("a source that does not answer keeps its entries; reads are turned off and 
   // With one source there is no top row to dot: the header says it.
 });
 
-test("the keys: c copies the password, u the username, o the code; r does nothing", async () => {
+test("the keys: c copies the password, u the username, o the code; r does nothing; / does not swallow section search", async () => {
   const p = ports();
   await open(p, ["entry", "pw:graf"]);
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }));
@@ -208,11 +212,19 @@ test("the keys: c copies the password, u the username, o the code; r does nothin
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true }));
   await settle();
   expect(p.held).toHaveBeenCalledTimes(1);
+  // `/` belongs to the shell's section search (#2515), not the local filter.
+  const slash = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  window.dispatchEvent(slash);
+  await settle();
+  expect(slash.defaultPrevented).toBe(false);
+  expect(document.activeElement).not.toBe(target.querySelector(".tf-pw-filter input"));
+  expect(target.querySelector(".tf-pw-filter kbd")?.textContent).toMatch(/^(⌘F|Ctrl\+F)$/);
 });
 
-test("no password source says how to add one; one never synced offers its sync", async () => {
+test("no secrets source says how to add one; one never synced offers its sync", async () => {
   await open(ports({}, { sources: [], folders: [], entries: [], recent: [] }));
-  expect(target.querySelector("h1")?.textContent).toBe("No password source yet");
+  expect(target.querySelector("h1")?.textContent).toBe("No secrets source yet");
+  expect(target.querySelector(".tf-empty a")?.textContent).toBe("Add a secrets source");
   unmount(app!);
   app = null;
   forgetHeld();
@@ -499,4 +511,272 @@ test("leaving the page after the filter's index has had its first frame drops th
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+/** Mounted with props that change after the mount, as the router changes `rest`. */
+async function openLive(p: PasswordPorts, rest: string[]): Promise<{ rest: string[] }> {
+  const props = $state({ ready: true, rest, ports: p, timedTicket: null as string | null });
+  app = mount(TfPasswords, { target, props });
+  await settle();
+  return props;
+}
+
+const filterBox = () => target.querySelector<HTMLInputElement>(".tf-pw-filter input")!;
+async function type(value: string): Promise<void> {
+  filterBox().value = value;
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+}
+const node = (name: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-pw-node")].find((b) => b.querySelector(".tf-pw-nm")?.textContent === name)!;
+
+test("in a folder the filter reads only that folder and the folders under it, and says so (#2531)", async () => {
+  await open(ports(), ["in", "pw:pay"]);
+  expect(filterBox().placeholder).toBe("Filter Payments");
+  // "a" is in grafana (Platform) too, which is not under Payments.
+  await type("a");
+  expect(text(".tf-pw-lhead h3")).toEqual(["9 entries in Payments"]);
+  expect(text(".tf-pw-row .tf-pw-t")).not.toContain("grafana");
+  await type("grafana");
+  expect(text(".tf-pw-blank p")[0]).toContain('Nothing in Payments matches "grafana".');
+});
+
+test("the app ranks every entry, held to the folder's scope, marks the letters it matched, and a key keeps what was drawn until its answer (#2535)", async () => {
+  await open(ports());
+  const before = text(".tf-pw-lhead h3");
+  filterBox().value = "agnt3";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  // The answer is out: the folders' panels stand as drawn, no list of the old filter in between.
+  expect(text(".tf-pw-lhead h3")).toEqual(before);
+  await settle();
+  // No substring holds "agnt3"; its letters stand in order in "agent 3".
+  const rows = [...target.querySelectorAll(".tf-pw-row .tf-pw-t")];
+  expect(rows[0]?.textContent).toBe("agent 3");
+  expect([...rows[0]!.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("agnt3");
+  await type("grfn");
+  expect(text(".tf-pw-row .tf-pw-t")).toContain("grafana");
+  unmount(app!);
+  app = null;
+
+  await open(ports(), ["in", "pw:pay"]);
+  // "grfn" holds in grafana, which is in Platform, not under Payments.
+  await type("grfn");
+  expect(text(".tf-pw-blank p")[0]).toContain('Nothing in Payments matches "grfn".');
+});
+
+test("another folder, by a press, a link or the address, clears the filter (#2531)", async () => {
+  const props = await openLive(ports(), ["in", "pw:pay"]);
+  await type("agent");
+  // The address moves without a press of the tree: a crumb, a panel's head, Back.
+  props.rest = ["in", "pw:plat"];
+  await settle();
+  expect(filterBox().value).toBe("");
+  expect(text(".tf-pw-row .tf-pw-t")).toEqual(["grafana"]);
+  await type("graf");
+  node("Payments").click();
+  await settle();
+  expect(filterBox().value).toBe("");
+});
+
+test("the folder on show is drawn selected, also while the filter has words (#2531)", async () => {
+  await open(ports(), ["in", "pw:pay"]);
+  expect(node("Payments").getAttribute("aria-current")).toBe("true");
+  expect(node("Platform").getAttribute("aria-current")).toBeNull();
+  await type("agent");
+  expect(node("Payments").getAttribute("aria-current")).toBe("true");
+});
+
+test("a press on a folder's row selects it and never folds it; the chevron and ← → fold (#2531)", async () => {
+  const props = await openLive(ports(), []);
+  const pressed = () => node("Payments").getAttribute("aria-expanded");
+  node("Payments").querySelector<HTMLElement>(".tf-pw-nm")!.click();
+  props.rest = ["in", "pw:pay"];
+  await settle();
+  // Select-only (spec #2514): a press on a closed folder selects it and leaves it closed.
+  expect(location.hash).toBe("#/secrets/in/pw%3Apay");
+  expect(node("Payments").getAttribute("aria-current")).toBe("true");
+  expect(pressed()).toBe("false");
+  node("Payments").querySelector<HTMLElement>("[data-twist]")!.click();
+  await settle();
+  expect(pressed()).toBe("true");
+  // On the folder on show, open: a second press does not close it.
+  node("Payments").querySelector<HTMLElement>(".tf-pw-nm")!.click();
+  await settle();
+  expect(pressed()).toBe("true");
+  node("Payments").click();
+  await settle();
+  expect(pressed()).toBe("true");
+  node("Payments").querySelector<HTMLElement>("[data-twist]")!.click();
+  await settle();
+  expect(pressed()).toBe("false");
+  node("Payments").focus();
+  node("Payments").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+  await settle();
+  expect(pressed()).toBe("true");
+});
+
+test("Alt+click on a folder opens everything under it, and again closes everything under it (#2531)", async () => {
+  const deep = held();
+  deep.folders.push({ id: "pw:linux", source: 0, parent: "pw:agents", name: "Linux", comment_read: false, can_add: true });
+  deep.entries.push(row("pw:lx", "pw:linux", "linux agent"));
+  location.hash = "#/secrets";
+  await open(ports({}, deep));
+  const alt = (name: string) => node(name).dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true, button: 0 }));
+  alt("Payments");
+  await settle();
+  expect(text(".tf-pw-node .tf-pw-nm")).toEqual(["All entries", "Payments", "Agents", "Linux", "Platform"]);
+  // Alt+click selects nothing: the address stays.
+  expect(location.hash).toBe("#/secrets");
+  alt("Payments");
+  await settle();
+  expect(text(".tf-pw-node .tf-pw-nm")).toEqual(["All entries", "Payments", "Platform"]);
+  // Opened alone again, Agents keeps the closed state Alt+click gave it.
+  node("Payments").querySelector<HTMLElement>("[data-twist]")!.click();
+  await settle();
+  expect(text(".tf-pw-node .tf-pw-nm")).toEqual(["All entries", "Payments", "Agents", "Platform"]);
+});
+
+/** ⌘ on the Mac, Ctrl elsewhere, as the platform under test reads it. */
+const mod = (key: string, over: KeyboardEventInit = {}) =>
+  new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...(onMac() ? { metaKey: true } : { ctrlKey: true }), ...over });
+
+test("in the filter, ⌘⇧C, U, O, S and A act on the open entry; ⌘C and ⌘A stay the box's (#2531)", async () => {
+  const p = ports();
+  await open(p, ["in", "pw:plat"]);
+  await type("graf");
+  filterBox().focus();
+  const plainCopy = mod("c");
+  filterBox().dispatchEvent(plainCopy);
+  const selectAll = mod("a");
+  filterBox().dispatchEvent(selectAll);
+  await settle();
+  expect(plainCopy.defaultPrevented).toBe(false);
+  expect(selectAll.defaultPrevented).toBe(false);
+  expect(p.copy).not.toHaveBeenCalled();
+  expect(p.openExternal).not.toHaveBeenCalled();
+  // Shift makes the key a capital: the chord is read either way.
+  const copy = mod("C", { shiftKey: true });
+  filterBox().dispatchEvent(copy);
+  await settle();
+  expect(copy.defaultPrevented).toBe(true);
+  expect(p.calls.copy).toEqual([["pw:graf", { kind: "password" }, null]]);
+  filterBox().dispatchEvent(mod("U", { shiftKey: true }));
+  await settle();
+  expect(p.copyPlain).toHaveBeenCalledWith("payout_user");
+  filterBox().dispatchEvent(mod("S", { shiftKey: true }));
+  await settle();
+  expect(p.show).toHaveBeenCalledTimes(1);
+  filterBox().dispatchEvent(mod("A", { shiftKey: true }));
+  await settle();
+  expect(p.openExternal).toHaveBeenCalledWith("https://pay.example");
+  // The filter keeps focus and its words throughout.
+  expect(document.activeElement).toBe(filterBox());
+  expect(filterBox().value).toBe("graf");
+});
+
+test("⌘⇧O in the filter copies the open entry's one-time code (#2531)", async () => {
+  const p = ports();
+  await open(p, ["in", "pw:pay"]);
+  await type("payout");
+  filterBox().focus();
+  filterBox().dispatchEvent(mod("O", { shiftKey: true }));
+  await settle();
+  expect(p.copyCode).toHaveBeenCalledTimes(1);
+});
+
+test("Enter in the filter takes focus to the open entry's row, where the bare keys answer (#2531)", async () => {
+  const p = ports();
+  await open(p, ["in", "pw:pay"]);
+  await type("agent 3");
+  filterBox().focus();
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  filterBox().dispatchEvent(enter);
+  await settle();
+  expect(enter.defaultPrevented).toBe(true);
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.classList.contains("tf-pw-row")).toBe(true);
+  expect(focused.getAttribute("aria-current")).toBe("true");
+  expect(focused.querySelector(".tf-pw-t")?.textContent).toBe("agent 3");
+  focused.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.calls.copy.map((c) => c[0])).toEqual(["pw:a3"]);
+});
+
+test("Enter in the filter focuses the first match's row when the entry opened by its address is filtered out (#2531)", async () => {
+  // Opened from the launcher: the address names the entry, and the router answers a new address only later.
+  const view = held();
+  view.entries.push(row("pw:kib", "pw:plat", "kibana"));
+  await open(ports({}, view), ["entry", "pw:graf"]);
+  await type("kib");
+  expect(text(".tf-pw-row .tf-pw-t")).toEqual(["kibana"]);
+  filterBox().focus();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.classList.contains("tf-pw-row")).toBe(true);
+  expect(focused.querySelector(".tf-pw-t")?.textContent).toBe("kibana");
+  expect(filterBox().value).toBe("kib");
+});
+
+test("Enter in the filter before the ranking answers opens the first match of that answer, not a row of the panels drawn before (#2535)", async () => {
+  await open(ports(), ["in", "pw:plat"]);
+  filterBox().value = "grfn";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  // The answer is out: the folder's panels still stand, grafana not first among them.
+  filterBox().focus();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.classList.contains("tf-pw-row")).toBe(true);
+  expect(focused.querySelector(".tf-pw-t")?.textContent).toBe("grafana");
+  // Typed on before an answer: that Enter is dropped, and nothing more is opened for the new words.
+  const opened = location.hash;
+  filterBox().focus();
+  filterBox().value = "grfnx";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  // Back to words grafana holds: a stale Enter would take focus to its row once they are answered.
+  filterBox().value = "grfn";
+  filterBox().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  await settle();
+  expect(location.hash).toBe(opened);
+  expect(document.activeElement).toBe(filterBox());
+});
+
+test("the filter's chords read Ctrl as ⌘ and a layout without Latin letters by the key's place (#2531)", async () => {
+  const p = ports();
+  await open(p, ["in", "pw:plat"]);
+  await type("graf");
+  filterBox().focus();
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "C", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.calls.copy).toEqual([["pw:graf", { kind: "password" }, null]]);
+  // Cyrillic С on the C key.
+  filterBox().dispatchEvent(new KeyboardEvent("keydown", { key: "С", code: "KeyC", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.calls.copy).toHaveLength(2);
+  // A Latin letter on another place is read as typed: ⌘⇧Q is no chord where Q sits on the A key.
+  const q = new KeyboardEvent("keydown", { key: "Q", code: "KeyA", metaKey: true, shiftKey: true, bubbles: true, cancelable: true });
+  filterBox().dispatchEvent(q);
+  await settle();
+  expect(q.defaultPrevented).toBe(false);
+  expect(p.openExternal).not.toHaveBeenCalled();
+});
+
+test("a long attachment name is one line that gives up its middle, its end and extension kept, the whole name its title (#2531)", async () => {
+  const name = "payout-db client certificate bundle for the payments team 2026-11.p12";
+  const listed = { state: "listed" as const, files: [{ id: "a1", name, size: 612 }] };
+  const view = held();
+  view.sources[0] = { ...view.sources[0]!, offers: { ...offers, attachments: true } };
+  await open(ports({ entry: vi.fn(async (id: string) => record(id, { attachments: listed })) }, view), ["entry", "pw:graf"]);
+  const box = target.querySelector<HTMLElement>(".tf-pw-file .tf-pw-filename > :first-child")!;
+  expect(box.title).toBe(name);
+  expect(box.classList.contains("tf-path")).toBe(true);
+  expect(box.querySelector(".tf-path-head")?.textContent).toBe("payout-db client certificate bundle for the payments ");
+  expect(box.querySelector(".tf-path-tail")?.textContent).toBe("team 2026-11.p12");
+  // The size stays under the name, out of the cut.
+  expect(box.textContent).toBe(name);
 });

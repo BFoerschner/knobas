@@ -25,7 +25,18 @@ import { heldTree } from "../docs/tree-store";
 
 export type Thing =
   /** An item of a source, opened at its address. `kind` is the address's kind, not the source's word. */
-  | { kind: "ticket" | "pr" | "repo" | "branch" | "pipeline" | "page" | "asset" | "note" | "set" | "item"; id: string; hash: string }
+  | { kind: "ticket" | "pr" | "repo" | "branch" | "page" | "asset" | "note" | "set" | "item"; id: string; hash: string }
+  /**
+   * A pipeline. `unread` where the Builds rail draws it (#2527, #2543): its unread failed runs over its whole history,
+   * read when the menu opens; the menu's *Mark N runs as read* marks the pipeline, and draws those read at once. A link
+   * elsewhere has none.
+   */
+  | { kind: "pipeline"; id: string; hash: string; unread?: readonly string[] }
+  /**
+   * A folder of the Builds rail (#2527, #2543): what it says, the unread failed runs of every pipeline under it over their
+   * whole history, and those pipelines, which its *Mark N runs as read* marks.
+   */
+  | { kind: "pipeline-folder"; name: string; unread: readonly string[]; pipelines: readonly string[] }
   /**
    * A monitor; `alerting` where its row shows an open alert, so *Acknowledge* is offered with no read, and `ack` the
    * row's own *Ack*, so its *Acked* and its toast follow.
@@ -304,6 +315,25 @@ export function webUrl(href: string, origin: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The repository a selection of code is in, for *Search in repository* (ADR-0062): a diff names it on its card
+ * (`data-search-repo`, set by `TfDiffCard` from the repository its files open in, so a pull request's diff knows it
+ * too), a file view on its page (`#/repo/<id>/…`). `null` anywhere else, and in a generated folder's file (ADR-0046),
+ * which is no file of the repository.
+ */
+export function repoOfSelection(node: Element | null, hash: string = location.hash): string | null {
+  for (let at: Element | null = node; at !== null; at = at.parentElement) {
+    if (!(at instanceof HTMLElement)) continue;
+    const named = at.dataset["searchRepo"];
+    if (named) return named;
+    if (at.classList.contains("tf-fileview")) {
+      // A file view inside a generated folder's box is still the generated file's.
+      return at.closest("[data-made]") === null ? repoOfPage(hash) : null;
+    }
+  }
+  return null;
 }
 
 /** The selected words, when the press is inside them; `null` otherwise. A press beside a selection is not on it. */

@@ -263,24 +263,28 @@ A second credential stored beside a source's ordinary one, in the same keychain 
 _Avoid_: second secret, write credential, admin login
 
 **Direct write**:
-A write to a password manager (add an entry, edit one, change its password) sent once when the person presses *Save* and answered before the dialog closes, never put in the write queue. If the source does not answer, nothing is kept and the dialog keeps what was typed. A direct write is not a [write-back](#write-back) in the queue's sense: it cannot wait, retry or be undone from the queue, because it may carry a [secret](#secret) (ADR-0056).
+A write to a password manager (add an entry, edit one, change its password) sent once when the person presses *Save* and answered before the dialog closes, never put in the write queue. If the source does not answer, nothing is kept and the dialog keeps what was typed. A direct write is not a [write-back](#write-back) in the queue's sense: it cannot wait, retry or be undone from the queue, because it may carry a [protected value](#protected-value) (ADR-0056).
 _Avoid_: queued write, write op (for these), sync back
 
-**Secret**:
-A value a password manager hides behind a reveal: a password, a field the source marks protected, an earlier password, an attachment's bytes. Read live from the source, held in the app process for at most 30 seconds (the *hold*), and written to no table, file, log, cache or queue. A [code key](#code-key) is not a secret in this sense: it is kept, in the system's password store. A note or a field the source sends openly is not one either: the [mirror](#mirror) holds it (ADR-0056).
-_Avoid_: credential (a source's own sign-in), sensitive data, password (for the general term)
+**Secrets**:
+The surface (`#/secrets`) and navigation section for [secret entries](#secret-entry) and [secret folders](#secret-folder) from sources filling the `passwords` role (ADR-0056, #2515). Searched in the [launcher](#launcher) behind `#s`, which restricts to `password_entry` items only; `/` outside a field and `⌘/` anywhere on the Secrets page open the launcher pre-seeded with `#s `, while `⌘F` focuses the local filter. Legacy `#/passwords/...` addresses redirect to `#/secrets/...`, and internal database and SPI identifiers (`passwords`, `password_entry`, `password_folder`) stay unchanged.
+_Avoid_: Passwords (former surface name), vault
+
+**Protected value**:
+A value a password manager hides behind a reveal: a password, a field the source marks protected, an earlier password, an attachment's bytes. Read live from the source, held in the app process for at most 30 seconds (the *hold*), and written to no table, file, log, cache or queue. A [code key](#code-key) is not a protected value in this sense: it is kept, in the system's password store. A note or a field the source sends openly is not one either: the [mirror](#mirror) holds it (ADR-0056, #2515).
+_Avoid_: secret (now the [Secrets](#secrets) surface and its entries), credential (a source's own sign-in), sensitive data, password (for the general term)
 
 **Code key**:
-The key a [password entry](#password-entry)'s one-time codes are made from, read by a sync and kept in the system's password store, never in the [mirror](#mirror), so codes work offline and read nothing from the source. On Pleasant it is the entry's own `TOTPSecret` or one of four KeePass plugins' custom fields; an account the source does not let see it gets none (ADR-0056).
+The key a [secret entry](#secret-entry)'s one-time codes are made from, read by a sync and kept in the system's password store, never in the [mirror](#mirror), so codes work offline and read nothing from the source. On Pleasant it is the entry's own `TOTPSecret` or one of four KeePass plugins' custom fields; an account the source does not let see it gets none (ADR-0056).
 _Avoid_: TOTP secret (the vendor's word), seed, OTP
 
-**Password entry**:
-The [kind](#kind) of one password manager record: its username, address, notes, the custom fields the source sends openly, its folder, its rules and rights, and never its password or [code key](#code-key). Its title stays in the [mirror](#mirror) and never reaches `knobas.entity`, so link lists, link sets, the timer and the standup never name it; it takes part in none of them (ADR-0056).
-_Avoid_: credential (Pleasant's word), login, item (the generic word)
+**Secret entry**:
+The [kind](#kind) (`password_entry`) of one password manager record: its username, address, notes, the custom fields the source sends openly, its folder, its rules and rights, and never its [protected value](#protected-value) or [code key](#code-key). Its title stays in the [mirror](#mirror) and never reaches `knobas.entity`, so link lists, link sets, the timer and the standup never name it; it takes part in none of them (ADR-0056, #2515).
+_Avoid_: password entry (former UI label), credential (Pleasant's word), login, item (the generic word)
 
-**Password folder**:
-The [kind](#kind) of a password manager's folder: its name and parent, whether it asks a usage comment, whether the account may add to it. The Passwords page's tree is drawn from these; the manager's own root is not emitted (ADR-0056).
-_Avoid_: group (Pleasant's word), vault, collection
+**Secret folder**:
+The [kind](#kind) (`password_folder`) of a password manager's folder: its name and parent, whether it asks a usage comment, whether the account may add to it. The [Secrets](#secrets) page's tree is drawn from these; the manager's own root is not emitted (ADR-0056, #2515).
+_Avoid_: password folder (former UI label), group (Pleasant's word), vault, collection
 
 **Section**:
 A heading of any level on a wiki [page](#kind) and everything under it until the next heading of any level, so a section never holds a heading. The unit knobas edits a page in, one section of prose at a time. A section holding a macro or a table, or sitting inside a table, refuses its edit and offers the source's own editor. A section is edited as text, so lists and inline formatting come back as plain paragraphs, and the surface says so before the edit. The edit that goes out carries the whole page body, so everything outside the section is sent back as it arrived.
@@ -556,6 +560,10 @@ _Avoid_: whitelist, trusted site, base URL (the source's own, which is always al
 A username and password saved for a [site](#site), kept in its source's keychain item beside the credential and typed into the site's own sign-in form: on *Fill sign-in*, and by itself once a page loads where the adapter says its sign-in form is. Only on the source's own origin, with "remember me" ticked; never a one-time code, never a provider's page. Settings shows the username alone (ADR-0050, ux29).
 _Avoid_: account (Uptime Kuma's second API credential), saved password (says where, not what), auto-login
 
+**Link handoff**:
+Opening matching external URLs for an opted-in [source](#source) directly in knobas through the Firefox Native Messaging host (`dev.knobas.desktop`), and any mirrored item's URL through the OS `knobas://open?url=...` scheme, which someone asks for explicitly. Configured per source in Settings › Sources as *Open matching links in knobas*, defaulting to *Known items only* (`known_items`, mirrored items resolved through `resolve_url` and declared `UrlForm` patterns) with an optional *Whole source* (`whole_source`) mode that routes non-item URLs to the source's [site](#site) when *Open its pages inside knobas* is on. Every *Open in browser* action in knobas records a short-lived one-shot bypass in memory so Firefox lets that navigation load normally without looping back into knobas (ADR-0061). The Firefox side is the *knobas link handoff* extension in `extension/firefox/`, whose toolbar button pauses it.
+_Avoid_: URL interceptor, redirector, protocol proxy
+
 **Update**:
 A newer knobas than the one running, offered on Settings › Updates and marked by a dot on the Settings cog. knobas
 finds it in its own GitHub releases, downloads it on a press, checks it against its own signing keys, backs up, and
@@ -580,6 +588,10 @@ _Avoid_: command palette, spotlight
 **Files index**:
 The names and the text of every mirrored repository's files, at its default branch's head, in a tantivy index in the profile (`<profile>/files-1/`, `knobas-files`, ADR-0050), read after each sync from a checkout on this machine where one holds the file, else from the forge. PostgreSQL keeps what it stands at (`sync.code_repo`, `sync.code_file`); bring-up compares the two. A backup does not carry it, as it carries nothing of `sync`: the next syncs read it again. What it keeps of file text is bounded in Settings › Search.
 _Avoid_: code search, grep
+
+**Text search**:
+A repository's Files tab searching the text of its files, every line holding a literal or a pattern, in the tree the tab shows: the branch's commit in a clone on this computer, the working tree as git lists it, or, where no clone holds the default branch, the [files index](#files-index)'s copy of it, which the answer names. Smart case unless *Aa*; *.\** for a pattern. *Files | Text* in the tree's search box, `Mod+Shift+F`, and *Search in repository* on selected code in a file or a diff (ADR-0062). Not the launcher's search, which finds a repository by its files and never a line in one branch.
+_Avoid_: grep, code search, find in files (*Find in file* is ⌘F in one file)
 
 **Section's place**:
 The last address a reader stood on in a section of the nav, however deep (a Docs page or space, a ticket, a pull request at its tab, a run at its tab, a marked monitor, a link set, a source's page in Settings): where the section's nav entry, the gear or `⌘,` comes back to from another section, as the kept page that was left (2026-11-13, `docs/decisions/2026-11-13-a-nav-entry-comes-back-to-where-you-were.md`). Pressed inside the section, the entry goes to the section's own page as it was left instead (its tab, saved view, pipeline or search). Not a card row's narrowing and not home. A launcher row naming a section opens the section's own page, not its place.

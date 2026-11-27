@@ -12,6 +12,7 @@ import * as entityIpc from "../../ipc/entity";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 import { runsRead } from "./runs-read.svelte";
+import { thingAt } from "../context/thing";
 import { buildsView } from "./builds-view.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { echoEvents } from "../echo-events.fixture";
@@ -89,6 +90,7 @@ function pipeline(id: string, name: string, recent: RunRow[]): PipelineRow {
     pinned: false,
     web_url: null,
     recent,
+    unread: [],
   };
 }
 
@@ -910,4 +912,122 @@ test("a bare #/builds with Recent kept takes Recent's address; Pipelines takes i
   expect(buildsView.value).toBe("pipelines");
   expect(location.hash.startsWith("#/builds")).toBe(true);
   expect(location.hash).not.toBe("#/builds/recent");
+});
+
+test("Alt+click on a Builds folder recursively expands and collapses every nested folder under it", async () => {
+  const nested: PipelineRow[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw([], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const foldSummary = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)!;
+
+  // Collapse Core recursively first, then Alt+click to expand Core + Payments + V1 + V2 + Edge at once.
+  foldSummary("Core").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect((foldSummary("Core").parentElement as HTMLDetailsElement).open).toBe(false);
+  expect(names()).toEqual([]);
+
+  foldSummary("Core").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect((foldSummary("Core").parentElement as HTMLDetailsElement).open).toBe(true);
+  expect((foldSummary("Payments").parentElement as HTMLDetailsElement).open).toBe(true);
+  expect((foldSummary("V1").parentElement as HTMLDetailsElement).open).toBe(true);
+  expect(names()).toEqual(["Edge", "Api", "Worker"]);
+
+  // Alt+click Core again collapses the subtree; re-opening Core alone leaves Payments closed.
+  foldSummary("Core").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(names()).toEqual([]);
+  const coreDetails = foldSummary("Core").parentElement as HTMLDetailsElement;
+  coreDetails.open = true;
+  coreDetails.dispatchEvent(new Event("toggle"));
+  flushSync();
+  expect((foldSummary("Payments").parentElement as HTMLDetailsElement).open).toBe(false);
+});
+
+// -- Right-click on the rail: Mark N runs as read (#2527, #2543) --------------
+
+test("a right-click on a rail pipeline or folder carries its unread failed runs over the whole history, read as the menu opens (#2543)", async () => {
+  marks(["teamcity:build:5", "teamcity:build:40"]);
+  const nested: PipelineRow[] = [
+    {
+      ...pipeline("a", "Api", [run("teamcity:build:1", "err"), run("teamcity:build:9", "ok"), run("teamcity:build:5", "err")]),
+      path: ["Core", "Payments"],
+      // What the backend named as the list was read: one drawn, two past the twelve, one of them read since.
+      unread: ["teamcity:build:1", "teamcity:build:41", "teamcity:build:40"],
+    },
+    {
+      ...pipeline("b", "Worker", [run("teamcity:build:2", "err"), run("teamcity:build:8", "ok", { finished: null, state: { text: "running", tone: "info" } })]),
+      path: ["Core", "Payments"],
+      unread: ["teamcity:build:2", "teamcity:build:30"],
+    },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw([], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const fold = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)!;
+
+  expect(thingAt(nameOf("Api").querySelector(".tf-pi-nm"))?.thing).toEqual({
+    kind: "pipeline",
+    id: "teamcity:buildType:a",
+    hash: "#/builds/teamcity%3AbuildType%3Aa",
+    unread: ["teamcity:build:1", "teamcity:build:41"],
+  });
+  expect(thingAt(fold("Core").querySelector(".tf-fold-nm"))?.thing).toEqual({
+    kind: "pipeline-folder",
+    name: "Core",
+    unread: ["teamcity:build:1", "teamcity:build:41", "teamcity:build:2", "teamcity:build:30"],
+    pipelines: ["teamcity:buildType:c", "teamcity:buildType:a", "teamcity:buildType:b"],
+  });
+  expect(thingAt(fold("Edge"))?.thing).toEqual({ kind: "pipeline-folder", name: "Edge", unread: [], pipelines: ["teamcity:buildType:c"] });
+
+  // Fresh across marks: a run past the twelve read, or one put back, moves the count with no read of the list.
+  void runsRead.markRead(["teamcity:build:2", "teamcity:build:41"]);
+  flushSync();
+  expect(thingAt(fold("Core"))?.thing).toMatchObject({ unread: ["teamcity:build:1", "teamcity:build:30"] });
+  expect(thingAt(nameOf("Worker"))?.thing).toMatchObject({ kind: "pipeline", unread: ["teamcity:build:30"] });
+  void runsRead.markUnread(["teamcity:build:40"]);
+  flushSync();
+  expect(thingAt(nameOf("Api"))?.thing).toMatchObject({ unread: ["teamcity:build:1", "teamcity:build:40"] });
+});
+
+test("a failure the list did not name, marked unread, reads the list again so the rail's count holds it (#2543)", async () => {
+  marks(["teamcity:build:77"]);
+  let reads = 0;
+  const listed = (unread: string[]): PipelineRow[] => [{ ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), unread }];
+  draw([], "builds", [], {
+    pipelines: () => {
+      reads += 1;
+      return Promise.resolve(listed(reads === 1 ? [] : ["teamcity:build:77"]));
+    },
+  });
+  await settle();
+  expect(reads).toBe(1);
+  expect(thingAt(nameOf("Api"))?.thing).toMatchObject({ unread: [] });
+
+  // Read when the list was read, so the list did not name it: an older page's *Mark as unread* puts it back. The list is
+  // read once that write answered: a read sent beside it could miss the mark.
+  const unmark = runsRead.ports.unmark;
+  let answer = () => {};
+  runsRead.ports = { ...runsRead.ports, unmark: (runs) => new Promise((resolve) => (answer = () => resolve(runs))) };
+  void runsRead.markUnread(["teamcity:build:77"]);
+  await settle();
+  expect(reads, "not while the write is out").toBe(1);
+  answer();
+  runsRead.ports = { ...runsRead.ports, unmark };
+  await settle();
+  expect(reads, "the list read again").toBe(2);
+  expect(thingAt(nameOf("Api"))?.thing).toMatchObject({ unread: ["teamcity:build:77"] });
+
+  // One the list names already reads nothing more.
+  void runsRead.markRead(["teamcity:build:77"]);
+  await settle();
+  void runsRead.markUnread(["teamcity:build:77"]);
+  await settle();
+  expect(reads).toBe(2);
 });

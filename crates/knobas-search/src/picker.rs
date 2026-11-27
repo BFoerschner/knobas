@@ -813,8 +813,9 @@ pub struct HeldLists {
 }
 
 impl HeldLists {
-    /// How many lists are held at once.
-    pub const BOUND: usize = 4;
+    /// How many lists are held at once: enough for every mounted kept page to
+    /// hold its own local filter without evicting another (#2520).
+    pub const BOUND: usize = 32;
 
     /// Holds `haystacks` as list `id`, in place of any list of that id.
     pub fn hold(&mut self, id: String, haystacks: Vec<String>) {
@@ -1308,25 +1309,34 @@ mod held_tests {
     }
 
     #[test]
-    fn four_lists_are_held_and_the_least_lately_used_goes_first() {
+    fn held_lists_keep_up_to_bound_and_evict_the_least_lately_used_first() {
+        assert_eq!(HeldLists::BOUND, 32);
         let held = Mutex::new(HeldLists::default());
         assert!(held.lock().unwrap().is_empty());
-        for id in ["a", "b", "c", "d"] {
-            held.lock().unwrap().hold(id.into(), texts());
+        for i in 0..HeldLists::BOUND {
+            held.lock().unwrap().hold(format!("list-{i}"), texts());
         }
-        // `a` used again is the newest, so `b` goes when a fifth comes.
-        assert!(rank_held(&held, "a", "user").is_some());
-        held.lock().unwrap().hold("e".into(), texts());
         assert_eq!(held.lock().unwrap().len(), HeldLists::BOUND);
-        assert!(rank_held(&held, "b", "user").is_none());
-        assert!(rank_held(&held, "a", "user").is_some());
-        assert!(rank_held(&held, "c", "user").is_some());
-        held.lock().unwrap().drop_list("c");
-        assert!(rank_held(&held, "c", "user").is_none());
-        // Holding an id again replaces its list.
-        held.lock().unwrap().hold("a".into(), vec!["only".into()]);
-        assert_eq!(rank_held(&held, "a", "only").map(|r| r.len()), Some(1));
-        assert_eq!(held.lock().unwrap().len(), 3);
+        // Every list held up to the bound is still present without eviction.
+        for i in 1..HeldLists::BOUND {
+            assert!(rank_held(&held, &format!("list-{i}"), "user").is_some());
+        }
+        // `list-0` used again becomes the newest, so `list-1` goes when a 33rd comes.
+        assert!(rank_held(&held, "list-0", "user").is_some());
+        held.lock().unwrap().hold("overflow".into(), texts());
+        assert_eq!(held.lock().unwrap().len(), HeldLists::BOUND);
+        assert!(rank_held(&held, "list-1", "user").is_none());
+        assert!(rank_held(&held, "list-0", "user").is_some());
+        assert!(rank_held(&held, "list-2", "user").is_some());
+        assert!(rank_held(&held, "overflow", "user").is_some());
+        held.lock().unwrap().drop_list("list-2");
+        assert!(rank_held(&held, "list-2", "user").is_none());
+        // Holding an id again replaces its list without growing the count.
+        held.lock()
+            .unwrap()
+            .hold("list-0".into(), vec!["only".into()]);
+        assert_eq!(rank_held(&held, "list-0", "only").map(|r| r.len()), Some(1));
+        assert_eq!(held.lock().unwrap().len(), HeldLists::BOUND - 1);
         assert!(!held.lock().unwrap().is_empty());
     }
 }

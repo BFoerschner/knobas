@@ -50,6 +50,25 @@ export class RunsRead {
   #loading: Promise<void> | null = null;
   /** The failed runs each open pipeline page holds, by pipeline: *Mark all* turns them at once, older pages too. */
   #held = new Map<string, readonly string[]>();
+  /** The marks being written: a read of what they change waits on them ({@link RunsRead.settled}). */
+  #writes = new Set<Promise<unknown>>();
+
+  /** `write`, held in {@link RunsRead.settled} until it answers. */
+  #writing<T>(write: Promise<T>): Promise<T> {
+    this.#writes.add(write);
+    const done = () => void this.#writes.delete(write);
+    write.then(done, done);
+    return write;
+  }
+
+  /**
+   * Resolves once every mark written so far has answered, either way: a read of the backend made after it sees them.
+   * The Builds rail reads its list again after a mark it doesn't name is taken back (#2543), and a read sent while
+   * that write was out could miss it.
+   */
+  async settled(): Promise<void> {
+    await Promise.allSettled([...this.#writes]);
+  }
 
   /**
    * A pipeline page's failed runs, held while it draws them. *Mark all as read* on that pipeline, from the rail or its
@@ -104,7 +123,7 @@ export class RunsRead {
     if (fresh.length === 0) return;
     this.#with(fresh);
     try {
-      await this.ports.mark([...fresh], []);
+      await this.#writing(this.ports.mark([...fresh], []));
     } catch (cause) {
       this.#with([], fresh);
       push({ text: `Could not mark ${counted(fresh.length, "run", "runs")} as read: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -117,7 +136,7 @@ export class RunsRead {
     if (marked.length === 0) return;
     this.#with([], marked);
     try {
-      await this.ports.unmark([...marked]);
+      await this.#writing(this.ports.unmark([...marked]));
     } catch (cause) {
       this.#with(marked);
       push({ text: `Could not mark ${counted(marked.length, "run", "runs")} as unread: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -142,7 +161,7 @@ export class RunsRead {
     this.#with(drawn);
     let wrote: string[];
     try {
-      wrote = await this.ports.mark([...drawn], [...scope.pipelines]);
+      wrote = await this.#writing(this.ports.mark([...drawn], [...scope.pipelines]));
     } catch (cause) {
       this.#with([], drawn);
       push({ text: `Could not mark the runs as read: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -159,6 +178,7 @@ export class RunsRead {
     this.#read = null;
     this.#loading = null;
     this.#held.clear();
+    this.#writes.clear();
     this.ports = REAL;
   }
 }

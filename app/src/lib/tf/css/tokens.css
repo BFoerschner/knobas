@@ -42,23 +42,26 @@
   /* Code's face (2026-11-16): the family chosen in Settings › Fonts first (`--mono-chosen`, which `fonts.svelte.ts`
      sets on <html>), then the bundled face (`--mono-bundled`), its stand-ins while it loads (`fonts/fonts.css`), and
      the system's monospace, so a font missing on this machine draws in the bundled face and never in a proportional
-     one. The bundled face is Cascadia Mono (2026-11-21; Björn: "Cascadia Mono looks better with like, ASCII and
-     boxes"), with no programming ligatures. *Ligatures in code* is off until turned on; on, `fonts.svelte.ts` sets
-     `--mono-bundled` to Cascadia Code, which draws `=>` and `->` as one sign, and `--mono-ligatures` to `normal`, so a
-     chosen face draws its own. Only one of the two Cascadias is in the list, so the other is never loaded. Every rule
-     that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
-  --mono-bundled: "knobas Cascadia Mono";
+     one. The bundled face is Cascadia Code 2009.22 with its ligatures, which draw `=>` and `->` as one sign (#2516; the
+     newer Cascadia Mono from 2026-11-21). With *Ligatures in code* turned off or the newer release picked,
+     `fonts.svelte.ts` sets `--mono-bundled` to that release's Cascadia Mono or Code and `--mono-ligatures` to `none`, so
+     a chosen face draws none either. 2009.22 has no italic, so its comments stand upright (`--mono-synth`), which
+     `fonts.svelte.ts` sets to `auto` for any other face. Only one of the Cascadias is in the list, so the others are
+     never loaded. Every rule that sets `--mono` sets `font-variant-ligatures` from it (`code-face.test.ts`). */
+  --mono-bundled: "knobas Cascadia Code 2009";
   --mono: var(--mono-chosen, var(--mono-bundled)), var(--mono-bundled), "Cascadia over Menlo", "Cascadia over Consolas", ui-monospace, monospace;
-  --mono-ligatures: none;
+  --mono-ligatures: normal;
+  --mono-synth: none;
   /* A code row's height (2026-11-21, `docs/decisions/2026-11-21-fonts-you-can-tune.md`): every area that stacks code
      lines (a file, a diff, a hunk, a fence, the editor, a log, a Docs block, an OpenAPI or JAR block) draws its rows at
-     `var(--code-lh, <its own>)`, so with nothing set here they would be today's 1.6, 1.55 and 1.5 (*Open*). *Joined*,
-     the default, is the drawn face's own line height (`--code-lh-face`, its ascent and descent over its size: Cascadia's
-     2380 of 2048 at 105 %, or an installed face's, measured when picked), rounded to whole device pixels
-     (`--dpr`, which `fonts.svelte.ts` writes on <html> with each scale), so its box drawing joins from row to row: 16 px
-     at 13 px. A custom line height is written to `--code-lh-face` the same way; *Open* sets `--code-lh` to `initial`, so
-     each area's own number stands. The `1em` is the area's own font size: a custom property is substituted where used. */
-  --code-lh-face: 1.2202;
+     `var(--code-lh, <its own>)`, so with nothing set here they would be today's 1.6, 1.55 and 1.5 (*Open*). The default
+     is 1.60 of the size (`--code-lh-face`, #2516), rounded to whole device pixels (`--dpr`, which `fonts.svelte.ts`
+     writes on <html> with each scale): 21 px at 13 px, at which Cascadia 2009.22's `│` still joins from row to row.
+     *Joined* writes the drawn face's own line height there (its ascent and descent over its size: Cascadia's 2380 of
+     2048 at 105 %, or an installed face's, measured when picked), and another notch its own; *Open* sets `--code-lh`
+     to `initial`, so each area's own number stands. The `1em` is the area's own font size: a custom property is
+     substituted where used. */
+  --code-lh-face: 1.6;
   --dpr: 1;
   --code-lh: round(calc(var(--code-lh-face) * 1em), calc(1px / var(--dpr)));
   /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
@@ -211,20 +214,31 @@ a { color: var(--link); text-decoration: none; }
 /* No `.tf p { margin: 0 }` here: `* { margin: 0 }` above already does it, and that rule's weight beat every
    one-class margin on a heading or paragraph, so `.tf-md > * + *` and the like never applied. */
 
-/* Focus (design system, Motion and focus; docs/decisions/2026-11-21-a-ring-takes-the-shape-of-what-it-rings.md): a 2 px ring
-   in the surface's colour with no radius of its own, so it takes the shape of what it rings (a pill stays round, a square row
-   stays square). A control standing free wears it outside, `--focus-off`; a field, and anything in a box that clips, inside,
-   `--focus-in`, so a field's border becomes the ring and no parent cuts it. A container sets `--focus-o` or `--focus-c`; no
-   component writes an outline of its own. */
+/* Focus (design system, Motion and focus; #2517): a 2 px transient ring in the surface's colour with no radius of its
+   own, so it takes the shape of what it rings (a pill stays round, a square row stays square). Keyboard or programmatic
+   focus sets `data-focus-ring="on"` on `<html>` (`input-modality.ts`) for 1.2 s and then `"fade"` for 0.3 s (~1.5 s total;
+   under `prefers-reduced-motion: reduce`, it hides cleanly after the hold). Pointer clicks set `data-input="pointer"` and
+   never draw the blue ring; focused text inputs retain their blinking caret and subtle border (`--ink-2`). A control
+   standing free wears the ring outside, `--focus-off`; a field, and anything in a box that clips, inside, `--focus-in`,
+   so a field's border becomes the ring and no parent cuts it. A container sets `--focus-o` or `--focus-c`; no component
+   writes an outline of its own. */
 :root { --focus-w: 2px; --focus-off: 2px; --focus-in: -2px; }
+:root { --focus-fade: 0.3s; --focus-a: 0%; }
+:root[data-focus-ring="on"] { --focus-a: 100%; }
 .tf { --focus-c: var(--focus); --focus-o: var(--focus-off); }
-.tf :focus-visible { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-o); }
+.tf :focus-visible { outline: none; }
+:where(:root[data-focus-ring]) .tf :focus-visible { outline: var(--focus-w) solid color-mix(in srgb, var(--focus-c) var(--focus-a), transparent); outline-offset: var(--focus-o); }
+:where(:root[data-focus-ring="fade"]) .tf :focus-visible { transition: outline-color var(--focus-fade) ease-out; }
+/* Focused text fields and search wrappers keep a subtle border once the transient ring fades or on pointer click. */
+.tf :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"])):not([aria-invalid="true"], .tf-oas-missing):focus { border-color: var(--ink-2); }
+.tf :is(.tf-fsearch, .tf-minif):focus-within { border-color: var(--ink-2); }
 /* A field's ring is its own border, in `--focus` on the field's own fill wherever the field stands. */
-.tf :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible { outline-color: var(--focus); outline-offset: var(--focus-in); }
+:where(:root[data-focus-ring]) .tf :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible { --focus-c: var(--focus); outline-offset: var(--focus-in); }
 /* A box that is the field, its input bare inside it. */
-.tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: var(--focus-in); }
-/* A select pressed with the mouse draws no ring, as a button pressed so draws none (`input-modality.ts` sets `data-input`). */
-:root[data-input="pointer"] .tf select:focus-visible { outline: none; }
+:where(:root[data-focus-ring]) .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: var(--focus-w) solid color-mix(in srgb, var(--focus) var(--focus-a), transparent); outline-offset: var(--focus-in); }
+:where(:root[data-focus-ring="fade"]) .tf :is(.tf-fsearch, .tf-minif):focus-within { transition: outline-color var(--focus-fade) ease-out; }
+/* Pointer presses never draw a focus ring (`input-modality.ts` sets `data-input="pointer"`). */
+:where(:root[data-input="pointer"]) .tf :focus-visible, :where(:root[data-input="pointer"]) .tf :is(.tf-fsearch, .tf-minif):focus-within { outline: none; }
 /* On a yellow card the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
 .tf .tf-card { --focus-c: var(--card-ink); }
 /* A ring drawn inside a fill is `--paper`: `--focus` on it is 1.10:1 in dark and 2.62:1 in light, `--paper` 8.48 and 13.23. */

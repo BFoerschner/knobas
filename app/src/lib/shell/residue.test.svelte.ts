@@ -360,6 +360,39 @@ vi.mock("../ipc/app", () => ({
     deferred({ dir: "/s/knobas-rendered", set: null, default_dir: "/s", place: "clones", folders: 0, bytes: 0, cap_bytes: 4 * 1024 ** 3 }),
   setFolderRenderStore: () => new Promise(() => {}),
   clearFolderRenderStore: () => new Promise(() => {}),
+  sourceLinkHandoff: (source: string) => deferred({ source, enabled: false, scope: "known_items" }),
+  setSourceLinkHandoff: (source: string, enabled: boolean, scope: string) => deferred({ source, enabled, scope }),
+  firefoxHostStatus: () =>
+    deferred({
+      installed: false,
+      supported: true,
+      host_name: "dev.knobas.desktop",
+      extension_id: "link-handoff@knobas.dev",
+      manifest_path: "/tmp/dev.knobas.desktop.json",
+      executable_path: null,
+      matches_current: false,
+    }),
+  installFirefoxHost: () =>
+    deferred({
+      installed: true,
+      supported: true,
+      host_name: "dev.knobas.desktop",
+      extension_id: "link-handoff@knobas.dev",
+      manifest_path: "/tmp/dev.knobas.desktop.json",
+      executable_path: "/tmp/knobas",
+      matches_current: true,
+    }),
+  uninstallFirefoxHost: () =>
+    deferred({
+      installed: false,
+      supported: true,
+      host_name: "dev.knobas.desktop",
+      extension_id: "link-handoff@knobas.dev",
+      manifest_path: "/tmp/dev.knobas.desktop.json",
+      executable_path: null,
+      matches_current: false,
+    }),
+  recordBrowserBypass: () => deferred(true),
 }));
 
 /**
@@ -381,6 +414,9 @@ vi.mock("../ipc/api", () => ({
   apiCancel: () => deferred(undefined),
   apiAnswerBody: () => deferred(new Uint8Array()),
   apiSaveAnswer: () => deferred(""),
+  apiAnswerPiped: () => deferred({ outcome: "done", name: "answer-200.json", output: { kind: "text", text: "{}" } }),
+  apiAnswerPipedSave: () => deferred(""),
+  jsonQueryOpen: () => deferred(1),
   imageFetch: () => deferred({ url: "", mime: "image/png", size: 0, base64: "" }),
   imageHosts: () => deferred({ hosts: [] }),
   xmlCheck: () => deferred({ on: true }),
@@ -481,6 +517,8 @@ const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const StatusMenu = (await import("../tf/tickets/StatusMenu.svelte")).default;
 const TfPeoplePick = (await import("../tf/job/TfPeoplePick.svelte")).default;
 const TfLabelsPick = (await import("../tf/job/TfLabelsPick.svelte")).default;
+const ValuePicker = (await import("../tf/tickets/ValuePicker.svelte")).default;
+const TfXsdPoint = (await import("../tf/render/xsd/TfXsdPoint.svelte")).default;
 const TfFactControl = (await import("../tf/job/TfFactControl.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
@@ -525,6 +563,7 @@ const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfOpenApi = (await import("../tf/render/TfOpenApi.svelte")).default;
 const TfOasAnswer = (await import("../tf/render/TfOasAnswer.svelte")).default;
+const TfOasBody = (await import("../tf/render/TfOasBody.svelte")).default;
 const TfLines = (await import("../tf/code/TfLines.svelte")).default;
 const TfDocView = (await import("../tf/render/doc/TfDocView.svelte")).default;
 const TfDocRail = (await import("../tf/render/doc/TfDocRail.svelte")).default;
@@ -673,6 +712,7 @@ const TfPwWrite = (await import("../tf/passwords/TfPwWrite.svelte")).default;
 const TfPwFile = (await import("../tf/passwords/TfPwFile.svelte")).default;
 const { model: passwordModel } = await import("../tf/passwords/model");
 const TfPasswordsSection = (await import("../tf/settings/TfPasswordsSection.svelte")).default;
+const TfLinkHandoffSection = (await import("../tf/settings/TfLinkHandoffSection.svelte")).default;
 
 /** The Passwords page's reads (ADR-0056), answering late: one source, one folder, one entry with a code. */
 function passwordPorts() {
@@ -1077,6 +1117,34 @@ const CASES: Case[] = [
     }),
   },
   {
+    /** The view editor's value search (#2535): its ranked list, held by the app while it stands. */
+    name: "ValuePicker",
+    source: "lib/tf/tickets/ValuePicker.svelte",
+    open: (target) => ({
+      app: mount(ValuePicker, {
+        target,
+        props: {
+          options: Array.from({ length: 12 }, (_, n) => [`P${n}`, `Project ${n}`] as [string, string]),
+          label: "Project",
+          many: "projects",
+          isPicked: () => false,
+          ontoggle: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** *Point to a file…* (#2535): its ranked list, held by the app while it stands. */
+    name: "TfXsdPoint",
+    source: "lib/tf/render/xsd/TfXsdPoint.svelte",
+    open: (target) => ({
+      app: mount(TfXsdPoint, {
+        target,
+        props: { namespace: "urn:a", location: "a.xsd", candidates: [{ repo: "r", repoName: null, path: "a.xsd", declares: "urn:a" }], onpick: () => {}, onclose: () => {} },
+      }),
+    }),
+  },
+  {
     /** A fact's control (ADR-0054): asks its field's list when it opens. */
     name: "TfFactControl",
     source: "lib/tf/job/TfFactControl.svelte",
@@ -1272,6 +1340,7 @@ const CASES: Case[] = [
                   pinned: false,
                   web_url: null,
                   recent: [],
+                  unread: [],
                 },
               ]),
             runs: () => deferred([]),
@@ -1301,6 +1370,7 @@ const CASES: Case[] = [
             pinned: false,
             web_url: null,
             recent: [],
+            unread: [],
           },
           rest: ["teamcity:buildType:A"],
           job: "PAY-231",
@@ -1330,6 +1400,7 @@ const CASES: Case[] = [
             pinned: false,
             web_url: null,
             recent: [],
+            unread: [],
           },
           rest: ["teamcity:buildType:A", "teamcity:build:1"],
           job: "PAY-231",
@@ -2057,6 +2128,12 @@ const CASES: Case[] = [
     name: "TfOasAnswer",
     source: "lib/tf/render/TfOasAnswer.svelte",
     open: (target) => ({ app: mount(TfOasAnswer, { target, props: { sending: undefined } }) }),
+  },
+  {
+    /** An answer's body (#2533): its bytes, and a pipeline's run, answer late. */
+    name: "TfOasBody",
+    source: "lib/tf/render/TfOasBody.svelte",
+    open: (target) => ({ app: mount(TfOasBody, { target, props: { answer: { id: 1, status: 200, content_type: "application/json", bytes: 2 }, view: { steps: [{ step: "gunzip" }], as: null } } }) }),
   },
   {
     /** A spec drawn small (ux31): its parse answers late. */
@@ -4037,6 +4114,21 @@ const CASES: Case[] = [
           offers: { one_time_codes: true, expiry: true, usage_comments: true, audit_log: true, history: null, attachments: false, access_requests: false, marks_protected_fields: false, writes: [] },
           synced: true,
           facts: () => deferred({ entries: 1, folders: 1, formats: [["keepass", 1]] } as never),
+        },
+      }),
+    }),
+  },
+  {
+    /** Per-source Link handoff Settings section (ADR-0061): its setting and Firefox host status, answering late. */
+    name: "TfLinkHandoffSection",
+    source: "lib/tf/settings/TfLinkHandoffSection.svelte",
+    open: (target) => ({
+      app: mount(TfLinkHandoffSection, {
+        target,
+        props: {
+          source: "jira",
+          name: "Tidewater Jira",
+          openInside: false,
         },
       }),
     }),

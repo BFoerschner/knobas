@@ -6,7 +6,11 @@
  * string that spans hunks is witnessed by the engine the app runs.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filter ranks through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
+const { ranked } = await import("../filter/test-fuzzy");
 
 import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { createPendingComments } from "../../detail/view/pending-comments.svelte";
@@ -443,20 +447,65 @@ test("the file filter is a box beside the diff, so ⌘F passes it for the find b
   stop();
 });
 
-test("the filter narrows the tree and the diff together", () => {
-  draw({ files: [file("src/retry.rs"), file("docs/retry.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
+test("the filter narrows the rail and the diff together: a flat list by whole path while it has words, the folders back once cleared (#2532)", async () => {
+  draw({ files: [file("src/retry.rs"), file("docs/retry.md"), file("src/a.rs"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
+  // A folder folded by hand before the filter.
+  target.querySelector<HTMLButtonElement>(".tf-flist button.tf-fdir[aria-expanded=true]")!.click();
+  flushSync();
+  const folded = treeRows();
+  expect(folded).toEqual(["M Cargo.toml +1 −1", "docs", "src", "M a.rs +1 −1", "M retry.rs +1 −1"]);
   const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
   input.value = "retry";
   input.dispatchEvent(new Event("input"));
   flushSync();
-  expect(treeRows()).toEqual(["docs", "M retry.md +1 −1", "src", "M retry.rs +1 −1"]);
-  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["docs/retry.md", "src/retry.rs"]);
+  await ranked();
+  // No directory row: each kept file by its whole path, the folded folder's too.
+  const flat = treeRows();
+  expect([...flat].sort()).toEqual(["M docs/retry.md +1 −1", "M src/retry.rs +1 −1"]);
+  expect(target.querySelectorAll(".tf-flist .tf-fdir")).toHaveLength(0);
+  // The cards follow the rail's order, so j walks it down.
+  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(flat.map((row) => row.slice(2, -" +1 −1".length)));
+  // No substring holds "srcrt": its letters stand in order in one path only, and are marked there.
+  input.value = "srcrt";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  expect(treeRows()).toEqual(["M src/retry.rs +1 −1"]);
+  expect([...target.querySelectorAll(".tf-flist .tf-fname mark")].map(squash).join("")).toBe("srcrt");
+  // Cleared: the tree as it was left, the folded folder still folded, nothing marked.
+  input.value = "";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  expect(treeRows()).toEqual(folded);
+  expect(target.querySelectorAll(".tf-flist mark")).toHaveLength(0);
+});
+
+test("files read again while the filter has words keep the flat rail as drawn until their ranking answers (#2532)", async () => {
+  const props = $state({ files: [file("src/retry.rs"), file("docs/retry.md"), file("src/a.rs")], layout: createDiffLayout(() => null) });
+  draw(props);
+  const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
+  input.value = "retry";
+  input.dispatchEvent(new Event("input"));
+  flushSync();
+  await ranked();
+  const flat = treeRows();
+  expect([...flat].sort()).toEqual(["M docs/retry.md +1 −1", "M src/retry.rs +1 −1"]);
+  // A working tree read again (a save): new file objects, one more that matches.
+  props.files = [file("src/retry.rs"), file("docs/retry.md"), file("src/a.rs"), file("lib/retry.ts")];
+  flushSync();
+  // Before the new list's answer: still flat, the rows where they drew, no folder tree over every file.
+  expect(target.querySelectorAll(".tf-flist .tf-fdir")).toHaveLength(0);
+  expect(treeRows()).toEqual(flat);
+  await ranked();
+  expect([...treeRows()].sort()).toEqual(["M docs/retry.md +1 −1", "M lib/retry.ts +1 −1", "M src/retry.rs +1 −1"]);
+  expect(target.querySelectorAll(".tf-flist .tf-fdir")).toHaveLength(0);
 });
 
 test("the diffs are drawn in the rail's order, so j walks the rail down", () => {
   draw({ files: [file("tests/z.rs"), file("src/b.rs"), file("docs/a.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
   expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
-  const titles = [...target.querySelectorAll(".tf-flist button")].map((row) => row.getAttribute("title"));
+  const titles = [...target.querySelectorAll(".tf-flist button.tf-ffile")].map((row) => row.getAttribute("title"));
   expect(titles).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
 });
 
@@ -953,4 +1002,76 @@ test("a generated file over the Load diff limit starts open on its Load diff lin
     "Generated, and over 1,500 lines (3,552 changed): not loaded until you ask; nothing is cut. Load diff",
   );
   expect(cardOf("src/generated/small.rs").querySelector(".tf-fh-caret")!.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("changed-files folder headers collapse on click and recursively on Alt+click without hiding diff cards", () => {
+  draw({
+    files: [file("README.md"), file("src/a.rs"), file("src/sub/b.rs"), file("lib/c.rs")],
+    layout: createDiffLayout(() => null),
+  });
+  const dirBtn = (path: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>(".tf-flist button.tf-fdir")].find((b) => b.textContent?.trim() === path)!;
+  const railFiles = () => [...target.querySelectorAll(".tf-flist .tf-fname")].map((el) => el.textContent);
+
+  expect(railFiles()).toEqual(["README.md", "c.rs", "a.rs", "b.rs"]);
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("true");
+
+  // Plain click collapses only src, leaving src/sub open and diff cards intact.
+  dirBtn("src").click();
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("false");
+  expect(dirBtn("src/sub").getAttribute("aria-expanded")).toBe("true");
+  expect(railFiles()).toEqual(["README.md", "c.rs", "b.rs"]);
+  expect(target.querySelectorAll(".tf-diff")).toHaveLength(4);
+
+  // Plain click expands src again.
+  dirBtn("src").click();
+  flushSync();
+  expect(railFiles()).toEqual(["README.md", "c.rs", "a.rs", "b.rs"]);
+
+  // Alt+click collapses src and src/sub together.
+  dirBtn("src").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("false");
+  expect(dirBtn("src/sub").getAttribute("aria-expanded")).toBe("false");
+  expect(railFiles()).toEqual(["README.md", "c.rs"]);
+
+  // Alt+click again expands src and src/sub together.
+  dirBtn("src").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("src").getAttribute("aria-expanded")).toBe("true");
+  expect(dirBtn("src/sub").getAttribute("aria-expanded")).toBe("true");
+  expect(railFiles()).toEqual(["README.md", "c.rs", "a.rs", "b.rs"]);
+});
+
+test("pressing T focuses Filter changed files, opens the narrow rail, and ignores text fields and modals", () => {
+  draw({ files: [RETRY, file("src/other.rs")], layout: createDiffLayout(() => null) });
+  const input = target.querySelector<HTMLInputElement>('input[aria-label="Filter changed files"]')!;
+  const grid = target.querySelector<HTMLElement>(".tf-dgrid")!;
+  expect(grid.classList.contains("tf-rail-shut")).toBe(true);
+
+  // Pressing T outside fields opens the rail and focuses the filter input.
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(grid.classList.contains("tf-rail-shut")).toBe(false);
+  expect(document.activeElement).toBe(input);
+
+  // While a modal layer is open, T does not steal focus.
+  input.blur();
+  const off = layers.add({ kind: "dialog", close: () => {} });
+  try {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "T", bubbles: true, cancelable: true }));
+    flushSync();
+    expect(document.activeElement).not.toBe(input);
+  } finally {
+    off();
+  }
+
+  // While focus is inside another text field, T does not steal focus.
+  const other = document.createElement("input");
+  target.appendChild(other);
+  other.focus();
+  other.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.activeElement).toBe(other);
 });

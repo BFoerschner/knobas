@@ -21,6 +21,7 @@
  * Values are `xsd-values.ts`'. The spike's is `makeExample` in `xr-make.js`; its rules reached 5,618 of 5,618 examples
  * libxml2 judged valid.
  */
+import { xmlAttr, xmlText } from "./xml-escape";
 import { XML_NS } from "./xml-names";
 import { baseOf } from "./xsd-locate";
 import { XSI } from "./xsd-xml";
@@ -376,8 +377,6 @@ export function makeExample(set: SchemaSet, key: string, options: ExampleOptions
     used.set(ns, p);
     return p;
   };
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const escA = (s: string) => esc(s).replace(/"/g, "&quot;");
   const qn = (n: Node) => (n.ns === "" || n.ns === defaultNs ? n.name : `${used.get(n.ns)}:${n.name}`);
   const lines: { key: string | null; depth: number }[] = [];
   const text: string[] = [];
@@ -390,19 +389,19 @@ export function makeExample(set: SchemaSet, key: string, options: ExampleOptions
     const ind = "  ".repeat(depth);
     if (n.name === undefined) return push(`${ind}<!-- ${n.comment} -->`, null, depth);
     let attrs = "";
-    for (const a of n.attrs) attrs += ` ${a.ns === "" ? a.name : `${a.ns === XML_NS ? "xml" : attrPrefix(a.ns)}:${a.name}`}="${escA(a.v)}"`;
+    for (const a of n.attrs) attrs += ` ${a.ns === "" ? a.name : `${a.ns === XML_NS ? "xml" : attrPrefix(a.ns)}:${a.name}`}="${xmlAttr(a.v)}"`;
     const name = qn(n);
     const open = `${ind}<${name}${top ? ROOT_MARK : ""}${attrs}`;
     if (n.comment !== undefined) return push(`${open}/> <!-- ${n.comment} -->`, n.key, depth);
-    if (n.any === true) return push(`${open}${n.ns === "" ? "" : ` xmlns:${used.get(n.ns)}="${escA(n.ns)}"`}>${esc(n.text ?? "")}</${name}>`, null, depth);
-    if (n.kids.length === 0) return push(n.text === null || n.text === "" ? `${open}/>` : `${open}>${esc(n.text)}</${name}>`, n.key, depth);
+    if (n.any === true) return push(`${open}${n.ns === "" ? "" : ` xmlns:${used.get(n.ns)}="${xmlAttr(n.ns)}"`}>${xmlText(n.text ?? "")}</${name}>`, null, depth);
+    if (n.kids.length === 0) return push(n.text === null || n.text === "" ? `${open}/>` : `${open}>${xmlText(n.text)}</${name}>`, n.key, depth);
     push(`${open}>`, n.key, depth);
     for (const k of n.kids) write(k, depth + 1, false);
     push(`${ind}</${name}>`, n.key, depth);
   };
   write(tree, 0, true);
-  let decls = defaultNs !== null ? ` xmlns="${escA(defaultNs)}"` : "";
-  for (const [ns, p] of used) if (p !== null && ns !== XML_NS && ns !== "urn:example:anything") decls += ` xmlns:${p}="${escA(ns)}"`;
+  let decls = defaultNs !== null ? ` xmlns="${xmlAttr(defaultNs)}"` : "";
+  for (const [ns, p] of used) if (p !== null && ns !== XML_NS && ns !== "urn:example:anything") decls += ` xmlns:${p}="${xmlAttr(ns)}"`;
   const rootAt = text.findIndex((l) => l.includes(ROOT_MARK));
   text[rootAt] = text[rootAt]!.replace(ROOT_MARK, decls);
 

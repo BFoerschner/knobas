@@ -70,6 +70,10 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::file_pipeline::saved::NamedPipeline::export_all(cfg)?;
     crate::file_pipeline::saved::NamedPipelineDraft::export_all(cfg)?;
     crate::archive::java::JavaRuntime::export_all(cfg)?;
+    crate::link_handoff::LinkHandoffScope::export_all(cfg)?;
+    crate::link_handoff::LinkHandoffSetting::export_all(cfg)?;
+    crate::link_handoff::LinkHandoffTarget::export_all(cfg)?;
+    crate::link_handoff::manifest::NativeHostStatus::export_all(cfg)?;
     // update.ts
     crate::update::UpdateState::export_all(cfg)?;
     crate::update::UpdateNotes::export_all(cfg)?;
@@ -281,6 +285,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::checkout::local::LocalDir::export_all(cfg)?;
     crate::checkout::local::LocalPaths::export_all(cfg)?;
     crate::checkout::local::LocalEntry::export_all(cfg)?;
+    crate::checkout::text_search::TextQuery::export_all(cfg)?;
+    crate::checkout::text_search::TextFound::export_all(cfg)?;
     crate::checkout::fetch::Fetched::export_all(cfg)?;
     crate::checkout::clone_all::Plan::export_all(cfg)?;
     crate::checkout::clone_all::PlannedSource::export_all(cfg)?;

@@ -106,6 +106,15 @@
 .tf-oas-used { display: grid; }
 .tf-oas-usedrow { display: grid; grid-template-columns: 44px minmax(0, max-content) minmax(0, 1fr); column-gap: 10px; align-items: baseline; padding: 4px 4px; border: 0; border-bottom: 1px solid var(--rule-2); background: none; color: var(--ink); text-align: left; cursor: pointer; font-family: inherit; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-oas-usedrow:hover { background: var(--sheet-2); }
+.tf-oas-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+/* A parent schema: a `.tf-chip` (chrome.css sizes it) whose name is a `.tf-chipbtn` (design system, Controls: chip
+   buttons). The view gives it the code face and lets a long name wrap; it sets no size of its own. */
+.tf-chip.tf-oas-part {
+  max-width: 100%; white-space: normal; overflow-wrap: anywhere; background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule);
+  --fs: var(--size-code); font-family: var(--mono); font-weight: var(--wt-code, 400); font-variant-ligatures: var(--mono-ligatures);
+}
+.tf-oas-part .tf-chipbtn { text-align: left; }
+.tf-oas-part .tf-chipbtn:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 .tf-oas-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-oas-kv dt { color: var(--ink-2); }
@@ -117,7 +126,8 @@
 .tf-oas-tag .tf-oas-n { margin-left: auto; }
 
 /* ---- the request ---- */
-.tf-oas-req { padding: 14px 16px 30px; background: var(--sheet); display: flex; flex-direction: column; gap: 14px; }
+.tf-oas-req { padding: 14px 16px 24px; background: var(--sheet); display: flex; flex-direction: column; gap: 14px; }
+.tf-oas-page .tf-oas-req { padding: 0 0 24px; }
 .tf-oas-req h3 { margin: 0; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
 .tf-oas-grid { display: grid; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: calc(var(--t-sm) * var(--fs)); }
 /* A row: its label (with a query or header row's tick before its name), then its field. One element a row, laid on the
@@ -135,6 +145,7 @@
 .tf-oas-row2 { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .tf-oas-row2 > .tf-oas-inp, .tf-oas-row2 > select { flex: 1; }
 .tf-oas-hint { grid-column: 2; margin: -2px 0 2px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-oas-edithint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tf textarea.tf-oas-body { width: 100%; box-sizing: border-box; min-height: 150px; max-height: 340px; resize: vertical; border: 1px solid var(--rule); border-radius: 4px; background: var(--field, var(--sheet)); color: var(--ink); padding: 8px 9px; --fs: var(--size-code); font: var(--wt-code, 400) calc(var(--t-xs) * var(--fs))/var(--code-lh, 1.6) var(--mono); font-variant-ligatures: var(--mono-ligatures); white-space: pre; }
 /* What will go out, exactly: one line in the code face that gives up its middle. */
 .tf-oas-line { display: flex; gap: 8px; align-items: baseline; padding: 7px 9px; border: 1px solid var(--rule-2); border-radius: 4px; background: var(--sheet-2); min-width: 0; --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); }
@@ -146,8 +157,10 @@
 .tf-oas-ask label { display: flex; gap: 6px; align-items: center; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-ask div { display: flex; gap: 8px; }
 
-/* The answer. Its status is a state, so it takes a tone. */
-.tf-oas-ans { border-top: 1px solid var(--rule); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
+/* The answer. Its status is a state, so it takes a tone. Matches `.tf-oas-req` padding; border only when stacked below it. */
+.tf-oas-ans { padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.tf-oas-req + .tf-oas-ans { border-top: 1px solid var(--rule); }
+.tf-oas-page .tf-oas-ans { padding: 14px 0 0; }
 .tf-oas-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-oas-code3 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 700; font-variant-numeric: tabular-nums; }
 .tf-oas-code3.tf-ok { color: var(--ok); } .tf-oas-code3.tf-warn { color: var(--warn); } .tf-oas-code3.tf-err { color: var(--err); }
@@ -174,7 +187,8 @@
 .tf-oas { position: relative; }
 .tf-oas-list .tf-wgap { pointer-events: none; }
 .tf-oas-rows { position: relative; }
-.tf-oas-list:focus-visible .tf-oas-cursor { box-shadow: inset 0 0 0 2px var(--focus); }
+:where(:root[data-focus-ring]) .tf-oas-list:focus-visible .tf-oas-cursor { box-shadow: inset 0 0 0 1px var(--focus), inset 0 0 0 var(--focus-w) color-mix(in srgb, var(--focus) var(--focus-a), transparent); }
+:where(:root[data-focus-ring="fade"]) .tf-oas-list:focus-visible .tf-oas-cursor { transition: box-shadow var(--focus-fade) ease-out; }
 .tf-oas-reading { margin: 0; padding: 16px 20px; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-oas-bad { padding: 16px 20px; display: grid; gap: 8px; max-width: 760px; }
 .tf-oas-bad p { margin: 0; }
@@ -188,6 +202,13 @@
 .tf-oas-prose .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.5; color: inherit; }
 .tf-oas-prose .tf-md > :first-child { margin-top: 0; }
 .tf-oas-prose .tf-md > :last-child { margin-bottom: 0; }
+.tf-oas-desc:has(table), .tf-oas-fd:has(table) { max-width: none; }
+.tf-oas-desc .tf-oas-prose .tf-md :is(p, ul, ol, blockquote) { max-width: 76ch; }
+.tf-oas-fd .tf-oas-prose .tf-md :is(p, ul, ol, blockquote) { max-width: 64ch; }
+.tf-oas-prose .tf-md table { width: fit-content; max-width: 100%; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.45; overflow-wrap: break-word; }
+.tf-oas-prose .tf-md :is(th, td) { padding: 4px 10px; vertical-align: top; overflow-wrap: break-word; }
+.tf-oas-prose .tf-md th { color: var(--ink); }
+.tf-oas-fd .tf-md :is(th, td) code { overflow-wrap: break-word; }
 .tf-oas-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 2px; }
 .tf-oas-link:hover { text-decoration-color: currentColor; }
 .tf-oas-page:focus { outline: none; }
@@ -237,7 +258,8 @@
 .tf-oas-fr.tf-oas-can:hover .tf-oas-fd code { background: var(--rule-2); }
 .tf-oas-fr:is(.tf-oas-can:hover, :focus-visible, .tf-oas-cursor) > .tf-oas-tog { color: var(--ink); }
 .tf .tf-oas-fr:focus-visible { outline-offset: var(--focus-in); }
-:focus-visible .tf-oas-fr.tf-oas-cursor { box-shadow: inset 0 0 0 var(--focus-w) var(--focus); }
+:where(:root[data-focus-ring]) :focus-visible .tf-oas-fr.tf-oas-cursor { box-shadow: inset 0 0 0 var(--focus-w) color-mix(in srgb, var(--focus) var(--focus-a), transparent); }
+:where(:root[data-focus-ring="fade"]) :focus-visible .tf-oas-fr.tf-oas-cursor { transition: box-shadow var(--focus-fade) ease-out; }
 
 /* What a row holds: one step in, under a guide that drops from its caret. */
 .tf-oas-in { grid-column: 1 / -1; margin: 0 0 6px 8px; padding-left: 11px; border-left: 1px solid var(--rule); }
@@ -295,15 +317,18 @@
 .tf-oas-time { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-oas-time select { height: var(--control-h-sm); }
 .tf-oas-send kbd { margin-left: 6px; }
-.tf-oas-anslines { padding: 6px 0; white-space: pre; overflow: auto; display: flex; flex-direction: column; background: var(--sheet-2); }
-.tf-oas-anslines > * { flex: none; }
-.tf-oas-al { display: grid; grid-template-columns: 5ch minmax(0, 1fr); column-gap: 10px; min-height: var(--code-lh, 1.6em); }
-.tf-oas-ln { text-align: right; color: var(--muted); user-select: none; padding-right: 4px; }
-.tf-oas-tk { color: var(--hl-prop, var(--ink)); }
-.tf-oas-ts { color: var(--hl-str, var(--ok)); }
-.tf-oas-tn { color: var(--hl-num, var(--warn)); }
-.tf-oas-tb { color: var(--hl-kw, var(--info)); }
-.tf-oas-anshdrs { font-size: calc(var(--t-xs) * var(--fs)); }
+.tf-oas-anshdrs {
+  display: grid; grid-template-columns: fit-content(42%) minmax(0, 1fr);
+  margin: 0; border-top: 1px solid var(--rule-2); border-bottom: 1px solid var(--rule-2);
+  font-size: calc(var(--t-xs) * var(--fs)); line-height: 1.5;
+}
+.tf-oas-anshdr {
+  grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; column-gap: 14px;
+  align-items: baseline; padding: 6px 4px;
+}
+.tf-oas-anshdr + .tf-oas-anshdr { border-top: 1px solid var(--rule-2); }
+.tf-oas-anshdr dt { color: var(--ink-2); font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.tf-oas-anshdr dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
 .tf-oas-sentlab { margin: 10px 0 0; font-size: calc(var(--t-xs) * var(--fs)); font-weight: 600; color: var(--ink-2); display: flex; gap: 6px; align-items: baseline; }
 .tf-oas-ans .tf-ok { color: var(--ok); } .tf-oas-ans .tf-warn { color: var(--warn); } .tf-oas-ans .tf-err { color: var(--err); }
 .tf-oas-page.tf-oas-col:has(+ .tf-oas-col) { border-right: 0; }
@@ -336,3 +361,18 @@
 .tf-oas-irow[data-mark="removed"] { --mark-edge: var(--err); }
 .tf-oas-irow[data-mark="changed"] { --mark-edge: var(--warn); }
 .tf-oas-iopen { padding: 4px 10px 14px 18px; }
+
+/* ---- An answer's body (#2533): Render as, Pipeline and Expand, the compact views, the body expanded over the pane ---- */
+.tf-oas-bodybar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* *Pipeline* and the trail, one group that takes the line's rest: the bar wraps before it, never inside it, so *Expand*
+   never wraps alone (the filter bar's rule for its count, at 1100 x 600 where the page's column is 456 px). */
+.tf-oas-bodyrest { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+/* The compact view holds its room from the first frame: the box is the same height reading, drawn or failed. */
+.tf-oas-docbox { height: clamp(260px, 52vh, 560px); min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--rule-2); border-radius: 4px; overflow: hidden; background: var(--sheet); }
+.tf-oas-ans .tf-pipe { border: 1px solid var(--rule-2); border-radius: 4px; }
+.tf-oas-ans .tf-stepfail { border: 1px solid var(--rule-2); border-radius: 4px; }
+.tf-oas-expanded { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 0; background: var(--sheet); overflow: hidden; }
+.tf-oas-exphead { flex: none; }
+.tf-oas-expline { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-oas-docbox.tf-oas-full { flex: 1; height: auto; margin: 0 -16px; border: 0; border-top: 1px solid var(--rule); border-radius: 0; }
+.tf-oas-ansbody.tf-oas-full { flex: 1; max-height: none; margin-bottom: 14px; }

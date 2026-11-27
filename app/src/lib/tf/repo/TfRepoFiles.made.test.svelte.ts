@@ -658,3 +658,28 @@ test("the bar's Run… runs on the generated folder knobas kept, its files and i
     oneoffs.commands = had;
   }
 });
+
+test("Alt+click on a grafted generated folder expands and collapses its entire generated subtree", async () => {
+  draw({ rendered: RENDERED });
+  await settle();
+  const dirBtn = (path: string) => target.querySelector<HTMLButtonElement>(`.tf-ftree button.tf-fdir[data-path="${path}"]`)!;
+  // Start by collapsing the grafted folder so Alt+click expands every nested generated folder inside it.
+  dirBtn("flows/orders").click();
+  flushSync();
+  expect(dirBtn("flows/orders").getAttribute("aria-expanded")).toBe("false");
+
+  dirBtn("flows/orders").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("flows/orders").getAttribute("aria-expanded")).toBe("true");
+  expect(dirBtn("flows/orders/docs").getAttribute("aria-expanded")).toBe("true");
+  expect(target.querySelector('.tf-ftree a[data-path="flows/orders/docs/steps.md"]')).not.toBeNull();
+  expect(dirBtn("flows/orders/img").getAttribute("aria-expanded")).toBe("true");
+
+  // Alt+click again collapses the grafted folder and every nested generated folder beneath it.
+  dirBtn("flows/orders").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirBtn("flows/orders").getAttribute("aria-expanded")).toBe("false");
+  dirBtn("flows/orders").click();
+  flushSync();
+  expect(dirBtn("flows/orders/docs").getAttribute("aria-expanded")).toBe("false");
+});

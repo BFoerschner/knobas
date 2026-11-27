@@ -27,6 +27,7 @@ import { hintKey, hintStore, hintedPaths, keepHint } from "../../../render/xsd-h
 import type { KeptValue } from "../../kept-value";
 import { firstTag } from "../../../render/xsd-sniff";
 import { XS, XSI } from "../../../render/xsd-xml";
+import { xmlAttr } from "../../../render/xml-escape";
 
 /** The files whose check was stopped, until knobas quits (`repository\npath`). */
 const stopped = new Set<string>();
@@ -110,7 +111,6 @@ const FOUND: Record<string, string> = {
 /** How a set open elsewhere was found, in the rail's words after *found*: an example's own (E1). */
 const MADE_FROM = "where the example was made";
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1).replace(/^@(repo\/[^/]+|download|knobas)\//, "");
 const dirOf = (p: string) => (p.lastIndexOf("/") === -1 ? "" : p.slice(0, p.lastIndexOf("/") + 1));
 
@@ -151,14 +151,14 @@ export function rootSays(text: string): RootSays | null {
 export function entryFor(path: string, root: RootSays): { path: string; text: string } | null {
   if (root.namespace === "" && root.location === null) return null;
   const at = `${dirOf(path)}.knobas-document-schema.xsd`;
-  const loc = root.location === null ? "" : ` schemaLocation="${esc(root.location)}"`;
-  const body = root.namespace === "" ? `<xs:include${loc}/>` : `<xs:import namespace="${esc(root.namespace)}"${loc}/>`;
+  const loc = root.location === null ? "" : ` schemaLocation="${xmlAttr(root.location)}"`;
+  const body = root.namespace === "" ? `<xs:include${loc}/>` : `<xs:import namespace="${xmlAttr(root.namespace)}"${loc}/>`;
   // The document's own prefixes stand first, so a name in a finding is written as the document writes it; in one order,
   // so the root read from the first tag and from the outline ask for one set.
   const binds = Object.entries(root.prefixes ?? {})
     .filter(([p]) => p !== "xs" && /^[A-Za-z_][\w.-]*$/.test(p))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([p, uri]) => ` xmlns:${p}="${esc(uri)}"`)
+    .map(([p, uri]) => ` xmlns:${p}="${xmlAttr(uri)}"`)
     .join("");
   return { path: at, text: `<xs:schema xmlns:xs="${XS}"${binds}>${body}</xs:schema>` };
 }

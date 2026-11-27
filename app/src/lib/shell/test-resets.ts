@@ -65,6 +65,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The band's *Rendered* and an image's mode in a rendered diff (ux26): off and side by side again.
   "tf/diff/diff-rendered.svelte.ts#diffRendered": async () => (await import("../tf/diff/diff-rendered.svelte")).diffRendered.reset(),
   "tf/repo/cloned-here.svelte.ts#known": async () => (await import("../tf/repo/cloned-here.svelte")).forgetCheckouts(),
+  // *Search in repository*'s words waiting for a Files tab (ADR-0062).
+  "tf/repo/text-search.svelte.ts#asked": async () => (await import("../tf/repo/text-search.svelte")).forgetAsked(),
   "tf/diff/image-mode.svelte.ts#imageMode": async () => (await import("../tf/diff/image-mode.svelte")).imageMode.set("sides"),
   // How a changed class in a JAR's comparison is diffed (2026-11-22), stored in `localStorage`: each test starts on Source.
   "tf/diff/class-mode.svelte.ts#classMode": async () => (await import("../tf/diff/class-mode.svelte")).classMode.reset(),
@@ -232,6 +234,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // What was typed on an application's page and not saved (PR #2479, 2026-11-13): each test starts with none.
   "tf/openin/app-drafts.svelte.ts#typedDrafts": async () => (await import("../tf/openin/app-drafts.svelte")).forgetAppDrafts(),
   "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  // The spaces and folds the reader shut although they hold the open page (#2521).
+  "tf/docs/TfDocs.svelte#closedSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  "tf/docs/TfDocs.svelte#closedFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),

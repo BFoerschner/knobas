@@ -267,9 +267,11 @@ async fn filters_narrow_the_read() {
         9,
         "Other_Build",
         "main",
-        Some("20260822T113000+0000"),
+        // 11:20, not the queued run's 11:30: a tie would go to the entity ids,
+        // which start with each source's random token (#2537).
+        Some("20260822T112000+0000"),
         None,
-        "2026-08-22T11:30:00Z",
+        "2026-08-22T11:20:00Z",
     )
     .await;
 

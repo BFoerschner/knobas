@@ -444,3 +444,66 @@ export const DEEP_30_JSON = JSON.stringify(
   null,
   2,
 );
+
+/**
+ * A pet store that speaks XML (#2525): an XML body beside a JSON one, an XML answer, and the schema's `xml` object at
+ * work (a renamed root under a namespace, an attribute, a wrapped list). The dev fake's `api/pets-xml.yaml`.
+ */
+export const PETS_XML_YAML = `openapi: 3.0.3
+info:
+  title: Pet Store (XML)
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /pets:
+    post:
+      summary: Create a pet
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              $ref: "#/components/schemas/Pet"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "201":
+          description: The pet, as stored
+          content:
+            application/xml:
+              schema:
+                $ref: "#/components/schemas/Pet"
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id, name]
+      xml:
+        name: pet
+        namespace: https://example.com/schema/pets
+        prefix: p
+      properties:
+        id:
+          type: integer
+          format: int64
+          xml:
+            attribute: true
+        name:
+          type: string
+          example: Rex
+        status:
+          type: string
+          enum: [available, pending, sold]
+        tags:
+          type: array
+          xml:
+            wrapped: true
+          items:
+            type: string
+            example: friendly
+            xml:
+              name: tag
+`;

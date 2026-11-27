@@ -2289,6 +2289,21 @@ notarization warning is expected too. The check has two steps:
    `notification closed without a click` at `debug` instead
    (`RUST_LOG=knobas_app=debug` to see it).
 
+**On Windows** (#2529) the toast is sent on WinRT under the bundle
+identifier `dev.knobas.desktop`, registered at start under
+`HKCU\Software\Classes\AppUserModelId\dev.knobas.desktop` (`DisplayName`
+knobas, `IconUri` the `notification-icon.png` knobas writes into
+`%APPDATA%\dev.knobas.desktop`). The check, from an installed build and
+again from the bare release binary under `target\release` (`KNOBAS_UPDATE=off`
+for both): the toast and its Action Center entry say *knobas* with knobas's
+icon, not *Windows PowerShell*; minimize knobas, raise a toast and click its
+body: knobas comes up in front on that item's room; raise another, let the
+banner slide away (about 5 s), open Action Center and click it there: the
+same. The stderr lines are the macOS ones, and a dismissal from Action
+Center logs `notification closed without a click`. A toast that never shows
+logs `the Windows toast failed` with its `HRESULT`, or the registration's
+`the notification identity is not registered` at start.
+
 **The Launch Services caveat, and why the path matters.** knobas sends
 through `notify-rust`'s `UNUserNotificationCenter` backend, and a click on
 one of its banners activates *the bundle Launch Services has registered for
@@ -3071,6 +3086,18 @@ as the trips run, under the machine's lock:
 
 ```sh
 testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5341 node testenv/ui-checks/long-paths.mjs "$TMPDIR/long-paths" --port 5341
+```
+
+**The API explorer** (`api-explorer.mjs`, spec #2514): the explorer's layout under `?fake-ipc&fake-openapi`, at the
+window's smallest (1100 x 600, two columns), 1920 x 960 (three) and 5120 x 1440 (four). It fails when a column scrolls
+inside a column (two gutters), the answer's padding is not the request's or it keeps a top rule standing alone, the auth
+choice by hand is missing, the answer's headers lose their rows, the answer's body bar runs past its column (or wraps in
+three or four columns, or leaves *Expand* alone on a line), *Expand* does not cover the pane exactly or `Esc` does not give it back with the focus on
+*Expand*, a schema's *Part of* is not 12 chips then 23 behind *Show all*, or a schema's Markdown table is held to a width.
+Each check and its numbers are in the file's header.
+
+```sh
+testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5342 node testenv/ui-checks/api-explorer.mjs "$TMPDIR/api-explorer" --port 5342
 ```
 
 **The screenshot comparison** (`pixel-same.py`): given two folders of screenshots taken of the same screens on two

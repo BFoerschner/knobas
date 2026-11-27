@@ -25,6 +25,7 @@ import { commandFor, joinInside, menuOrder, objectMenu, repoName } from "../open
 import { compareHash, fileHash, folderRenderHash, lineHash, renderedHash, repoHash } from "../repo/repo";
 import { tabHash } from "../builds/pipeline";
 import { runTabHash } from "../builds/run";
+import { counted } from "../counted";
 import type { Thing } from "./thing";
 import type { OneOff } from "../../ipc/oneoff";
 import { takesCommit, takesFile, takesFolder, takesMadeFile, takesMadeFolder, takesRepository } from "../../render/oneoff";
@@ -63,6 +64,8 @@ export type Act =
   /** The document's own copy of the selection, so a page's `copy` handler still shapes what lands. */
   | { do: "copy-selection" }
   | { do: "search"; text: string }
+  /** *Search in repository* (ADR-0062): the repository's Files tab, *Text* filled with the words. */
+  | { do: "search-repo"; repoId: string; text: string }
   /** The browser, on purpose: an item named *Open in browser*. */
   | { do: "browser"; url: Text }
   /** *Open in ⟨source⟩*: its site inside knobas when the source's pages open there (ADR-0050), else the browser. */
@@ -86,6 +89,11 @@ export type Act =
   | { do: "run-read"; id: string; read: boolean }
   /** *Mark all as read* on a pipeline (ux18): every failed run of it. */
   | { do: "pipeline-read"; id: string }
+  /**
+   * *Mark N runs as read* (#2527, #2543): `runs` drawn read at once, and every failed run of `pipelines` by the backend,
+   * with *Undo* on the toast.
+   */
+  | { do: "runs-read"; runs: readonly string[]; pipelines: readonly string[] }
   /** *Move to ▸ ⟨status⟩* on a ticket (ADR-0054): the page offering moves makes it. */
   | { do: "move"; entityId: string; status: string }
   /** *Assign to…* on a ticket (ADR-0054, section 26): the page offering field edits opens its people picker at the card. */
@@ -145,6 +153,8 @@ export interface MenuContext {
   docs?: { isHome(kind: "space" | "page", id: string): boolean; hidden: ReadonlySet<string> };
   /** Whether a failed run is marked read (`runs-read.svelte.ts`, ux18); absent, no mark is offered. */
   runs?: { isRead(runId: string): boolean };
+  /** The repository the selected words are code of (`repoOfSelection`): *Search in repository* is offered for it. */
+  searchRepo?: string | null;
   /** Whether a repository is known to be cloned here (ux26): a commit offers *Compare with working tree* only then. */
   checkout?: (repoId: string) => boolean;
   /**
@@ -231,6 +241,7 @@ export function menuFor(thing: Thing | null, selection: string | null, ctx: Menu
   if (searchable(selection)) {
     const shown = selection.length > 24 ? `${selection.slice(0, 23)}…` : selection;
     words.push({ id: "search-sel", label: `Search knobas for “${shown}”`, act: { do: "search", text: selection } });
+    if (ctx.searchRepo) words.push({ id: "search-repo", label: "Search in repository", act: { do: "search-repo", repoId: ctx.searchRepo, text: selection } });
   }
   return own.length === 0 ? words : [...words, RULE, ...own];
 }
@@ -317,6 +328,13 @@ function grouped(...groups: Entry[][]): Entry[] {
     out.push(...group);
   }
   return out;
+}
+
+/** *Mark 3 runs as read*, *Mark 1 run as read*, `runs` the unread failures of `pipelines`; nothing at none (#2527, #2543). */
+function readRuns(runs: readonly string[], pipelines: readonly string[]): Item[] {
+  return runs.length === 0
+    ? []
+    : [{ id: "read-runs", label: `Mark ${counted(runs.length, "run", "runs")} as read`, act: { do: "runs-read", runs, pipelines } }];
 }
 
 function open(hash: string, ctx: MenuContext): Item[] {
@@ -440,8 +458,13 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
         [
           ...open(thing.hash, ctx),
           ...fromSheet("pipeline", thing.id, title, ctx),
-          // Every failed run of it, older ones too (ux18), with *Undo* on the toast.
-          ...(ctx.runs !== undefined ? [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item] : []),
+          // Every failed run of it, older ones too (ux18): counted on the Builds rail (#2527, #2543), *Mark all* elsewhere.
+          // Both with *Undo* on the toast.
+          ...(ctx.runs === undefined
+            ? []
+            : thing.unread !== undefined
+              ? readRuns(thing.unread, [thing.id])
+              : [{ id: "read-all", label: "Mark all as read", act: { do: "pipeline-read", id: thing.id } } satisfies Item]),
         ],
         inSource(thing.id, ctx),
         [{ id: "copy-name", label: "Copy name", act: { do: "copy", text: { read: "title" }, said: "Copied the name" } }, copyLink()],
@@ -581,6 +604,10 @@ function thingEntries(thing: Thing, ctx: MenuContext, facts: MenuFacts): Entry[]
       }
       return grouped([...(thing.open === null ? [] : [{ id: "open", label: "Open", act: { do: "go", hash: thing.open } } satisfies Item]), ...acts]);
     }
+    case "pipeline-folder":
+      return grouped(ctx.runs === undefined ? [] : readRuns(thing.unread, thing.pipelines), [
+        { id: "copy-name", label: "Copy name", act: { do: "copy", text: thing.name, said: "Copied the name" } },
+      ]);
     case "test":
       return [{ id: "copy-name", label: "Copy name", hint: thing.name, act: { do: "copy", text: thing.name, said: "Copied the test's name" } }];
     case "web": {

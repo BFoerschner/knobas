@@ -84,6 +84,7 @@
   import { sideWidth } from "../side-width.svelte";
   import TfScope from "../filter/TfScope.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
+  import { menuThing } from "../context/thing";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
   import { afterLayout } from "../../shell/after-layout";
@@ -117,6 +118,7 @@
   import { RUN_BRIDGE } from "./pipeline-ports";
   import { QUEUED_RUN, withQueued } from "./pipeline";
   import { echoesOn, type EchoListen } from "../queued.svelte";
+  import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { windowListen } from "../../ipc/shared-listen";
   import { EVENTS } from "../../ipc";
   import type { RefreshEnded } from "../../ipc/sources";
@@ -128,7 +130,9 @@
     groupsOf,
     recentNewestFirst,
     asksAttention,
-    unreadRun,
+    unreadRunsOf,
+    namesEvery,
+    foldPipelines,
     keptPipelines,
     latestTime,
     listRows,
@@ -227,6 +231,22 @@
       if (at === listReads) failed = message(error);
     }
   }
+
+  /**
+   * A failure marked unread that the list names nowhere (#2543): it was read when the list was read, so no pipeline's
+   * `unread` holds it, and the rail's count would miss it. The list is read again once the mark's write answered, so the
+   * read sees it. A mark the list names (*Undo* of a press, a run of the last twelve) moves the count through `read`
+   * alone.
+   */
+  let readBefore = untrack(() => read);
+  $effect(() => {
+    const now = read;
+    const before = readBefore;
+    readBefore = now;
+    if (before === null || now === null || before === now) return;
+    const back = [...before].filter((id) => !now.has(id));
+    if (back.length > 0 && untrack(() => all !== null && !namesEvery(all, back))) void runsRead.settled().then(rereadPipelines);
+  });
 
   /**
    * A pipeline's row read again when a run it draws moved, or a run queued on it here was read back (the TeamCity run
@@ -438,7 +458,7 @@
    */
   function markAllRead() {
     void runsRead.markAll({
-      runs: kept.flatMap((p) => p.recent.filter((run) => unreadRun(run, read)).map((run) => run.entity_id)),
+      runs: unreadRunsOf(kept, read),
       pipelines: kept.map((p) => p.entity_id),
     });
   }
@@ -501,6 +521,14 @@
     // Only the reader's own toggle is remembered, not the one the open
     // attribute raises when the fold is drawn.
     if (open !== foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)) remembered.set(f.key, open);
+  }
+
+  /** Alt+click on a Builds folder toggles it and every nested folder under it. */
+  function altFold(f: Fold, isOpen: boolean, event: MouseEvent) {
+    if (!isAltClick(event)) return;
+    event.preventDefault();
+    const want = !isOpen;
+    for (const node of collectDescendants([f], (x) => x.folds, TREE_EXPAND_CAP)) remembered.set(node.key, want);
   }
 
   /**
@@ -669,6 +697,7 @@
     class={`tf-tr tf-pi ${indent(depth)}`}
     href={pipelineHash(pipeline.entity_id)}
     aria-current={pipeline.entity_id === selected?.entity_id}
+    {@attach menuThing(() => ({ kind: "pipeline", id: pipeline.entity_id, hash: pipelineHash(pipeline.entity_id), unread: unreadRunsOf([pipeline], read) }))}
     title={`${[...groupsOf(pipeline), pipeline.name].join(" › ")}\n${glyph.word}${latest !== "" ? ` ${latest}` : ""}`}
     {@attach win.row(key)}
   >
@@ -683,7 +712,12 @@
 {#snippet foldView(f: Fold, depth: number, open: boolean, key: string)}
   <!-- The summary alone: a fold's rows follow it while it is open, and a closed one has none (#2200's class, #2211). -->
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
-    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key} onclick={(event) => altFold(f, open, event)}
+      {@attach menuThing(() => {
+        const under = foldPipelines(f);
+        return { kind: "pipeline-folder", name: f.name, unread: unreadRunsOf(under, read), pipelines: under.map((p) => p.entity_id) };
+      })}
       ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
         >{#if f.failing > 0}<span class="tf-count" class:tf-err={f.asking > 0}>{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
             class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span

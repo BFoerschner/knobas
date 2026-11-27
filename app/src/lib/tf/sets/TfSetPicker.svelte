@@ -8,8 +8,8 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetMemberKind } from "../../ipc/entity";
-  import { matchesAll } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { intoList, withinList } from "./list-keys";
   import type { Candidate } from "./ports";
@@ -57,7 +57,13 @@
   });
 
   const noun = $derived(KIND_LABEL[kind].toLowerCase());
-  const shown = $derived((all ?? []).filter((row) => matchesAll(`${row.name} ${row.sub}`, typed)));
+  /** The typed words rank every item by its name and line, best first, through the app's ranking (#2535). */
+  const rows = $derived(all ?? []);
+  const rowText = (row: Candidate) => `${row.name} ${row.sub}`;
+  const order = heldOrder<Candidate>("set-picker");
+  $effect(() => order.ask(typed, rows, rowText));
+  const shown = $derived(order.rows(typed, rows, rowText));
+  const marking = $derived(order.typed(typed, rows));
 
   function toggle(id: string, on: boolean) {
     picked = on ? [...picked, id] : picked.filter((held) => held !== id);
@@ -112,7 +118,7 @@
             checked={held || picked.includes(row.entity_id)}
             disabled={held}
             onchange={(event) => toggle(row.entity_id, event.currentTarget.checked)}
-          /> <span class="tf-pick-name"><Marked text={row.name} {typed} /></span><span class="tf-dim">{held ? "already in" : row.sub}</span></label
+          /> <span class="tf-pick-name"><Marked text={row.name} typed={marking} pairs={order.marks(row, 0, row.name.length)} /></span><span class="tf-dim">{held ? "already in" : row.sub}</span></label
         >
       {/each}
       {#if shown.length > DRAWN}

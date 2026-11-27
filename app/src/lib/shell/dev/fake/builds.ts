@@ -348,7 +348,12 @@ function buildHistory(now: Date): Map<string, RunRow[]> {
   return out;
 }
 
-/** `pipelines`: every configuration by name, each with its last twelve runs. */
+/** The unread failures among `runs`: what a pipeline row's `unread` names. */
+function unreadOf(runs: readonly RunRow[]): string[] {
+  return runs.filter((run) => failedFake(run) && !readRuns.has(run.entity_id)).map((run) => run.entity_id);
+}
+
+/** `pipelines`: every configuration by name, each with its last twelve runs and its unread failures (#2543). */
 export function fakePipelines(now: Date = new Date()): PipelineRow[] {
   const runs = history(now);
   return Object.entries(CONFIGURATIONS)
@@ -363,6 +368,8 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
         pinned: pins.has(`${SOURCE}:buildType:${config}`),
         web_url: `https://ci.tidewater.example/buildConfiguration/${config}`,
         recent: (runs.get(config) ?? []).slice(0, 12),
+        // Every unread failure of the mirrored history, past the twelve too (#2543), as `PIPELINES` names them.
+        unread: unreadOf(runs.get(config) ?? []),
       })),
     )
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
@@ -787,6 +794,7 @@ export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] 
       pinned: false,
       web_url: null,
       recent,
+      unread: [],
     });
   }
   return out;
@@ -837,7 +845,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
     pipelines: () => {
       const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
-      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk];
+      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk.map((p) => ({ ...p, unread: unreadOf(p.recent) }))];
     },
     // Mark builds as read (ux18): the fixture's own set, as `knobas.run_read` holds them.
     read_runs: () => [...readRuns],

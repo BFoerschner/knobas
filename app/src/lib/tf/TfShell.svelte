@@ -53,7 +53,7 @@
   import { flushSync, onMount, tick, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
-  import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
+  import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers, type LinkHandoffTarget } from "../ipc/app";
   import { diffPipelines as heldDiffPipelines } from "./diff/diff-pipelines.svelte";
   import { docsChoices as readDocsChoices } from "../ipc/entity";
   import { docsChoices as heldDocsChoices } from "./docs/docs-choices.svelte";
@@ -151,7 +151,7 @@
   import TfSiteQuit from "./site/TfSiteQuit.svelte";
   import { ackBand } from "../shell/ack.svelte";
   import { openInBrowser } from "../shell/external-links"; // browser on purpose: a site's link to an address it may not show
-  import { openWeb } from "../shell/open-web";
+  import { openSiteAt, openWeb } from "../shell/open-web";
   import "./tf.css";
 
   let {
@@ -761,6 +761,8 @@
     hold(ports.listen(EVENTS.siteQuit, ({ payload }) => (quitting = payload as SiteStatus[])));
     // What the clipboard holds for knobas (ADR-0056): the status bar's line and the entry's rows read it.
     hold(ports.listen(EVENTS.clipboardState, ({ payload }) => clipped((payload as ClipState | null) ?? { what: null, entity_id: null, until: null })));
+    // External URL handed off via `knobas://open?url=...` or Firefox Native Messaging (ADR-0061).
+    hold(ports.listen(EVENTS.linkHandoffOpen, ({ payload }) => openHandoff(payload as LinkHandoffTarget)));
 
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);
@@ -810,6 +812,13 @@
     return untrack(() => layers.add({ kind: "panel", close: toggleZen }));
   });
 
+  /** Back or forward: on a site's page in the site first, then in knobas (decisions §8; the mouse's buttons too, #2528). */
+  function travelTo(travel: "back" | "forward") {
+    if (route.view === "site" && (travel === "back" ? siteBack(route.source) : siteForward(route.source))) return;
+    if (travel === "back") nav.back();
+    else nav.forward();
+  }
+
   function onkeydown(event: KeyboardEvent) {
     // On a site's page a key between two `Esc`s is a new start (decisions §9).
     if (route.view === "site" && event.key !== "Escape") siteStore.disarm(route.source);
@@ -830,10 +839,7 @@
     if (travel !== null) {
       event.preventDefault();
       if (dialogOpen()) return;
-      // On a site's page, back and forward in the site first, then in knobas (decisions §8).
-      if (route.view === "site" && (travel === "back" ? siteBack(route.source) : siteForward(route.source))) return;
-      if (travel === "back") nav.back();
-      else nav.forward();
+      travelTo(travel);
       return;
     }
     const mod = event.metaKey || event.ctrlKey;
@@ -1017,6 +1023,22 @@
     void Promise.race([settling.catch(() => {}), new Promise((resolve) => setTimeout(resolve, SITE_SETTLE_MS))]).then(go);
   }
 
+  /** Navigate to an external link handed off via `knobas://` or Firefox Native Messaging (ADR-0061). */
+  function openHandoff(target: LinkHandoffTarget) {
+    if (target.kind === "entity") {
+      go(entityAddress(target.entity_kind, target.entity_id));
+      return;
+    }
+    if (target.kind === "site") {
+      void openSiteAt(target.source, target.url);
+      return;
+    }
+    pushToast({
+      text: "knobas holds nothing at that address yet.",
+      action: { label: "Open in browser", run: () => openInBrowser(target.url) },
+    });
+  }
+
   /** Where a link a site may not show went (decisions §6): the bar says so for six seconds. */
   function siteRouted(routed: SiteRouted) {
     const name = siteStore.name(routed.source);
@@ -1097,13 +1119,14 @@
    * The mouse's back (3) and forward (4) buttons (#693). Navigated on
    * `mouseup`, the moment a browser does; every event of the press is
    * `preventDefault`ed so the webview adds no navigation or selection of its own.
+   * Over a site's bar they are the site's back and forward first, as ⌘[ and ⌘] are
+   * (#2528); over the site's page the native hook decides the same in Rust.
    */
   function onmouse(event: MouseEvent) {
     if (event.button !== 3 && event.button !== 4) return;
     event.preventDefault();
     if (event.type !== "mouseup" || dialogOpen()) return;
-    if (event.button === 3) nav.back();
-    else nav.forward();
+    travelTo(event.button === 3 ? "back" : "forward");
   }
   const MOUSE = ["mousedown", "mouseup", "auxclick"] as const;
 

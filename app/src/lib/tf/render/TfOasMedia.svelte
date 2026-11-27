@@ -65,7 +65,7 @@
   const made = $derived(shown === undefined || given !== undefined ? undefined : choice === 0 ? st.samples.get(sk) : st.samples.get(`${sk}|${choice}`));
   const example = $derived(given ?? (made === undefined ? undefined : { name: "", summary: "", value: made, external: null }));
   $effect(() => {
-    if (shown !== undefined && given === undefined && shown.schema !== null && choice > 0) void st.sampleChoice(sk, base, shown.schema, direction, choice);
+    if (shown !== undefined && given === undefined && shown.schema !== null && choice > 0) void st.sampleChoice(sk, base, shown.schema, direction, choice, shown.type);
   });
 
   // A shape the page's one answer did not bring (a path item read from another file) is asked for once.

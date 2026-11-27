@@ -66,6 +66,7 @@ function pipeline(name: string, recent: RunRow[], extra: Partial<PipelineRow> = 
     pinned: false,
     web_url: null,
     recent,
+    unread: [],
     ...extra,
   };
 }

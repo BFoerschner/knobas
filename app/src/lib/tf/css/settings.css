@@ -27,8 +27,10 @@
 .tf-stg-nav a.tf-stg-child { padding-left: 24px; }
 /* A closed fold holding the open page: the open row's fill as an edge, as Docs' tree marks it. */
 .tf-stg-fold > summary.tf-holds { box-shadow: inset 2px 0 0 var(--sel-row); }
-.tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
-.tf-stg-h { margin-bottom: 16px; }
+/* The column (#2518, Björn: Settings felt cramped): wide enough for a table of commands or paths to show them, the gutter
+   growing with the window, and room above and under each section. A paragraph keeps its own measure (`.tf-stg-p`). */
+.tf-stg-body { padding: 24px clamp(24px, 3vw, 44px) 64px; max-width: 1080px; min-width: 0; }
+.tf-stg-h { margin-bottom: 20px; }
 .tf-stg-h h1 {
   font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
 }
@@ -37,10 +39,10 @@
    title line (#2284), laid out by the canonical header's rule in dialogs.css. */
 .tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
-.tf-stg-sec { margin-top: 26px; }
-.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
-.tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
-.tf-stg-gap { margin-top: 14px; }
+.tf-stg-sec { margin-top: 34px; }
+.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 10px; }
+.tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 12px; max-width: 72ch; line-height: 1.5; }
+.tf-stg-gap { margin-top: 16px; }
 /* *Load the Tidewater dataset* (`TfLoadDemo`, ux31): both labels in one cell, the hidden one keeping its room, so
    *Loading…* does not narrow the button and move what stands beside it. */
 .tf-ld-demo { display: inline-grid; }
@@ -49,7 +51,7 @@
 /* A control sits at the top of its row, its text on one line with its label's first, however long the description runs.
    A switch and a textarea have no line of text to share, so they start at the top instead. */
 .tf-stg-row {
-  display: grid; grid-template-columns: minmax(240px, 46%) minmax(0, 1fr); gap: 16px; padding: 11px 0;
+  display: grid; grid-template-columns: minmax(240px, 44%) minmax(0, 1fr); gap: 24px; padding: 14px 0;
   border-bottom: 1px solid var(--rule-2); align-items: first baseline;
 }
 .tf-stg-row:has(.tf-stg-sw, textarea) { align-items: start; }
@@ -58,12 +60,14 @@
 .tf .tf-stg-body textarea.tf-stg-in.tf-stg-in { height: auto; padding-block: 5px; }
 /* Where the section's column is too narrow for both, the label goes above its control: a control keeps its whole width. */
 @container (max-width: 720px) {
-  .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 }
 .tf-stg-l { font-weight: 500; }
 .tf-stg-l small { display: block; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
 .tf-stg-c { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tf-stg-inl { flex-wrap: wrap; }
+/* A control drawn unseen to hold its row's height until the real one lands (Link handoff's Firefox host). */
+.tf-stg-held { visibility: hidden; }
 .tf-stg-in {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
   font-size: calc(var(--t-md) * var(--fs)); width: min(420px, 100%);
@@ -75,7 +79,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* Named at this weight because the one field height in dialogs.css is an `:is()` list that outweighs a two-class rule. */
 .tf .tf-stg-c.tf-stg-row1 .tf-stg-in { height: var(--control-h-sm); padding-block: 0; min-width: 70px; flex: 1 1 0; }
 .tf-stg-row1 .tf-select { flex: none; }
-.tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 12px 0 0; }
+.tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 16px 0 0; }
 .tf-stg-sw {
   width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
   position: relative; cursor: pointer; flex: none; padding: 0;
@@ -156,11 +160,18 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* *Make default*, ↑ and *Edit* (PR #2479, 2026-11-13). */
 .tf-stg-apps th:nth-child(4) { width: 212px; }
 .tf-stg-apps .tf-chip { white-space: nowrap; }
+/* Pull request worktrees (#2518): the columns are set here, not by the paths, so a long worktree cuts its middle and moves
+   no column; the number with its *closed* chip, and *Remove…*, keep their line at every UI size. */
+.tf-tbl.tf-stg-trees { table-layout: fixed; }
+.tf-stg-trees th:nth-child(1) { width: calc(132px * var(--size-ui)); }
+.tf-stg-trees th:nth-child(3) { width: calc(108px * var(--size-ui)); }
+.tf-stg-trees td:first-child { white-space: nowrap; }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
 /* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line.
-   Renderers' tables hold each cell to one line instead (below). */
-.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono) { white-space: normal; overflow-wrap: anywhere; }
+   Renderers' tables hold each cell to one line instead (below), and so does a `TfCommand` or a `TfPath` in any table (#2518):
+   each gives up its middle on one line, whole in its title, so it is never told to wrap here. */
+.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono):not(.tf-cmd, .tf-path) { white-space: normal; overflow-wrap: anywhere; }
 .tf-stg-body .tf-tbl td.tf-right { white-space: nowrap; }
 /* Settings › Renderers' tables (the renderers-columns pass, 2026-11-20; Björn: "the command, the files, and so on completely
    explode the columns"): each cell is one line, as Code's *Local checkout* column is. A command is a `TfCommand`, a list a
@@ -181,6 +192,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-rnd-steps th:nth-child(3) { width: calc(80px * var(--size-ui)); }
 .tf-rnd-pipes th:nth-child(1) { width: 24%; }
 .tf-rnd-pipes th:nth-child(3) { width: 24%; }
+/* Schemas (#2518): a namespace, a location and the file answering them, each a `TfPath` that gives up its middle. */
+.tf-rnd-schemas th:nth-child(1), .tf-rnd-schemas th:nth-child(2) { width: 28%; }
+/* A downloaded file's row has *Download again* and *Forget*: both on one line at every UI size. */
+.tf-rnd-tbl.tf-rnd-schemas th:last-child { width: calc(212px * var(--size-ui)); }
 .tf-rnd-defaults th:nth-child(2), .tf-rnd-defaults th:nth-child(3) { width: 24%; }
 .tf-rnd-defaults th:last-child { width: calc(100px * var(--size-ui)); }
 .tf-rnd-defaults .tf-select { max-width: 100%; }
@@ -247,13 +262,13 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* The application page (PR #2479, 2026-11-13): each command's field over the line it will run, with *Try it* beside that line. */
 .tf-stg-c.tf-appcmd { flex-direction: column; align-items: stretch; gap: 6px; }
 .tf-appcmd .tf-stg-in { width: 100%; }
-/* *It will run*: one box two lines high in every state, waiting or filled, so the repository answering moves nothing under it, and a
-   command typed or a repository picked doesn't either (2026-11-17). Two lines hold the usual command whole; a longer one scrolls in
-   its box. A scrollbar coming may wrap the words again inside it, which moves nothing outside (no page keeps a gutter, tf-css.test). */
+/* *It will run*: at least two lines high in every state, waiting or filled, so the repository answering moves nothing under it for the
+   usual command (2026-11-17), and as tall as the command it shows past that (#2518, Björn: a long command was trapped in a two-line
+   box that scrolled): every line of it is read where it stands, no scrollbar in it. */
 .tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-apprun-box {
-  flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: 44px; line-height: 19px; padding: 3px 8px;
-  overflow-y: auto; background: var(--sheet-2); border-radius: 4px;
+  flex: 1 1 auto; min-width: 0; box-sizing: border-box; min-height: 44px; line-height: 19px; padding: 3px 8px;
+  background: var(--sheet-2); border-radius: 4px;
 }
 .tf-apprun code { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-apppage .tf-phs { margin: 4px 0 6px; }
@@ -263,8 +278,8 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-more > * { grid-area: 1 / 1; }
 .tf-stg-more > .tf-stg-done { visibility: hidden; }
 .tf-appremove { margin-left: auto; }
-/* Where a list lands back from an entry's page (2026-11-17): the entry's row, outlined inside the table's edge. */
-.tf-land:focus { outline: var(--focus-w) solid var(--focus-c); outline-offset: var(--focus-in); }
+/* Where a list lands back from an entry's page (2026-11-17): the entry's row wears the transient ring inside the table's edge. */
+.tf-land { --focus-o: var(--focus-in); }
 .tf-stg-appacts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 /* *required* stands beside its label, as in a form grid, not on a line of its own like the label's description. */
 .tf-stg-l small.tf-req { display: inline; margin-left: 4px; }
@@ -360,6 +375,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-dec-line.tf-dec-one { -webkit-line-clamp: 1; line-clamp: 1; }
 /* A Java found: one line, its path a `TfPath` that gives up its middle, the words around it whole. */
 .tf-dec-line.tf-dec-at { display: flex; white-space: nowrap; overflow: clip; }
+/* Settings › Renderers' generated folders (#2519): the row keeps its room unseen while the store is counted, so its
+   count is two lines high and its path is cut, never wrapped under the buttons. */
+.tf-made-l small { min-height: 2.8em; }
+.tf-made-row.tf-made-held { visibility: hidden; }
 .tf-dec-at > span { flex: none; white-space: pre; }
 .tf-dec-why { margin: 0; color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-dec-path { margin-top: 8px; }
@@ -415,7 +434,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 button.tf-thm-sw { cursor: pointer; }
 .tf-thm-sw.tf-ink { background: linear-gradient(135deg, var(--ink) 0 50%, var(--sheet) 50% 100%); }
 .tf-thm-role code { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs)) var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); }
+/* A colour's hex value is a button that opens its swatch's panel (#2516): drawn as the value, underlined under the pointer.
+   Its line height is set, not the face's own, so two of them in a row keep its height when the code face lands. */
+.tf-thm-hex { --fs: var(--size-code); font: calc(var(--t-xs) * var(--fs))/1.3 var(--mono); font-variant-ligatures: var(--mono-ligatures); color: var(--ink-2); border: 0; background: none; padding: 0; margin: 0; text-align: left; cursor: pointer; justify-self: start; }
+.tf-thm-hex:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .tf-thm-cr { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-thm-role.tf-low { background: var(--warn-bg); padding-top: 5px; padding-bottom: 6px; row-gap: 3px; }
 .tf-thm-role.tf-low .tf-thm-cr { color: var(--warn); font-weight: 600; }
@@ -430,6 +452,16 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-popf .tf-stg-in { width: 100%; height: var(--control-h-sm); contain: strict; --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); }
 .tf-thm-popf input[type="color"] { width: 100%; height: var(--control-h-sm); padding: 0 2px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 .tf-thm-popa { display: flex; flex-wrap: wrap; gap: var(--control-gap); }
+/* A swatch's own picker (#2516): saturation across the square and brightness up it, over the hue the strip under it
+   picks; a ring marks where each stands. Its colours are the picture of every colour, not a theme's. */
+.tf-cp { display: grid; gap: 8px; }
+/* Each is its own layout root (`contain`; their sizes are set), as the Hex field is: a native picker's drag moves both
+   rings every frame, which otherwise laid out the whole editor (6x worst pick 343 ms against 100 without them). */
+.tf-cp-sv, .tf-cp-hue { position: relative; border: 1px solid var(--rule); touch-action: none; contain: strict; }
+.tf-cp-sv { height: 120px; border-radius: 4px; cursor: crosshair; background: linear-gradient(to top, #000000, transparent), linear-gradient(to right, #FFFFFF, transparent), var(--cp-hue); }
+.tf-cp-hue { height: 12px; border-radius: 4px; cursor: ew-resize; background: linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000); }
+.tf-cp-at { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px #000000; pointer-events: none; }
+.tf-cp-hue .tf-cp-at { top: 50%; }
 /* The preview stays in view while the role list scrolls. */
 .tf-thm-side { display: grid; gap: 10px; min-width: 0; position: sticky; top: 0; max-height: calc(100vh - 96px); overflow: auto; background: var(--paper); }
 .tf-thm-pre { display: grid; gap: 10px; min-width: 0; color: var(--ink); }
@@ -445,8 +477,9 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-thm-italic { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
 /* A code slot that follows a window theme with no code colours says which draws (ADR-0055). */
 .tf-thm-follow { grid-column: 1 / -1; margin: 0; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
-/* Code colours' editor: the line on a theme's window colours, over the role list. */
-.tf-thm-app { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* Code colours' editor: the line on a theme's window colours, over the role list and the preview both: a row of the
+   editor's grid to itself, so the list and the preview keep their columns (#2516). */
+.tf-thm-app { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 0; font-size: calc(var(--t-sm) * var(--fs)); }
 /* ---------- Settings › Updates (ADR-0052; design system, *The update box*) ---------- */
 /* One box, the same rooms in every state: only its words, the track's fill and the two buttons' words change. */
 .tf-upd {
@@ -496,8 +529,15 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-upd-h2 { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
 .tf-upd-h2 h2 { margin: 0; }
 .tf-upd-h2 a { margin-left: auto; font-size: calc(var(--t-sm) * var(--fs)); }
-/* The notes: a room of one height, scrolled inside, so a long release never grows the page. */
-.tf-upd-notes { border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); height: 250px; overflow: auto; padding: 12px 16px; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; }
+/* The notes: a room of one height, scrolled inside, so a long release never grows the page; the height follows the window, not the
+   notes, so it moves nothing either (#2518: 250 px read as a slot). The room pads the notes and gives them its type, as a panel
+   does its Markdown (markdown.css): the Markdown adds no padding of its own, and its headings are steps of the room's size, not
+   a file page's. */
+.tf-upd-notes { border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); height: clamp(320px, 52vh, 640px); overflow: auto; padding: 14px 20px 18px; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.55; }
+.tf-upd-notes .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.55; }
+.tf-upd-notes .tf-md h1 { font-size: calc(var(--t-xl) * var(--fs)); padding-bottom: 6px; }
+.tf-upd-notes .tf-md h2 { font-size: calc(var(--t-lg) * var(--fs)); margin-top: 20px; padding-bottom: 4px; }
+.tf-upd-notes .tf-md :is(h3, h4, h5, h6) { font-size: calc(var(--t-md) * var(--fs)); margin-top: 16px; }
 .tf-upd-lost { margin: 8px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
 .tf-upd-lost li { padding: 7px 0; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
 /* ---------- Settings › Appearance › Theme (ADR-0055; the mockups' `theme-mock.css`, `.tf-apt-*`). Everything else on
@@ -524,7 +564,9 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-apt-sws { display: flex; gap: 4px; }
 .tf-apt-eg { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; }
 .tf-apt-eg > span { overflow: hidden; text-overflow: ellipsis; }
-.tf-apt-hex { display: flex; align-items: center; gap: 5px; justify-content: flex-start; }
+.tf-apt-hex { display: flex; align-items: center; gap: 5px; justify-content: flex-start; min-width: 0; }
+/* A ground and its text: both values, one over the other (#2516). */
+.tf-apt-hexes { display: flex; flex-direction: column; align-items: flex-start; }
 .tf-apt-auto { font-size: calc(var(--t-2xs) * var(--fs)); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; line-height: 15px; font-style: normal; }
 /* The examples: each drawn in the colour its row sets, on the ground it is checked against. */
 .tf-apt-plate { display: inline-block; flex: none; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--rule); }

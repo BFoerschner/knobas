@@ -180,6 +180,17 @@ test("selected words: Copy, Search for short ones, then the thing's own below a 
   expect(searchable("x".repeat(81))).toBe(false);
 });
 
+test("selected code in a repository: Search in repository after Search knobas, short one-line words only", () => {
+  const inRepo = { ...ctx(), searchRepo: "gitea:acme/pay" };
+  expect(ids(menuFor(null, "retry_on", inRepo))).toEqual(["copy-sel", "search-sel", "search-repo"]);
+  expect(item(menuFor(null, "retry_on", inRepo), "search-repo")).toMatchObject({
+    label: "Search in repository",
+    act: { do: "search-repo", repoId: "gitea:acme/pay", text: "retry_on" },
+  });
+  expect(ids(menuFor(null, "a\nb", inRepo))).toEqual(["copy-sel"]);
+  expect(ids(menuFor(null, "retry_on", ctx()))).toEqual(["copy-sel", "search-sel"]);
+});
+
 test("nothing on nothing", () => {
   expect(menuFor(null, null, ctx())).toEqual([]);
 });
@@ -243,6 +254,38 @@ test("a failed run offers Mark as read, or Mark as unread once read; a run the p
   expect(item(read, "unread")).toMatchObject({ label: "Mark as unread", act: { do: "run-read", id: "tc:9", read: false } });
   expect(ids(menuFor({ ...failed, failed: false }, null, ctx({ runs: { isRead: () => false } })))).not.toContain("read");
   expect(ids(menuFor(failed, null, ctx()))).not.toContain("read");
+});
+
+/**
+ * #2527, #2543: a pipeline the Builds rail draws carries its unread failed runs over its whole history, and the menu says
+ * how many a press marks; the press marks by pipeline, so the backend writes every one of them. At none the item is not
+ * drawn.
+ */
+test("a pipeline of the Builds rail offers Mark N runs as read over its unread failures, by pipeline, and nothing at none (#2543)", () => {
+  const on = (unread: string[]) =>
+    menuFor({ kind: "pipeline", id: "tc:Pay", hash: "#/builds/tc%3APay", unread }, null, ctx({ runs: { isRead: () => false } }));
+  expect(item(on(["tc:9", "tc:7", "tc:5"]), "read-runs")).toMatchObject({
+    label: "Mark 3 runs as read",
+    act: { do: "runs-read", runs: ["tc:9", "tc:7", "tc:5"], pipelines: ["tc:Pay"] },
+  });
+  const three = ids(on(["tc:9", "tc:7", "tc:5"]));
+  expect(three.indexOf("read-runs"), "among what it does, before the source's group").toBeLessThan(three.indexOf("|"));
+  expect(item(on(["tc:9"]), "read-runs").label).toBe("Mark 1 run as read");
+  expect(ids(on([]))).not.toContain("read-runs");
+  expect(ids(on([])), "the count is the pipeline's: no blind Mark all beside it").not.toContain("read-all");
+});
+
+test("a folder of the Builds rail offers Mark N runs as read across everything under it, by its pipelines, and its name to copy (#2543)", () => {
+  const on = (unread: string[]) =>
+    menuFor({ kind: "pipeline-folder", name: "Payout › Release", unread, pipelines: ["tc:Pay", "tc:Rel"] }, null, ctx({ runs: { isRead: () => false } }));
+  expect(ids(on(["tc:9", "tc:3"]))).toEqual(["read-runs", "|", "copy-name"]);
+  expect(item(on(["tc:9", "tc:3"]), "read-runs")).toMatchObject({
+    label: "Mark 2 runs as read",
+    act: { do: "runs-read", runs: ["tc:9", "tc:3"], pipelines: ["tc:Pay", "tc:Rel"] },
+  });
+  expect(item(on(["tc:9"]), "read-runs").label).toBe("Mark 1 run as read");
+  expect(ids(on([]))).toEqual(["copy-name"]);
+  expect(item(on([]), "copy-name")).toMatchObject({ act: { do: "copy", text: "Payout › Release" } });
 });
 
 test("a pipeline offers Mark all as read among what it does (ux18)", () => {

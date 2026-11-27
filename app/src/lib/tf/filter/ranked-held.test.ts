@@ -70,6 +70,19 @@ test("a list the app dropped is held again once, and the key is answered", async
   sent.length = 0;
 });
 
+test("a key out when the page drops its list holds nothing again (#2532)", async () => {
+  const order = FuzzyOrder.held<string>("spec-gone");
+  sent.length = 0;
+  order.ask("resource9", rows, same);
+  // The page closes while the key's ranking is out: the app answers it `not_found`.
+  order.drop();
+  await flush();
+  await flush();
+  expect(sent.map((s) => s.cmd)).toEqual(["fuzzy_hold", "fuzzy_drop", "fuzzy_rank_held"]);
+  expect(held.has("spec-gone")).toBe(false);
+  sent.length = 0;
+});
+
 test("new rows are held anew; an older text's answer is never drawn", async () => {
   const order = FuzzyOrder.held<string>("spec-3");
   order.ask("resource5", rows, same);
@@ -78,5 +91,20 @@ test("new rows are held anew; an older text's answer is never drawn", async () =
   await flush();
   expect(sent.filter((s) => s.cmd === "fuzzy_hold").length).toBe(2);
   expect(order.rows("resource5", other, same)).toEqual([other[5]]);
+  sent.length = 0;
+});
+
+test("a held order exposes sliced UTF-16 marks and clears stale marks when the query empties", async () => {
+  const emojiRows = ["🚀 get /resource5/items", "get /health"];
+  const order = FuzzyOrder.held<string>("spec-marks");
+  order.ask("resource5", emojiRows, same);
+  await flush();
+  // "🚀 get /" is 2 + 6 = 8 UTF-16 code units; "resource5" is [8, 17].
+  expect(order.marks(emojiRows[0]!)).toEqual([8, 17]);
+  expect(order.marks(emojiRows[0]!, 7, 16)).toEqual([1, 10]);
+
+  order.ask("", emojiRows, same);
+  expect(order.marks(emojiRows[0]!)).toEqual([]);
+  expect(order.marks(emojiRows[0]!, 7, 16)).toEqual([]);
   sent.length = 0;
 });

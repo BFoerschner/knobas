@@ -6,7 +6,10 @@
  * tabs over the live settings read.
  */
 import { createRawSnippet, flushSync, mount, unmount, type Snippet } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The Runs filter ranks through the app's ranking (#2535): here a letters-in-order stand-in.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
@@ -105,6 +108,7 @@ const PIPELINE: PipelineRow = {
   pinned: false,
   web_url: "http://ci.example/buildConfiguration/Payout_IntegrationTests",
   recent: RUNS.slice(0, 12),
+  unread: [],
 };
 
 const SETTINGS: PipelineSettings = {
@@ -407,8 +411,21 @@ test("each run says how it was started; Started by me keeps the reader's; the wo
   button("All")!.click();
   input.value = "a41f2c";
   input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
+  await settle();
   expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1187"]);
+});
+
+test("the Runs filter has the app rank the runs, keeps them newest first in their days, and marks the matched letters (#2535)", async () => {
+  draw();
+  await settle();
+  const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
+  // No substring holds "sprtry"; its letters stand in order in "feature/PAY-231-sepa-retry".
+  input.value = "sprtry";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  const rows = [...target.querySelectorAll(".tf-runs tbody tr")];
+  expect(rows.map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1187", "#1185"]);
+  for (const row of rows) expect([...row.querySelectorAll(".tf-run-brname mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("sprtry");
 });
 
 test("a run's test summary sits between how it started and its duration, the failed count in err tone; a run without tests draws none", async () => {
@@ -546,9 +563,10 @@ test("a read again keeps the entered filter and the tab; a failed one keeps the 
   drawn.sync!(synced("teamcity"));
   await settle();
   expect(target.querySelector<HTMLInputElement>(".tf-runbar input")!.value).toBe("1188");
-  const rows = [...target.querySelectorAll(".tf-runs tbody tr")];
-  expect(rows).toHaveLength(1);
-  expect(rows[0]!.textContent).not.toContain("running");
+  // The suite's stand-in keeps every run holding 1, 1, 8, 8 in order; the one named so is the run read again.
+  const ran = () => [...target.querySelectorAll(".tf-runs tbody tr")].find((row) => row.querySelector(".tf-run-no b")?.textContent === "#1188");
+  expect(ran()).toBeDefined();
+  expect(ran()!.textContent).not.toContain("running");
 
   drawn.go([PIPELINE.entity_id, "params"]);
   drawn.sync!(synced("teamcity"));
@@ -561,7 +579,7 @@ test("a read again keeps the entered filter and the tab; a failed one keeps the 
   drawn.sync!(synced("teamcity"));
   await settle();
   expect(target.textContent).toContain("Runs could not be read");
-  expect(target.querySelectorAll(".tf-runs tbody tr")).toHaveLength(1);
+  expect(ran(), "the runs stay").toBeDefined();
   expect(target.querySelectorAll(".tf-bars a"), "the chart stays").toHaveLength(30);
 });
 

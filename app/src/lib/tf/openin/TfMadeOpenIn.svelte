@@ -14,6 +14,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
+  import TfCommand from "../TfCommand.svelte";
   import TfPath from "../TfPath.svelte";
   import { apps as sharedApps, type Apps } from "./apps.svelte";
   import { commandFor, fill, joinInside, menuOrder } from "./openin";
@@ -91,8 +92,9 @@
         disabled={needsPage}
         title={needsPage ? `${entry.app.name}'s command needs a page on the source, and a generated folder has none` : undefined}
         onclick={() => start(entry.app.id, entry.app.name)}
-        ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b>{#if dir !== null}<TfPath
-            path={fill(command, { path: dir, file: fileAt, line })}
+        ><b>{entry.app.name}{#if entry.isDefault}{" "}<span class="tf-dim tf-plain">(default)</span>{/if}</b>{#if dir !== null}<TfCommand
+            command={fill(command, { path: dir, file: fileAt, line })}
+            keepEnd
           />{/if}</button
       >
     {/each}

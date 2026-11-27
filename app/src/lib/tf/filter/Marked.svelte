@@ -6,7 +6,7 @@
   cards, two of these each, and a single letter marks nothing, so each drew a list of one run with its own block.
 -->
 <script lang="ts">
-  import { markNeedles, marks } from "./filter";
+  import { markNeedles, markPairs, marks } from "./filter";
 
   /**
    * `typed` is split on whitespace; `needles`, where given, are marked as they are (a phrase whole); `pairs`, where
@@ -21,24 +21,8 @@
     from = 0,
   }: { text: string; typed?: string; needles?: readonly string[]; pairs?: readonly number[]; from?: number } = $props();
 
-  /** `text` cut at `pairs`, moved back by `from` and kept to the text. */
-  function paired(text: string, pairs: readonly number[], from: number) {
-    const runs: { text: string; hit: boolean }[] = [];
-    let at = 0;
-    for (let i = 0; i + 1 < pairs.length; i += 2) {
-      const start = Math.max(at, pairs[i]! - from);
-      const end = Math.min(text.length, pairs[i + 1]! - from);
-      if (end <= start) continue;
-      if (start > at) runs.push({ text: text.slice(at, start), hit: false });
-      runs.push({ text: text.slice(start, end), hit: true });
-      at = end;
-    }
-    if (at < text.length || runs.length === 0) runs.push({ text: text.slice(at), hit: false });
-    return runs;
-  }
-
   const runs = $derived(
-    pairs && pairs.length > 0 ? paired(text, pairs, from) : needles ? markNeedles(text, needles) : marks(text, typed),
+    pairs && pairs.length > 0 ? markPairs(text, pairs, from) : needles ? markNeedles(text, needles) : marks(text, typed),
   );
   const plain = $derived(runs.length === 1 && !runs[0]!.hit);
 </script>

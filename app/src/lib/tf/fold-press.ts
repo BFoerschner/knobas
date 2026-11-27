@@ -13,16 +13,32 @@
  * later, so a fold that draws its rows only while open draws them in the frame its chevron turns.
  */
 
+import { isAltClick } from "./tree-alt";
+
 /** What the caller keeps for a fold: `set(open)` stores it before the fold's `open` changes. */
 export type FoldSet = (open: boolean) => void;
 
 /**
  * Call from the row's `<summary>` click. `here`: whether the link's place is the one open now.
+ * When `onAlt` is passed, `Alt+click` toggles the fold recursively instead of opening the link.
  */
-export function foldPress(event: MouseEvent & { currentTarget: HTMLElement }, here: boolean, set: FoldSet): void {
-  if (event.detail === 0 || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+export function foldPress(
+  event: MouseEvent & { currentTarget: HTMLElement },
+  here: boolean,
+  set: FoldSet,
+  onAlt?: FoldSet,
+): void {
   const summary = event.currentTarget;
   const fold = summary.parentElement;
+  if (onAlt !== undefined && isAltClick(event)) {
+    if (!(fold instanceof HTMLDetailsElement)) return;
+    event.preventDefault();
+    const now = !fold.open;
+    onAlt(now);
+    fold.open = now;
+    return;
+  }
+  if (event.detail === 0 || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   const link = summary.querySelector<HTMLAnchorElement>(":scope > a");
   if (!(fold instanceof HTMLDetailsElement) || link === null) return;
   const onLink = event.target instanceof Node && link.contains(event.target);

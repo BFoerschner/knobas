@@ -168,6 +168,7 @@
   import TfScroller from "../TfScroller.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { ADD_SOURCE_HASH, settingsHash, sourceHash } from "../settings/settings";
   import TfLoadDemo from "../settings/TfLoadDemo.svelte";
   import { health as sharedHealth, type Health } from "../../shell/health.svelte";
@@ -197,6 +198,7 @@
     draftRestore,
     drawnSavedViewColumns,
     groupViews,
+    viewText,
     hiddenViews,
     savedViewSourceId,
     savedViewsFoot,
@@ -384,7 +386,13 @@
    * are read or for an id no view has.
    */
   const view = $derived(viewId === null ? null : (views?.find((row) => row.id === viewId) ?? undefined));
-  const groups = $derived(groupViews(views ?? [], find));
+  /** *Find a view*: the app ranks every view's name and query (#2535), and decides only which views keep; each stays in its group and place. */
+  const viewRows = $derived(views ?? []);
+  const viewOrder = heldOrder<TicketViewRow>("ticket-views");
+  $effect(() => viewOrder.ask(find, viewRows, viewText));
+  const found = $derived(find.trim() === "" ? null : new Set(viewOrder.rows(find, viewRows, viewText)));
+  const viewMarking = $derived(viewOrder.typed(find, viewRows));
+  const groups = $derived(groupViews(viewRows, found));
   /** The Jira views hidden from the list (#878): one line at the bottom, each with *Show* when unfolded. */
   const hidden = $derived(hiddenViews(views ?? []));
   let showHidden = $state(false);
@@ -1400,7 +1408,7 @@
         {#each group.views as row (row.id)}
           <div class="tf-vw-row">
             <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
-              ><span class="tf-vw-name" title={row.name}><Marked text={row.name} typed={find} /></span
+              ><span class="tf-vw-name" title={row.name}><Marked text={row.name} typed={viewMarking} pairs={viewOrder.marks(row, 0, row.name.length)} /></span
               >{#if row.saved_view_source?.new}<span class="tf-vw-new">new</span>{/if}{#if row.count !== null && row.count > 0}{" "}<span
                   class="tf-count">{row.count}</span
                 >{/if}</a

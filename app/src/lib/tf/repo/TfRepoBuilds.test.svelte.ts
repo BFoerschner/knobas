@@ -3,7 +3,10 @@
  * branch shown against the default branch, failures only it has first.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+// The filter ranks through the app's ranking (#2532): here a letters-in-order stand-in, so a word no substring holds is kept.
+vi.mock("../../ipc/search", async (actual) => ({ ...(await actual<object>()), ...(await import("../filter/test-fuzzy")).fuzzyIpc() }));
 
 import type { RepoPipelineRow, RunRow } from "../../ipc/entity";
 import { parseTfHash } from "../route";
@@ -142,7 +145,7 @@ test("on the default branch the page has no comparison, and says when nothing fa
   expect(target.querySelector(".tf-rbp-ok")?.textContent).toContain("Every pipeline that ran on main passed");
 });
 
-test("Failing keeps the branches with a failure, and the filter narrows by name", async () => {
+test("Failing keeps the branches with a failure, and the filter narrows by name through the app's ranking, marked (#2532)", async () => {
   draw();
   await settle();
   target.querySelector<HTMLButtonElement>('.tf-rbrail button[aria-pressed]')!.click();
@@ -152,7 +155,16 @@ test("Failing keeps the branches with a failure, and the filter narrows by name"
   field.value = "spike";
   field.dispatchEvent(new Event("input"));
   flushSync();
+  await settle();
   expect(rail()).toEqual(["# Other branches", "spike/x"]);
+  // No substring holds "ftrtry"; its letters stand in order in one branch's name, marked on both sides of its slash.
+  field.value = "ftrtry";
+  field.dispatchEvent(new Event("input"));
+  flushSync();
+  await settle();
+  expect(rail()).toEqual(["# Yours", "feat/PAY-231-retry *"]);
+  expect([...target.querySelectorAll(".tf-rbrail .tf-pi-nm mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("ftrtry");
+  expect(target.querySelector(".tf-rbrail .tf-pi-pre mark")).not.toBeNull();
 });
 
 test("a repository nothing has built says what would fill the tab", async () => {

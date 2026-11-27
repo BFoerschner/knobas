@@ -81,6 +81,8 @@
   import TfSideEdge from "../TfSideEdge.svelte";
   import { sideWidth } from "../side-width.svelte";
   import { filterKeys } from "../filter-keys";
+  import Marked from "../filter/Marked.svelte";
+  import { heldOrder, MOST_RANKED } from "../filter/ranked.svelte";
   import { goAcross, replaceAddress } from "../opener";
   import type { SpecOpener } from "../render/oas-open.svelte";
   import { explorerModule } from "../render/oas-module";
@@ -161,12 +163,14 @@
   import { inTextField } from "../../shell/keys";
   import { flipZen, zen } from "../zen.svelte";
   import { layers } from "../layers.svelte";
+  import { expandLazy, isAltClick, LAZY_FETCH_CAP, LOCAL_FETCH_CAP, prefixDescendants, TREE_EXPAND_CAP } from "../tree-alt";
   import {
     BAND,
     bandFolder,
     checkoutListing,
     diskListings,
     fileMeta,
+    GO_TO_FILE_SHOWN,
     goToFile,
     graftedListings,
     graftedPaths,
@@ -195,6 +199,9 @@
   import type { WorkingMark } from "./repo";
   import { oneoffs } from "../../render/oneoff.svelte";
   import { menuThing, type Thing } from "../context/thing";
+  import TfRepoText from "./TfRepoText.svelte";
+  import { ipcTextPort, takeAsked, TextSearch, type TextPort } from "./text-search.svelte";
+  import { keyHint } from "../../shell/platform";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -230,6 +237,7 @@
     folderPorts = ipcFolderRenderPorts,
     madePorts = ipcMadePorts,
     disk = null,
+    textPort = ipcTextPort,
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite" | "listen" | "fileBytes" | "archive" | "piped" | "localDir" | "localPaths" | "localFile">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -302,6 +310,8 @@
      * so a file read from disk is read again when it moves. `null` on a branch.
      */
     disk?: { head: string; marks: ReadonlyMap<string, WorkingMark>; stamp: string; branch: string | null; standing: string | null } | null;
+    /** *Text search*'s reads (ADR-0062): the IPC, a fake in tests. */
+    textPort?: TextPort;
   } = $props();
 
   /** The real file the address names; `null` inside a generated folder, whose path is its own (ADR-0046). */
@@ -362,6 +372,8 @@
   const readAtOf = new WeakMap<ViewSection, string>();
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
+  /** In-flight directory reads by path, so recursive Alt+click can await them without double-fetching. */
+  let dirReads = new Map<string, Promise<readonly TreeEntry[] | null>>();
   // Each file the tab drew is kept by the listing's section that opens it (`drawn-files.ts`, the inner-pages pass).
   /** The read the file drawn came from, which a listing's section can stand for once it names it. */
   let drawnRead: ViewSection | undefined;
@@ -558,6 +570,7 @@
       // over the clone's.
       generation += 1;
       asked = new Set(Object.keys(drawn));
+      dirReads = new Map();
       early = new Map();
     }
     local = { commit: top.commit, checked: first && sourceTop === top.commit, asOf: top.as_of };
@@ -616,6 +629,7 @@
       movedFrom = file === null ? null : { path: file.path, sha: file.sha ?? null };
       generation += 1;
       asked = new Set([""]);
+      dirReads = new Map();
       early = new Map();
       listings = { "": block.entries };
       pathsSection = block.paths ?? null;
@@ -690,31 +704,43 @@
     return read;
   }
 
-  function readDir(dir: string, section: string) {
-    if (asked.has(dir) || listings[dir] !== undefined) return;
+  function readDir(dir: string, section: string): Promise<readonly TreeEntry[] | null> {
+    if (listings[dir] !== undefined) return Promise.resolve(listings[dir]!);
+    const pending = dirReads.get(dir);
+    if (pending !== undefined) return pending;
+    if (asked.has(dir)) return Promise.resolve(null);
     asked.add(dir);
     const mine = generation;
-    take(section, dirKey(dir)).then(
-      (read) => {
-        if (mine !== generation) return;
-        const block = read?.blocks[0];
-        if (dir === "" && block?.type === "tree") {
-          sourceTop = block.commit ?? null;
-          sourceTopHeld = read === undefined || !heldBefore(read) ? null : (readAtOf.get(read) ?? null);
-          topHeld = sourceTopHeld;
-          topFailed = null;
-        }
-        if (dir === "" && block?.type === "tree" && settleLocal(block)) return;
-        listings = { ...listings, [dir]: block?.type === "tree" ? block.entries : [] };
-        if (block?.type === "tree" && block.read_alone) readAlone = true;
-        if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
-        if (dir === "") pathsSection = disk !== null ? localId(disk.head, "paths", "") : block?.type === "tree" ? (block.paths ?? null) : null;
-      },
-      (error) => {
-        // The checkout's copy stands where the source cannot answer.
-        if (mine === generation && !(dir === "" && local !== null)) treeFailed = ipcErrorMessage(error);
-      },
-    );
+    const read = take(section, dirKey(dir))
+      .then(
+        (got) => {
+          if (mine !== generation) return null;
+          const block = got?.blocks[0];
+          if (dir === "" && block?.type === "tree") {
+            sourceTop = block.commit ?? null;
+            sourceTopHeld = got === undefined || !heldBefore(got) ? null : (readAtOf.get(got) ?? null);
+            topHeld = sourceTopHeld;
+            topFailed = null;
+          }
+          if (dir === "" && block?.type === "tree" && settleLocal(block)) return listings[dir] ?? null;
+          const entries = block?.type === "tree" ? block.entries : [];
+          listings = { ...listings, [dir]: entries };
+          if (block?.type === "tree" && block.read_alone) readAlone = true;
+          if (block?.type === "tree" && block.truncated) cutDirs = { ...cutDirs, [dir]: { shown: block.entries.length, url: block.url } };
+          if (dir === "") pathsSection = disk !== null ? localId(disk.head, "paths", "") : block?.type === "tree" ? (block.paths ?? null) : null;
+          return entries;
+        },
+        (error) => {
+          // The checkout's copy stands where the source cannot answer.
+          if (mine === generation && !(dir === "" && local !== null)) treeFailed = ipcErrorMessage(error);
+          return null;
+        },
+      )
+      .finally(() => {
+        if (dirReads.get(dir) === read) dirReads.delete(dir);
+      });
+    dirReads.set(dir, read);
+    return read;
   }
 
   // A new branch is a new tree, and so is the working tree at another `HEAD`.
@@ -730,6 +756,7 @@
     unkept = null;
     fileBehind = null;
     asked = new Set();
+    dirReads = new Map();
     early = new Map();
     listings = {};
     treeFailed = null;
@@ -1926,9 +1953,39 @@
     }
   }
 
-  function toggle(dir: string) {
-    if (open.has(dir)) open.delete(dir);
-    else open.add(dir);
+  function toggle(dir: string, all = false) {
+    if (!all) {
+      if (open.has(dir)) open.delete(dir);
+      else open.add(dir);
+      return;
+    }
+    if (open.has(dir)) {
+      for (const k of prefixDescendants(open, dir)) open.delete(k);
+      return;
+    }
+    const mine = generation;
+    const isLocal = disk !== null || local !== null;
+    const dirChildren = (d: string): string[] | undefined => {
+      const list = treeListings[d];
+      return list === undefined ? undefined : list.filter((e) => e.kind === "dir").map((e) => join(d, e.name));
+    };
+    open.add(dir);
+    void expandLazy(dir, {
+      nodeCap: TREE_EXPAND_CAP,
+      fetchCap: isLocal ? LOCAL_FETCH_CAP : LAZY_FETCH_CAP,
+      alive: () => mine === generation && open.has(dir),
+      cached: dirChildren,
+      fetch: async (d) => {
+        if (inGraft(d) || grafts.has(d)) return dirChildren(d) ?? [];
+        const entry = entryOf(d);
+        if (entry?.kind !== "dir" || entry.section === null) return [];
+        await readDir(d, entry.section);
+        return dirChildren(d);
+      },
+      open: (d) => {
+        open.add(d);
+      },
+    });
   }
 
   // ---- Go to file and the tree's keys (#2311) ----
@@ -1974,11 +2031,26 @@
     Object.entries(listings).flatMap(([dir, entries]) => entries.filter((entry) => entry.kind !== "dir" && entry.section !== null).map((entry) => join(dir, entry.name))),
   );
   const searched = $derived(every !== null && every.section === pathsSection ? every : null);
-  const goFound = $derived.by(() => {
-    const paths = searched?.paths ?? known;
-    return goToFile(grafts.size === 0 ? paths : graftedPaths(paths, grafted), goTyped);
-  });
   const going = $derived(goTyped.trim() !== "");
+  /** Every path Go to file looks through: the whole tree once read, the directories read so far meanwhile. */
+  const goPaths = $derived.by(() => {
+    const paths = searched?.paths ?? known;
+    return grafts.size === 0 ? paths : graftedPaths(paths, grafted);
+  });
+  /**
+   * Go to file ranks the paths through the app's ranking (#2532), best first, the first {@link GO_TO_FILE_SHOWN}
+   * drawn. A tree past what the app ranks (`MOST_RANKED`) keeps Go to file's own word ranking (`goToFile`).
+   */
+  const samePath = (path: string) => path;
+  const NO_PATHS: string[] = [];
+  const goOrder = heldOrder<string>("repo-go-to-file");
+  const goRanked = $derived(going && goPaths.length <= MOST_RANKED);
+  $effect(() => {
+    if (!goRanked) return void goOrder.ask("", NO_PATHS, samePath);
+    goOrder.ask(goTyped, goPaths, samePath);
+  });
+  const goFound = $derived(!going ? NO_PATHS : goRanked ? goOrder.rows(goTyped, goPaths, samePath).slice(0, GO_TO_FILE_SHOWN) : goToFile(goPaths, goTyped));
+  const goMarking = $derived(goRanked ? goOrder.typed(goTyped, goPaths) : goTyped);
 
   /** The repository's paths at the commit, as a set: what a path in an XML file is tried against (the XML view, section 13). */
   const pathSet = $derived(searched === null ? null : new Set(searched.paths));
@@ -2038,6 +2110,75 @@
     return (p: string): Promise<string | null> => (read === null ? Promise.resolve(null) : read(p).then((bytes) => utf8.decode(bytes), () => null));
   });
 
+  // ---- Text search (ADR-0062) ----
+
+  /** What the tree's search box searches: the files' names (*Go to file*), or their text. */
+  let mode = $state<"files" | "text">("files");
+  let textField = $state<HTMLInputElement | null>(null);
+  /** The tree the tab shows, as *Text search* reads it: the working tree, the clone's commit, or the branch's tip. */
+  const textSearch = new TextSearch(
+    (...asked) => textPort(...asked),
+    () => ({ at, commit: disk !== null ? null : (local?.commit ?? null), working: disk !== null, branch }),
+  );
+  const texting = $derived(mode === "text");
+  /** The tree's own rows and notes are drawn: neither *Go to file*'s answer nor *Text search*'s is in their place. */
+  const treeShown = $derived(!texting && !going);
+
+  /** The box searches `next`; its field takes focus. In Zen mode the tree is hidden: it is left first (Z1). */
+  function searchBy(next: "files" | "text") {
+    if (next === "files" && mode === "text") textSearch.stop();
+    mode = next;
+    if (zen.shown) flipZen(document.querySelector<HTMLElement>("main.tf-main"), flushSync);
+    flushSync();
+    (next === "text" ? textField : goField)?.focus();
+    if (next === "text") textField?.select();
+  }
+
+  // The tree shown moved (another branch, the working tree, a push): what is typed is searched again there.
+  $effect(() => {
+    void at;
+    void disk?.head;
+    void disk?.stamp;
+    void local?.commit;
+    untrack(() => {
+      if (mode === "text" && textSearch.asking) textSearch.ask(true);
+    });
+  });
+
+  // *Search in repository* on a selection (ADR-0062): its words, searched as typed text, file names too.
+  $effect(() => {
+    const words = takeAsked(repoId);
+    if (words === null) return;
+    untrack(() => {
+      textSearch.typed = words;
+      textSearch.caseSensitive = false;
+      textSearch.regex = false;
+      textSearch.names = true;
+      textSearch.ask(true);
+      mode = "text";
+      // Focus once drawn, outside the effect: `searchBy` flushes, which an effect may not.
+      if (shownPage()) void tick().then(() => searchBy("text"));
+    });
+  });
+
+  $effect(() => () => textSearch.stop());
+
+  function textKeys(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      textSearch.ask(true);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      tree?.querySelector<HTMLElement>("a")?.focus();
+    }
+  }
+
+  /** A switch beside the words: flipped, the words are searched again. */
+  function flip(which: "caseSensitive" | "regex") {
+    textSearch[which] = !textSearch[which];
+    textSearch.ask(true);
+  }
+
   function openPath(full: string) {
     goTyped = "";
     location.hash = hrefOf(full);
@@ -2057,12 +2198,12 @@
   /** The tree's own keys: only while focus is on one of its rows, so a field keeps every key. */
   function treeKeys(event: KeyboardEvent) {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || inTextField(event.target)) return;
-    if (going) {
+    if (going || texting) {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       event.preventDefault();
-      const links = [...(tree?.querySelectorAll<HTMLElement>("a.tf-gotof") ?? [])];
+      const links = [...(tree?.querySelectorAll<HTMLElement>(texting ? "a" : "a.tf-gotof") ?? [])];
       const here = links.indexOf(event.target as HTMLElement);
-      if (event.key === "ArrowUp" && here <= 0) goField?.focus();
+      if (event.key === "ArrowUp" && here <= 0) (texting ? textField : goField)?.focus();
       else links[event.key === "ArrowDown" ? Math.min(links.length - 1, here + 1) : here - 1]?.focus();
       return;
     }
@@ -2163,20 +2304,29 @@
     }
   }
 
-  // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says; never while typing.
+  // `T` focuses *Go to file* from anywhere on the tab, as the mockup's hint says, never while typing; `Mod+Shift+F` focuses
+  // *Text search*.
   $effect(() => {
     const onkey = (event: KeyboardEvent) => {
       // A page or tab keep-alive holds hidden (#2247) takes no keys.
       if (!shownPage()) return;
-      if (event.key !== "t" && event.key !== "T") return;
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (inTextField(event.target) || inTextField(document.activeElement)) return;
+      if (event.defaultPrevented) return;
       // A dialog or the launcher over the page keeps its keys and its focus.
-      if (layers.open.some((layer) => layer.kind !== "panel") || goField === null) return;
+      const covered = layers.open.some((layer) => layer.kind !== "panel");
+      // `Mod+Shift+F` is *Text search*, from a field too: a chord types nothing (ADR-0062).
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") {
+        if (covered) return;
+        event.preventDefault();
+        searchBy("text");
+        return;
+      }
+      if (event.key !== "t" && event.key !== "T") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (inTextField(event.target) || inTextField(document.activeElement)) return;
+      if (covered) return;
       event.preventDefault();
       // In Zen mode the tree is hidden: `T` leaves it first, so the key never goes dead (Z1).
-      if (zen.shown) flipZen(document.querySelector<HTMLElement>("main.tf-main"), flushSync);
-      goField.focus();
+      searchBy("files");
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
@@ -2206,7 +2356,7 @@
           onpointerleave={unrest}
           class:tf-frmarked={folderRendererOf(full) !== undefined}
           aria-current={(singleNow ?? renderedNow)?.folder === full ? "true" : undefined}
-          onclick={() => toggle(full)}
+          onclick={(event) => toggle(full, isAltClick(event))}
           {@attach row.made === undefined ? undefined : menuThing(() => madeDirThing(full))}
           {@attach treeRow(full)}>{@render icon(row.open ? "open" : "dir")}{row.name}</button
         >
@@ -2278,38 +2428,88 @@
   <!-- The tree stays beside every file (#2257, the mockup of #2252): its head folds it, its rows scroll inside it. -->
   <aside class="tf-ftreebox">
     <header>
-      <label class="tf-minif tf-gotofile">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input
-          placeholder="Go to file"
-          aria-label="Go to file"
-          bind:this={goField}
-          value={goTyped}
-          oninput={(event) => {
-            goTyped = event.currentTarget.value;
-            readEvery();
-          }}
-          onfocus={readEvery}
-          onkeydown={goKeys}
-          {@attach filterKeys({ aside: true })}
-        />
-        {#if !going}<kbd>T</kbd>{/if}
-      </label>
-      <button type="button" class="tf-iconbtn tf-sm" title="Collapse all" disabled={open.size === 0} onclick={() => open.clear()}
+      <!-- What the box searches (ADR-0062): the files' names, `T`, or their text, `Mod+Shift+F`. -->
+      <div class="tf-seg" role="group" aria-label="Search by">
+        <button type="button" aria-pressed={!texting} title="Go to a file by its name ({keyHint('T')})" onclick={() => searchBy("files")}>Files</button>
+        <button
+          type="button"
+          aria-pressed={texting}
+          title="Search the text of every file ({keyHint('⌘⇧F')})"
+          onclick={() => {
+            searchBy("text");
+            if (textSearch.asking && textSearch.found === null) textSearch.ask(true);
+          }}>Text</button
+        >
+      </div>
+      <button type="button" class="tf-iconbtn tf-sm" title="Collapse all" disabled={texting || open.size === 0} onclick={() => open.clear()}
         ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3" /></svg></button
       >
+      <div class="tf-ftsearch">
+        {#if texting}
+          <label class="tf-minif tf-gotofile">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+            <input
+              placeholder="Search text"
+              aria-label="Search text"
+              bind:this={textField}
+              value={textSearch.typed}
+              oninput={(event) => {
+                textSearch.typed = event.currentTarget.value;
+                // Typed by hand, the words are text: names were asked for a selection's hand-off alone.
+                textSearch.names = false;
+                textSearch.ask();
+              }}
+              onkeydown={textKeys}
+              {@attach filterKeys({ aside: true })}
+            />
+            {#if !textSearch.asking}<kbd>{keyHint("⌘⇧F")}</kbd>{/if}
+          </label>
+          <span class="tf-fchips">
+            <button type="button" aria-pressed={textSearch.caseSensitive} title="Match case (off: an upper-case letter typed matches its case)" aria-label="Match case" onclick={() => flip("caseSensitive")}>Aa</button>
+            <button type="button" aria-pressed={textSearch.regex} title="Regular expression" aria-label="Regular expression" onclick={() => flip("regex")}>.*</button>
+          </span>
+        {:else}
+          <label class="tf-minif tf-gotofile">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+            <input
+              placeholder="Go to file"
+              aria-label="Go to file"
+              bind:this={goField}
+              value={goTyped}
+              oninput={(event) => {
+                goTyped = event.currentTarget.value;
+                readEvery();
+              }}
+              onfocus={readEvery}
+              onkeydown={goKeys}
+              {@attach filterKeys({ aside: true })}
+            />
+            {#if !going}<kbd>T</kbd>{/if}
+          </label>
+        {/if}
+      </div>
     </header>
     <!-- A tree drawn from what knobas holds (the sync's stored tree, a read held from before) says from when (ADR-0042). -->
-    {#if local === null && !going}<TfHeldNote heldAt={topHeld} source={sourceName(source)} failed={topFailed} />{/if}
+    {#if local === null && treeShown}<TfHeldNote heldAt={topHeld} source={sourceName(source)} failed={topFailed} />{/if}
     <!-- The rows are the links and buttons; the arrow keys move between them (#2311). -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <nav class="tf-ftree" aria-label="Files" tabindex="-1" bind:this={tree} onkeydown={treeKeys} onfocusin={treeFocus} onfocusout={treeBlur}>
-      {#if going}
+      {#if texting && textSearch.asking}
+        <TfRepoText search={textSearch} {hrefOf} {lineHrefOf} current={path} />
+      {:else if texting}
+        <p class="tf-gonote">Search the text of every file {disk !== null ? "in the working tree" : local !== null ? "in your clone's copy of this branch" : "on this branch"}. A word typed in lower case matches every case.</p>
+      {:else if going}
         <!-- Go to file's answer in the rows' place (#2311): every path at the commit that holds what is typed. -->
         {#each goFound as found (found)}
           {@const cut = found.lastIndexOf("/") + 1}
           <a class="tf-gotof" href={hrefOf(found)} aria-current={found === shown ? "true" : undefined} onclick={() => (goTyped = "")}
-            >{@render icon("file")}<span>{#if cut > 0}<span class="tf-pdir">{found.slice(0, cut)}</span>{/if}{found.slice(cut)}</span></a
+            >{@render icon("file")}<span
+              >{#if cut > 0}<span class="tf-pdir"><Marked text={found.slice(0, cut)} typed={goMarking} pairs={goOrder.marks(found, 0, cut)} /></span>{/if}<Marked
+                text={found.slice(cut)}
+                typed={goMarking}
+                pairs={goOrder.marks(found, cut)}
+              /></span
+            ></a
           >
         {/each}
         {#if everyFailed !== null}
@@ -2334,19 +2534,19 @@
         </TfWaiting>
       {/if}
     </nav>
-    {#if local !== null && !going}
+    {#if local !== null && treeShown}
       <p class="tf-gonote">
         From your clone at <span class="tf-mono">{local.commit.slice(0, 7)}</span>{local.checked ? `, the same as on ${sourceName(source)}` : ", as of the last sync"}.
       </p>
     {/if}
     <!-- What the source could not list at once says so under the tree, never among its rows (the big-folder pass, 2026-11-13). -->
-    {#if unkept !== null && local === null && !going}
+    {#if unkept !== null && local === null && treeShown}
       <p class="tf-gonote">This branch holds {thousands(unkept)} entries, more than knobas keeps: its folders are read from {sourceName(source)} as they open.</p>
     {/if}
-    {#if readAlone && local === null && !going}
+    {#if readAlone && local === null && treeShown}
       <p class="tf-gonote">Folders past this repository's first 20,000 entries are read one at a time.</p>
     {/if}
-    {#if !going}
+    {#if treeShown}
       {#each Object.entries(cutDirs).filter(([dir]) => dir === "" || open.has(dir)) as [dir, cut] (dir)}
         <p class="tf-gonote">
           <span class="tf-mono">{dir || title || "The top folder"}</span> shows its first {thousands(cut.shown)} entries; the rest are
@@ -2355,7 +2555,7 @@
       {/each}
     {/if}
     {#if listings[""] !== undefined}
-      <footer class="tf-ftree-keys"><span><kbd>T</kbd> go to file</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
+      <footer class="tf-ftree-keys"><span><kbd>T</kbd> go to file</span><span><kbd>{keyHint("⌘⇧F")}</kbd> text</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>←</kbd><kbd>→</kbd> fold</span></footer>
     {/if}
   </aside>
   <div class="tf-fcol">

@@ -135,7 +135,7 @@ test.each([
 
 test("the option under the keys draws in the specimen before it is chosen; Enter chooses it for the whole app", async () => {
   await draw();
-  expect(caption()).toBe("Cascadia Mono, 100 %");
+  expect(caption()).toBe("Cascadia Code 2009.22, 100 %");
   for (let i = 0; i < 6; i++) key("ArrowDown");
   expect(specimen().style.getPropertyValue("--mono")).toMatch(/^"Menlo"/);
   expect(caption()).toBe("Menlo, 100 %");
@@ -166,7 +166,7 @@ test("the faces that come with knobas are the switch's two places: picking one s
   await draw();
   open();
   const selected = () => [...target.querySelectorAll('[role="option"][aria-selected="true"]')].map((el) => el.textContent!.trim());
-  expect(selected()).toEqual(["Cascadia Mono"]);
+  expect(selected()).toEqual(["Cascadia Code 2009.22 older release, with ligatures"]);
   key("ArrowDown");
   key("ArrowDown");
   // Under the keys, the specimen draws the bundled Cascadia Code by its own name.
@@ -324,7 +324,7 @@ test("a notch clicked sets its size, and Back to 100 % shows only off 100", asyn
   flushSync();
   expect(fonts.size("code")).toBe(115);
   expect(target.querySelector(".tf-fr-on")).toBe(target.querySelectorAll(".tf-fr-notch")[6]);
-  expect(caption()).toBe("Cascadia Mono, 115 %");
+  expect(caption()).toBe("Cascadia Code 2009.22, 115 %");
   button("Back to 100 %")!.click();
   flushSync();
   expect(fonts.size("code")).toBe(100);
@@ -346,7 +346,7 @@ test("the step that evens the chosen face out is ringed and named, and nothing s
   expect(target.querySelector(".tf-fr-hint")).toBeNull();
 });
 
-test("Ligatures in code is a switch under Code alone, off until turned on, and on draws Cascadia Code for all code at once", async () => {
+test("Ligatures in code is a switch under Code alone, on until turned off, and off draws Cascadia Mono for all code at once (#2516)", async () => {
   await draw("read");
   expect(target.querySelector('[role="switch"]')).toBeNull();
   unmount(view!);
@@ -354,21 +354,21 @@ test("Ligatures in code is a switch under Code alone, off until turned on, and o
   await draw("code");
   const sw = target.querySelector<HTMLButtonElement>('[role="switch"]')!;
   expect(sw.getAttribute("aria-label")).toBe("Ligatures in code");
-  expect(sw.getAttribute("aria-checked")).toBe("false");
-  expect(caption()).toBe("Cascadia Mono, 100 %");
+  expect(sw.getAttribute("aria-checked")).toBe("true");
+  expect(caption()).toBe("Cascadia Code 2009.22, 100 %");
   sw.click();
   flushSync();
-  expect(sw.getAttribute("aria-checked")).toBe("true");
-  expect(style.props.get("--mono-ligatures")).toBe("normal");
-  expect(style.props.get("--mono-bundled")).toBe('"knobas Cascadia Code"');
+  expect(sw.getAttribute("aria-checked")).toBe("false");
+  expect(style.props.get("--mono-ligatures")).toBe("none");
+  expect(style.props.get("--mono-bundled")).toBe('"knobas Cascadia Mono 2009"');
   // The row names the face drawn: the caption, the field's placeholder.
-  expect(caption()).toBe("Cascadia Code, 100 %");
-  expect(target.querySelector<HTMLInputElement>('[role="combobox"]')!.placeholder).toBe("Cascadia Code (comes with knobas)");
+  expect(caption()).toBe("Cascadia Mono 2009.22, 100 %");
+  expect(target.querySelector<HTMLInputElement>('[role="combobox"]')!.placeholder).toBe("Cascadia Mono 2009.22 (comes with knobas)");
   sw.click();
   flushSync();
   expect(style.props.has("--mono-ligatures")).toBe(false);
   expect(style.props.has("--mono-bundled")).toBe(false);
-  expect(caption()).toBe("Cascadia Mono, 100 %");
+  expect(caption()).toBe("Cascadia Code 2009.22, 100 %");
 });
 
 test("the Fonts section is the proof line and the four roles in order, one read of the fonts for all", async () => {
@@ -453,41 +453,50 @@ test("each knob is a line of notches with its figure, the arrows step it, 0 goes
   expect(style.props.get("--wt-read")).toBe("450");
 });
 
-test("code's line spacing is Joined or Open, or a notch; the ring marks where boxes still join, and its note says what is drawn", async () => {
+test("code's line spacing is 1.60 until changed, Joined or Open, or a notch; the ring marks where boxes still join, and its note says what is drawn (#2516)", async () => {
   await draw("code");
   const note = () => target.querySelector(".tf-fr-linesnote")!.textContent;
   const pressed = () => [...target.querySelectorAll('.tf-fr-seg button[aria-pressed="true"]')].map((el) => el.textContent);
-  expect(pressed()).toEqual(["Joined"]);
-  expect(note()).toBe("Rows are as tall as Cascadia Mono itself, 1.22 times the size. Box lines and trees join.");
   const lines = slider("Code line spacing");
-  // No notch filled with a preset pressed, none drawn taller, the ring at 1.20.
-  expect(lines.querySelector(".tf-fr-on")).toBeNull();
-  expect(lines.querySelector(".tf-fr-home")).toBeNull();
-  expect(lines.querySelector(".tf-fr-even")).toBe(notches("Code line spacing")[2]);
+  // The default: the 1.60 notch filled and home, the ring on it too (2009.22's │ joins up to 1.60), no preset pressed.
+  expect(pressed()).toEqual([]);
+  expect(fonts.lines).toBe(160);
+  expect(lines.querySelector(".tf-fr-on")).toBe(notches("Code line spacing")[10]);
+  expect(lines.querySelector(".tf-fr-home")).toBe(notches("Code line spacing")[10]);
+  expect(lines.querySelector(".tf-fr-even")).toBe(notches("Code line spacing")[10]);
+  expect(target.querySelector(".tf-fr-lines .tf-fr-fig")!.textContent).toBe("1.60");
+  expect(note()).toBe("1.60 times the size. Cascadia Code 2009.22's box lines join up to the ring at 1.60.");
+  expect(button("Back to 1.60")).toBeUndefined();
+  button("Joined")!.click();
+  flushSync();
+  expect(fonts.lines).toBe("joined");
+  expect(pressed()).toEqual(["Joined"]);
+  expect(note()).toBe("Rows are as tall as Cascadia Code 2009.22 itself, 1.22 times the size. Box lines and trees join.");
   // An arrow steps from the drawn 1.22 to the next notch that way.
   key("ArrowRight", lines);
   expect(fonts.lines).toBe(125);
   expect(pressed()).toEqual([]);
-  expect(note()).toBe("1.25 times the size. Cascadia Mono's box lines join up to the ring at 1.20.");
   expect(target.querySelector(".tf-fr-lines .tf-fr-fig")!.textContent).toBe("1.25");
+  // 0 goes home: 1.60.
   key("0", lines);
-  expect(fonts.lines).toBe("joined");
+  expect(fonts.lines).toBe(160);
   button("Open")!.click();
   flushSync();
   expect(fonts.lines).toBe("open");
   expect(style.props.get("--code-lh")).toBe("initial");
   expect(target.querySelector(".tf-fr-lines .tf-fr-fig")!.textContent).toBe("1.5 to 1.6");
-  expect(note()).toBe("The spacing before: 1.6 in files and diffs, 1.55 in logs, 1.5 in short logs. Cascadia Mono's box lines leave gaps.");
+  expect(note()).toBe("The spacing before: 1.6 in files and diffs, 1.55 in logs, 1.5 in short logs.");
   key("ArrowLeft", lines);
   expect(fonts.lines).toBe(155);
-  button("Back to Joined")!.click();
+  button("Back to 1.60")!.click();
   flushSync();
-  expect(fonts.lines).toBe("joined");
-  // The older release's │ is taller: the ring moves to 1.60, and the same spacing is kept.
-  fonts.setFamily("code", "Cascadia Mono 2009.22");
+  expect(fonts.lines).toBe(160);
+  // The newer release's │ is shorter: the ring moves to 1.20, and the same spacing is kept.
+  fonts.setFamily("code", "Cascadia Mono");
   flushSync();
-  expect(lines.querySelector(".tf-fr-even")).toBe(notches("Code line spacing")[10]);
-  expect(fonts.lines).toBe("joined");
+  expect(lines.querySelector(".tf-fr-even")).toBe(notches("Code line spacing")[2]);
+  expect(fonts.lines).toBe(160);
+  expect(note()).toBe("1.60 times the size. Cascadia Mono's box lines join up to the ring at 1.20.");
   // Code's letter spacing says what it costs.
   expect([...target.querySelectorAll(".tf-fr-hint")].map((el) => el.textContent)).toContain("Ligatures draw only at 0. Above 0, box lines show gaps.");
 });

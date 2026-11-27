@@ -131,8 +131,9 @@ const HL_PLACES = [
   SPACED("file", FILE),
   SPACED("diff", COMMIT),
   SPACED("docs-code", "#/page/confluence%3Asepa"),
-  // The older Cascadia kept (ux29): it loads as the file draws, at the current one's metrics, so nothing moves when it lands.
-  { name: "older-cascadia-file", fixture: true, store: { "knobas.code.release": "2009.22" }, start: "#/time", go: FILE, hash: FILE, away: "#/time", track: CODE_LINES },
+  // The release that is not the default kept (ux29; 2009.22 is the default since #2516, so the newer one is the kept
+  // case): it loads as the file draws, at the default's metrics, so nothing moves when it lands.
+  { name: "newer-cascadia-file", fixture: true, store: { "knobas.code.release": "2407.24" }, start: "#/time", go: FILE, hash: FILE, away: "#/time", track: CODE_LINES },
   ...["tanstack", "shiki", "pierre"].map((engine) => ({
     name: `hl-preview-${engine}`, fixture: true, once: true, start: CODE_COLOURS, ...(engine === "pierre" ? { store: { "knobas.highlighter": "shiki" } } : {}),
     ...RADIO(ENGINE[engine]), hash: null, ready: `${shown} input[name=tf-thm-engine][value=${engine}]:checked`, track: CODE_LINES, away: "#/settings",
@@ -286,8 +287,8 @@ const PLACES = [
   // Passwords (ADR-0056; the ux30 end gate's Passwords fix, 2026-11-23): its first open and a return, on the clickdummy's
   // entries and at 20,000 (`pw-scale`), where a folder's rows are made and sorted as they draw and the filter's index
   // builds in idle slices after the first frame.
-  { name: "passwords", start: "#/time", nav: "passwords", hash: "#/passwords", away: "time" },
-  { name: "passwords-20k", fixture: true, fake: "pw-scale=20000", start: "#/time", nav: "passwords", hash: "#/passwords", away: "time" },
+  { name: "passwords", start: "#/time", nav: "secrets", hash: "#/secrets", away: "time" },
+  { name: "passwords-20k", fixture: true, fake: "pw-scale=20000", start: "#/time", nav: "secrets", hash: "#/secrets", away: "time" },
   { name: "time", start: "#/docs", nav: "time", hash: "#/time", away: "docs", tabs: true },
   // An estate of one root lands on that root, so the address can be an asset's; the tree's rows are buttons (2026-11-19:
   // `asset` had found nothing to press since its rows stopped being links).
@@ -329,6 +330,9 @@ const PLACES = [
   // The Decompiler's Java read, past the 500 ms hold, with a reason to say: the ux19 gate found its path row moving on
   // the real backend, where the look for a Java answers after the page draws (2026-11-19).
   { name: "settings-renderers-java-late", fixture: true, late: "java_runtime:900", fake: "fake-jar=oldjava", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
+  // The generated folders' count, past the hold: the sections draw without it (#2519), and its row shows in the room it
+  // kept, so nothing under it moves.
+  { name: "settings-renderers-store-late", fixture: true, late: "folder_render_store:900", start: "#/settings", press: `${shown} a[href="#/settings/renderers"]`, hash: "#/settings/renderers", away: "#/settings" },
   // Commands (ADR-0060): Settings › Commands and a command's page, and a run's dialog opened from a file's Run…, which
   // streams lines and ends while it records; nothing in it moves but the rows it adds.
   { name: "settings-commands", fixture: true, fake: "fake-oneoff", start: "#/settings", press: `${shown} a[href="#/settings/commands"]`, hash: "#/settings/commands", away: "#/settings" },

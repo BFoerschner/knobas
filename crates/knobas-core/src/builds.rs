@@ -114,6 +114,11 @@ pub struct PipelineRow {
     pub pinned: bool,
     pub web_url: Option<String>,
     pub recent: Vec<RunRow>,
+    /// Its unread failed runs over its whole history (#2543), by id, newest
+    /// first: every finished failed run with no mark (`crate::run_read`),
+    /// whether `recent` draws it or not. What the Builds rail's right-click
+    /// counts, and what a mark of the pipeline writes as the list was read.
+    pub unread: Vec<String>,
 }
 
 /// One run in Builds' *Recent* (2026-11-25): the run as a pipeline's runs
@@ -379,6 +384,10 @@ macro_rules! newest_runs {
 /// pipelines × runs (2.5 s at 130 × 3,000); #2160 ranked every run once on
 /// its derived `pipeline` (140 ms, growing with the runs); the stored rows
 /// make it the pipelines × twelve, whatever TeamCity's history holds. The
+/// unread failures (#2543) are the one read of the whole history: each
+/// pipeline's range of `item_pipeline_runs_idx`, every run looked at once,
+/// kept to its failures with no `knobas.run_read` row
+/// ([`crate::failed_runs_of!`]); about 3 µs a run. The
 /// pipelines are `materialized` and read once: inlined, a pipeline's
 /// declarations were read for every pair of pipelines the final join
 /// compared (1.35 s against 0.59 s at 400 × 30,000).
@@ -432,12 +441,23 @@ recent as materialized (
            order by r.item_updated_at desc nulls last, r.entity_id desc) as runs
     from r
    group by r.pipeline
+),
+unread as materialized (
+  select t.entity_id as pipeline,
+         array_agg(i.entity_id order by ip.at desc nulls last, ip.entity_id desc) as ids",
+    crate::failed_runs_of!("p"),
+    "
+     and t.pkey is not null and t.name is not null
+     and not exists (select 1 from knobas.run_read rr where rr.entity_id = i.entity_id)
+   group by t.entity_id
 )
 select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path,
        exists (select 1 from pins where pins.id = p.entity_id) as pinned,
-       coalesce(rc.runs, '[]'::jsonb) as recent
+       coalesce(rc.runs, '[]'::jsonb) as recent,
+       coalesce(u.ids, '{}'::text[]) as unread
   from p
   left join recent rc on rc.pipeline = p.entity_id
+  left join unread u on u.pipeline = p.entity_id
  where p.pkey is not null and p.name is not null
  order by lower(p.name), p.entity_id
 "
@@ -984,6 +1004,7 @@ pub async fn pipelines(
                     .into_iter()
                     .map(|raw| RunRow::read(raw, identity))
                     .collect(),
+                unread: row.get("unread"),
             })
         })
         .collect()

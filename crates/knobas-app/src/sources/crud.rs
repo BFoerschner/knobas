@@ -539,6 +539,8 @@ pub async fn delete(
     crate::docs::forget_docs_choices(pool, id).await?;
     // Its site's switch, allowed origins and *Kept since* (ADR-0050).
     crate::site::forget_settings(pool, id).await?;
+    // Its *Open matching links in knobas* handoff setting (ADR-0061).
+    crate::link_handoff::forget_settings(pool, id).await?;
     Ok(())
 }
 

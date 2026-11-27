@@ -5,6 +5,14 @@
 //!   saving off (autofill is off on the builder).
 //! - Keys: `AcceleratorKeyPressed`, raised for every chord, every key that
 //!   types no character, and always for Esc, before the page sees it.
+//! - The mouse's back and forward buttons (#2528): the page runs in another
+//!   process, so no window message of knobas's sees them. A low-level mouse
+//!   hook, installed while a site is shown and removed when none is, takes
+//!   an `XButton1` or `XButton2` press whose window is in a shown site's and
+//!   hands its release to the site's mouse hook; WebView2 never sees it.
+//! - The keyboard: the controller's `GotFocus` and `LostFocus` say whether
+//!   the site holds it, since Tauri's window focus events are knobas's own
+//!   web view's.
 //! - Every permission refused without a prompt. Every certificate error
 //!   cancelled, never bypassed.
 //! - The address and history from `SourceChanged` and `HistoryChanged`,
@@ -18,6 +26,7 @@
 //!   origins to a closed proxy, so an identity provider's page could load
 //!   nothing more anyway, and this way the log names what it asked for.
 
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
@@ -34,7 +43,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Settings4,
 };
 use webview2_com::{
-    AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler,
+    AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, FocusChangedEventHandler,
     HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
     PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler,
     ServerCertificateErrorDetectedEventHandler, SourceChangedEventHandler,
@@ -43,21 +52,57 @@ use webview2_com::{
 use windows_core::{BOOL, HSTRING, Interface, PWSTR};
 use wry::{MemoryUsageLevel, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
-use crate::host::{Hooks, LeaveFreely, ViewEvent};
+use crate::host::{Hooks, LeaveFreely, MouseHook, ViewEvent};
 use crate::keys::{Key, Press};
 use crate::state::SiteFailure;
+
+/// A point on the screen, Win32's `POINT`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+/// Win32's `MSLLHOOKSTRUCT`.
+#[repr(C)]
+struct MouseLowLevel {
+    pt: Point,
+    mouse_data: u32,
+    flags: u32,
+    time: u32,
+    extra: usize,
+}
+
+type HookProc = unsafe extern "system" fn(i32, usize, isize) -> isize;
 
 #[link(name = "user32")]
 unsafe extern "system" {
     fn GetKeyState(virtual_key: i32) -> i16;
     fn MapVirtualKeyW(code: u32, map_type: u32) -> u32;
+    fn SetWindowsHookExW(id: i32, hook: Option<HookProc>, module: isize, thread: u32) -> isize;
+    fn UnhookWindowsHookEx(hook: isize) -> i32;
+    fn CallNextHookEx(hook: isize, code: i32, wparam: usize, lparam: isize) -> isize;
+    fn WindowFromPoint(point: Point) -> isize;
+    fn IsChild(parent: isize, child: isize) -> i32;
+    fn IsWindowVisible(hwnd: isize) -> i32;
+    fn GetForegroundWindow() -> isize;
+    fn GetAncestor(hwnd: isize, flags: u32) -> isize;
 }
+
+/// `WH_MOUSE_LL`: the low-level mouse hook.
+const WH_MOUSE_LL: i32 = 14;
+/// `HC_ACTION`: the hook's `lparam` holds an event.
+const HC_ACTION: i32 = 0;
+/// `GA_ROOT`: a window's top-level ancestor.
+const GA_ROOT: u32 = 2;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
     fn WaitForSingleObject(handle: isize, millis: u32) -> u32;
     fn CloseHandle(handle: isize) -> i32;
+    fn GetModuleHandleW(name: *const u16) -> isize;
 }
 
 /// `SYNCHRONIZE`: the right to wait on a process.
@@ -233,7 +278,148 @@ pub fn confine(view: &WebView, confined: &crate::wry_host::Confined) -> windows_
 }
 
 /// What lives as long as a site's view on Windows.
-pub struct Hardened;
+pub struct Hardened {
+    /// The site holds the keyboard: `GotFocus` and `LostFocus`.
+    focused: Rc<Cell<bool>>,
+    /// The view's mouse route, while it lives.
+    route: Rc<MouseRoute>,
+}
+
+impl Hardened {
+    /// Whether the site holds the keyboard now.
+    #[must_use]
+    pub fn holds_keyboard(&self) -> bool {
+        self.focused.get()
+    }
+
+    /// The view went on or off screen: the mouse hook is installed while a
+    /// site is shown, and only then.
+    pub fn shown(&self, shown: bool) {
+        self.route.shown.set(shown);
+        refresh_mouse_hook();
+    }
+}
+
+impl Drop for Hardened {
+    fn drop(&mut self) {
+        // `try_with`: a view dropped as the thread's locals go must not panic.
+        let _ = MOUSE_ROUTES.try_with(|routes| {
+            routes
+                .borrow_mut()
+                .retain(|route| !Rc::ptr_eq(route, &self.route));
+        });
+        refresh_mouse_hook();
+    }
+}
+
+// --------------------------------------------------------------------- mouse
+
+/// A site's view to the mouse hook: the window wry hosts its controller in.
+struct MouseRoute {
+    container: isize,
+    shown: Cell<bool>,
+    mouse: MouseHook,
+}
+
+thread_local! {
+    static MOUSE_ROUTES: RefCell<Vec<Rc<MouseRoute>>> = const { RefCell::new(Vec::new()) };
+    static MOUSE_HOOK: Cell<isize> = const { Cell::new(0) };
+    /// The `XButton` press the hook swallowed, whose release it owes itself.
+    static MOUSE_PRESSED: Cell<Option<crate::host::Travel>> = const { Cell::new(None) };
+}
+
+/// Install the hook while a site is shown, remove it when none is: a
+/// low-level hook runs on this thread for every mouse event on the machine.
+fn refresh_mouse_hook() {
+    let wanted = MOUSE_ROUTES
+        .try_with(|routes| routes.borrow().iter().any(|route| route.shown.get()))
+        .unwrap_or(false);
+    let hook = MOUSE_HOOK.with(Cell::get);
+    if wanted != (hook != 0) {
+        MOUSE_PRESSED.with(|pressed| pressed.set(None));
+    }
+    if wanted && hook == 0 {
+        // SAFETY: a low-level hook for this thread's own message loop.
+        let hook = unsafe {
+            SetWindowsHookExW(
+                WH_MOUSE_LL,
+                Some(mouse_proc),
+                GetModuleHandleW(std::ptr::null()),
+                0,
+            )
+        };
+        if hook == 0 {
+            tracing::warn!("the mouse's back and forward buttons over a site could not be hooked");
+        }
+        MOUSE_HOOK.with(|slot| slot.set(hook));
+    } else if !wanted && hook != 0 {
+        // SAFETY: the hook this thread installed.
+        unsafe { UnhookWindowsHookEx(hook) };
+        MOUSE_HOOK.with(|slot| slot.set(0));
+    }
+}
+
+/// The shown site whose window is under `point`, on top.
+fn route_at(point: Point) -> Option<MouseHook> {
+    // SAFETY: plain Win32 window questions.
+    let hit = unsafe { WindowFromPoint(point) };
+    if hit == 0 {
+        return None;
+    }
+    // `try_with` and `try_borrow`: a panic here, inside Windows' call,
+    // would abort the process.
+    MOUSE_ROUTES
+        .try_with(|routes| {
+            let routes = routes.try_borrow().ok()?;
+            routes.iter().find_map(|route| {
+                // SAFETY: plain Win32 window questions.
+                let inside = unsafe {
+                    IsWindowVisible(route.container) != 0
+                        && (hit == route.container || IsChild(route.container, hit) != 0)
+                };
+                (route.shown.get() && inside).then(|| Rc::clone(&route.mouse))
+            })
+        })
+        .ok()
+        .flatten()
+}
+
+/// The hook: quick, since Windows drops a low-level hook that keeps the
+/// machine's mouse waiting. A site's travel is posted (`Shell::later`),
+/// never done here. Every message that is not a site's `XButton` click goes
+/// on to the next hook; a release goes on whenever its press did
+/// (`glue::xbutton_step`).
+unsafe extern "system" fn mouse_proc(code: i32, wparam: usize, lparam: isize) -> isize {
+    if code == HC_ACTION && lparam != 0 {
+        // SAFETY: for `HC_ACTION` Windows hands an `MSLLHOOKSTRUCT`.
+        let info = unsafe { &*(lparam as *const MouseLowLevel) };
+        let message = u32::try_from(wparam).unwrap_or(0);
+        if let Some((travel, release)) = crate::glue::xbutton(message, info.mouse_data) {
+            let route = route_at(info.pt);
+            let pressed = MOUSE_PRESSED.with(Cell::get);
+            let step = crate::glue::xbutton_step(pressed, travel, release, route.is_some());
+            MOUSE_PRESSED.with(|slot| slot.set(step.pressed));
+            if let (Some(travel), Some(mouse)) = (step.travel, route) {
+                mouse(travel);
+            }
+            if step.swallow {
+                return 1;
+            }
+        }
+    }
+    // SAFETY: passing the event on, as every hook must.
+    unsafe { CallNextHookEx(0, code, wparam, lparam) }
+}
+
+/// Whether `hwnd`'s top-level window is the one in front.
+#[must_use]
+pub fn window_active(hwnd: isize) -> bool {
+    // SAFETY: plain Win32 window questions.
+    unsafe {
+        let front = GetForegroundWindow();
+        front != 0 && front == GetAncestor(hwnd, GA_ROOT)
+    }
+}
 
 /// Set the controller's settings and add knobas's handlers.
 pub fn harden(view: &WebView, hooks: &Hooks, leaving: &LeaveFreely) -> Hardened {
@@ -245,6 +431,20 @@ pub fn harden(view: &WebView, hooks: &Hooks, leaving: &LeaveFreely) -> Hardened 
     let source_hook = Rc::clone(&hooks.event);
     let history_hook = Rc::clone(&hooks.event);
     let ended_hook = Rc::clone(&hooks.event);
+    let focused = Rc::new(Cell::new(false));
+    let got = Rc::clone(&focused);
+    let got_hook = Rc::clone(&hooks.focus);
+    let lost = Rc::clone(&focused);
+    let lost_hook = Rc::clone(&hooks.focus);
+    let mut container: *mut std::ffi::c_void = std::ptr::null_mut();
+    // SAFETY: a WebView2 COM read on the main thread; `HWND` is a pointer.
+    let _ = unsafe { controller.ParentWindow((&raw mut container).cast()) };
+    let route = Rc::new(MouseRoute {
+        container: container as isize,
+        shown: Cell::new(false),
+        mouse: Rc::clone(&hooks.mouse),
+    });
+    MOUSE_ROUTES.with(|routes| routes.borrow_mut().push(Rc::clone(&route)));
     // SAFETY: on the main thread, with the controller wry just made; every
     // call is a WebView2 COM method on it.
     let result: windows_core::Result<()> = unsafe {
@@ -283,6 +483,22 @@ pub fn harden(view: &WebView, hooks: &Hooks, leaving: &LeaveFreely) -> Hardened 
                     if !key_hook(&press).pass {
                         args.SetHandled(true)?;
                     }
+                    Ok(())
+                })),
+                &raw mut token,
+            )?;
+            controller.add_GotFocus(
+                &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                    got.set(true);
+                    got_hook(true);
+                    Ok(())
+                })),
+                &raw mut token,
+            )?;
+            controller.add_LostFocus(
+                &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                    lost.set(false);
+                    lost_hook(false);
                     Ok(())
                 })),
                 &raw mut token,
@@ -398,7 +614,7 @@ pub fn harden(view: &WebView, hooks: &Hooks, leaving: &LeaveFreely) -> Hardened 
     if let Err(error) = result {
         tracing::warn!(%error, "a site's controller could not be fully set up");
     }
-    Hardened
+    Hardened { focused, route }
 }
 
 /// WebView2's page menu on a site, trimmed to `menu::SITE_KEPT`.

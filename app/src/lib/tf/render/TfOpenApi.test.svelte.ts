@@ -4,6 +4,9 @@
  * push, the filter and its keys, refs into other files read only when asked, a broken spec, places an address
  * names, and 5,000 operations drawn as a window.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -479,6 +482,8 @@ test("the filter draws a flat list; clearing it returns the folds and the scroll
   await settle();
   expect(railText().slice(0, 4)).toEqual(["GET /resource7/{id}", "PUT /resource7/{id}", "POST /resource7/{id}", "DEL /resource7/{id}"]);
   expect(text(target.querySelector(".tf-oas-count"))).toMatch(/^\d+ of 400$/);
+  // The path marks the matched letters at their place in it, past the method the ranking also read (#2520, #2532).
+  expect([...rail()[0]!.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["resource7"]);
   type("");
   await settle();
   expect(list.scrollTop).toBe(84);
@@ -660,4 +665,80 @@ test("a file view with no width, a page kept hidden, says nothing of its columns
   expect(columnsSeen(0)).toBeNull();
   expect(columnsSeen(1)).toBe(2);
   expect(columnsSeen(2560)).toBe(4);
+});
+
+test("Part of renders distinct parent schema chips with a Show all / Show fewer toggle", async () => {
+  const schemas: Record<string, unknown> = {
+    Shared: { type: "object", properties: { id: { type: "string" } } },
+  };
+  for (let i = 0; i < 16; i++) {
+    schemas[`Holder${i}`] = { type: "object", properties: { shared: { $ref: "#/components/schemas/Shared" } } };
+  }
+  const spec = JSON.stringify({ openapi: "3.0.3", info: { title: "Holders", version: "1" }, paths: {}, components: { schemas } });
+  draw("h.json", spec, { at: "schemas/Shared" });
+  await settle();
+  await drawnWhole();
+
+  const chips = () => [...page().querySelectorAll<HTMLButtonElement>(".tf-oas-chips .tf-oas-part .tf-chipbtn")];
+  expect(text(page())).toContain("Part of 16");
+  expect(chips().map((b) => text(b))).toHaveLength(12);
+  expect(chips()[0]!.textContent?.trim()).toBe("Holder0");
+  expect(text(page())).not.toContain("and 4 more");
+
+  button("Show all", page())!.click();
+  flushSync();
+  expect(chips()).toHaveLength(16);
+  expect(button("Show fewer", page())).toBeDefined();
+
+  button("Show fewer", page())!.click();
+  flushSync();
+  expect(chips()).toHaveLength(12);
+
+  chips()[0]!.click();
+  await settle();
+  expect(text(page().querySelector(".tf-oas-h"))).toBe("Holder0");
+});
+
+test("schema markdown tables expand into available width without mid-word breaks or oversized typography", () => {
+  const css = readFileSync(join(process.cwd(), "src/lib/tf/css/openapi.css"), "utf8");
+  expect(css).toMatch(/\.tf-oas-desc:has\(table\),\s*\.tf-oas-fd:has\(table\)\s*\{\s*max-width:\s*none;/);
+  expect(css).toMatch(/\.tf-oas-prose \.tf-md table\s*\{[^}]*font-size:\s*calc\(var\(--t-sm\) \* var\(--fs\)\)/);
+  expect(css).toMatch(/\.tf-oas-prose \.tf-md table\s*\{[^}]*overflow-wrap:\s*break-word/);
+  expect(css).toMatch(/\.tf-oas-fd \.tf-md :is\(th, td\) code\s*\{[^}]*overflow-wrap:\s*break-word/);
+});
+
+test("Alt+click on an OpenAPI Paths rail folder recursively expands and collapses nested path folders", async () => {
+  const nestedSpec = JSON.stringify({
+    openapi: "3.0.3",
+    info: { title: "Nested", version: "1.0" },
+    paths: {
+      "/v1/items": { get: { responses: { "200": { description: "ok" } } } },
+      "/v1/items/{id}/sub": { get: { responses: { "200": { description: "ok" } } } },
+      "/v1/items/{id}/sub/leaf": { get: { responses: { "200": { description: "ok" } } } },
+      "/v1/orders": { get: { responses: { "200": { description: "ok" } } } },
+    },
+  });
+  draw("nested.json", nestedSpec);
+  await settle();
+  button("Paths", target.querySelector(".tf-oas-rail")!)!.click();
+  flushSync();
+  const dirRow = (label: string) => rail().find((b) => text(b).startsWith(label))!;
+  // Ensure /v1 starts collapsed, then Alt+click expands /v1 and all nested path folders at once.
+  if (dirRow("/v1").getAttribute("aria-expanded") === "true") {
+    dirRow("/v1").click();
+    flushSync();
+  }
+  dirRow("/v1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirRow("/v1").getAttribute("aria-expanded")).toBe("true");
+  expect(dirRow("/items").getAttribute("aria-expanded")).toBe("true");
+  expect(dirRow("/{id}/sub").getAttribute("aria-expanded")).toBe("true");
+
+  // Alt+click again collapses /v1 and every nested folder under it.
+  dirRow("/v1").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(dirRow("/v1").getAttribute("aria-expanded")).toBe("false");
+  dirRow("/v1").click();
+  flushSync();
+  expect(dirRow("/items").getAttribute("aria-expanded")).toBe("false");
 });

@@ -11,6 +11,12 @@ face measured to a chosen font and the specimen built on them are not (Björn: "
 from Fable (accepted by Björn) on why boxes broke and the row height that joins them, one from Fable (xhigh) on the
 knobs, written out below.
 
+**Amended 2026-11-26** by #2516 (spec #2514: "The default code font and line height are not `Cascadia Code 2009.22`
+at `1.60`"): with nothing kept, code draws in Cascadia Code 2009.22 with its ligatures, rows 1.60 of the size, which
+`css/tokens.css` now draws itself. Ligatures are on until turned off (kept as `off`), the newer release is kept as
+`2407.24`, and *Joined* as `joined`. A choice kept before stays as it was; a default that was kept as nothing before
+reads as the new default.
+
 ## Why box drawing never joined
 
 Every Cascadia since 2106 cuts its line-spanning glyphs for the font's own line: ascent 1900 and descent 480 of 2048,

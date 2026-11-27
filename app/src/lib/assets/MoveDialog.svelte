@@ -226,10 +226,15 @@
   }
 
   /* Inside the list, which scrolls: a ring outside it is cut to a line along the row's edge (F-537). */
-  .opts:focus-visible,
-  .opt:focus-visible {
-    outline: var(--focus-w) solid var(--focus-c, var(--focus));
+  :global(:where(:root[data-focus-ring])) .opts:focus-visible,
+  :global(:where(:root[data-focus-ring])) .opt:focus-visible {
+    outline: var(--focus-w) solid color-mix(in srgb, var(--focus-c, var(--focus)) var(--focus-a), transparent);
     outline-offset: var(--focus-in);
+  }
+
+  :global(:where(:root[data-focus-ring="fade"])) .opts:focus-visible,
+  :global(:where(:root[data-focus-ring="fade"])) .opt:focus-visible {
+    transition: outline-color var(--focus-fade) ease-out;
   }
 
   .opt {

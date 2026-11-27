@@ -9,7 +9,7 @@
  */
 import type { AttentionGroup, CheckoutView, CodeFacts, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
-import { matchesAll } from "../filter/filter";
+import { joined, type Joined } from "../filter/filter";
 
 /** `code_facts`' answer by entity id. */
 export type FactsById = ReadonlyMap<string, CodeFacts>;
@@ -126,7 +126,6 @@ export interface PrFilter {
   repo: string;
   /** The *Team* dropdown's value, or `""` for *Any*: the pull request's repository is in that team. */
   team: string;
-  text: string;
 }
 
 /** Each repository's declared teams, by {@link repoKey}: what a pull request's *Team* is (#966). */
@@ -135,10 +134,10 @@ export function repoTeams(repos: readonly EntityRow[], facts: FactsById): Map<st
 }
 
 /**
- * The pull requests the filter keeps, in the order given. *Mine* is what
- * asks for your review and what you wrote, open or settled (prototype-6:
- * `p.by===ME||p.wait`).
- * The words reach the number, title, repository and author.
+ * The pull requests the filter's scope, chips and dropdowns keep, in the
+ * order given. *Mine* is what asks for your review and what you wrote, open
+ * or settled (prototype-6: `p.by===ME||p.wait`). The typed words rank
+ * {@link prText} through the app's ranking (#2532).
  */
 export function visiblePrs(
   lines: readonly PrLine[],
@@ -146,7 +145,7 @@ export function visiblePrs(
   teams: ReadonlyMap<string, readonly string[]>,
 ): PrLine[] {
   const states = filter.states.map((state) => state.toLowerCase());
-  return lines.filter(({ row, group, number, idle, author, mine }) => {
+  return lines.filter(({ row, group, idle, mine }) => {
     if (filter.scope === "job" && !filter.held(row.entity_id)) return false;
     if (filter.scope === "mine" && !isMineGroup(group) && !mine) return false;
     if (states.length > 0 && !states.includes(row.state?.text.toLowerCase() ?? "")) return false;
@@ -157,8 +156,18 @@ export function visiblePrs(
       const of = row.path === null ? [] : (teams.get(repoKey(row.source_id, row.path)) ?? []);
       if (!of.includes(filter.team)) return false;
     }
-    return matchesAll(`${number ?? ""} ${row.title} ${row.path ?? ""} ${author ?? ""}`, filter.text);
+    return true;
   });
+}
+
+/** What the *Pull requests* filter ranks a line by: its number, title, repository and author, a space between each. */
+export function prText(line: PrLine): string {
+  return prFields(line).text;
+}
+
+/** {@link prText} and where each field stands in it: the number, the title, the repository, the author. */
+export function prFields({ row, number, author }: PrLine): Joined {
+  return joined([number ?? "", row.title, row.path ?? "", author ?? ""]);
 }
 
 /**
@@ -232,7 +241,6 @@ export interface RepoFilter {
   team: string;
   /** The *Language* dropdown's value, or `""` for *Any*. */
   language: string;
-  text: string;
 }
 
 /** The *Team* and *Language* dropdowns' choices: every value the repositories declare, sorted. */
@@ -248,7 +256,7 @@ export function repoChoices(repos: readonly EntityRow[], facts: FactsById): { te
 /**
  * The repositories the filter keeps: yours first (an open pull request of
  * yours, or one asking your review, is in it), then by last push, newest
- * first. The words reach the name, the teams and the language.
+ * first. The rail's words narrow the list after this, by the ranking (#2532).
  *
  * Yours is the attention read's alone, so the order is decided once the
  * repositories and the open pull requests are read; a merged one of yours,
@@ -277,8 +285,7 @@ export function visibleRepos(
       if (filter.flags.includes("Has open PRs") && openCount(open, row) === 0) return false;
       const known = facts.get(row.entity_id);
       if (filter.team !== "" && !known?.teams.includes(filter.team)) return false;
-      if (filter.language !== "" && known?.language !== filter.language) return false;
-      return matchesAll(`${row.title} ${known?.teams.join(" ") ?? ""} ${known?.language ?? ""}`, filter.text);
+      return filter.language === "" || known?.language === filter.language;
     })
     .sort(
       (a, b) => Number(isMine(b)) - Number(isMine(a)) || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),

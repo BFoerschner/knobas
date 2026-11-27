@@ -74,6 +74,14 @@ password manager's audit log with the person's name.**
 - The web sign-in writes "Session Log On" under the account (not the API token's "Identity Verified"); a request on a
   kept session writes none. `docs/decisions/2026-11-22-a-password-managers-web-interface.md` has the measurements.
 
+## Amended 2026-11-26 (spec #2514, #2515): the words
+
+The page and its routes are called **Secrets** (`#/secrets`; `#/passwords` addresses redirect), and its two kinds
+**Secret entry** and **Secret folder**. What this ADR calls *a secret*, the value that never rests, is a **protected
+value** in `CONTEXT.md`, so the word *secret* names the surface and its mirrored entries and never the value. Only the
+words changed: every rule above holds for a protected value as it did for a secret, and the role id `passwords`, the
+kind ids `password_entry` and `password_folder`, and `Source::read_secret` stay as they are, so no migration follows.
+
 ## Consequences
 
 - The knobas-source SPI gains `passwords`, `Source::read_secret`, `Source::passwords_write`, `Sink::otp_key`,

@@ -53,25 +53,34 @@
   import { ipcErrorMessage } from "../../ipc";
   import { Windowed } from "../../shell/windowed.svelte";
   import { filterKeys } from "../filter-keys";
+  import Marked from "../filter/Marked.svelte";
+  import { sliceMarks } from "../filter/filter";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { imageType, typedImageBlob } from "../../render/image";
   import {
     DUPLICATE,
     UNREADABLE,
     UNSAFE,
     bytes,
+    chain,
     filteredRows,
     head,
     kindOf,
     libRows,
     listing,
     scopeOf,
-    terms,
+    entriesOf,
+    labelMarks,
+    libText,
     textOf,
     treeRows,
+    type Dir,
+    type Entry,
     type Listing,
     type Nested,
     type Row,
   } from "../../render/jar";
+  import { collectDescendants, isAltClick, TREE_EXPAND_CAP } from "../tree-alt";
   import { renderPort, type RenderPort } from "../../render/port";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import TfPdf from "./TfPdf.svelte";
@@ -168,17 +177,36 @@
 
   let typed = $state("");
   let tab = $state<"contents" | "deps">("contents");
-  const words = $derived(terms(typed));
+  const filtering = $derived(typed.trim() !== "");
 
+  // The filter ranks through the app's ranking (#2532): every entry by its path, every nested JAR by its name, version
+  // and entry; each list is held once and a key sends only what was typed. No words, no list: the open builds none.
+  const NO_ENTRIES: Entry[] = [];
+  const entries = $derived(filtering && tab === "contents" && top !== null && top.ok ? entriesOf(top.listing, new Map(nested)) : NO_ENTRIES);
+  const entryName = (entry: Entry) => entry.name;
+  const entryOrder = heldOrder<Entry>("jar-entries");
+  $effect(() => entryOrder.ask(tab === "contents" ? typed : "", entries, entryName));
+  const allLibs = $derived(index?.libs ?? []);
+  const libOrder = heldOrder<(typeof allLibs)[number]>("jar-libs");
+  $effect(() => libOrder.ask(tab === "deps" ? typed : "", allLibs, libText));
+
+  /** What Contents drew last: kept while a first key's ranking is out (`FuzzyOrder.ready`); never the Dependencies' rows. */
+  let drewLast: { rows: Row[]; hits: number | null } | null = null;
   // Plain copies of what is open, read once a pass: the rows ask for each of thousands.
   const filtered = $derived.by(() => {
     if (top === null || !top.ok) return null;
     const open = { dirs: new Set(openDirs), files: new Set(openFiles) };
     const got = new Map(nested);
-    if (tab === "deps") return { rows: libRows(top.index, words, open, got), hits: null };
-    if (words.length > 0) return filteredRows(top.listing, words, open, got);
-    return { rows: treeRows(top.listing, "", 0, open, got), hits: null };
+    let made: { rows: Row[]; hits: number | null };
+    if (tab === "deps") made = { rows: libRows(libOrder.rows(typed, allLibs, libText), open, got, (lib) => libOrder.marks(lib)), hits: null };
+    else if (filtering && !entryOrder.ready(typed, entries) && drewLast !== null) made = drewLast;
+    else if (filtering) made = filteredRows(entryOrder.rows(typed, entries, entryName), open, got);
+    else made = { rows: treeRows(top.listing, "", 0, open, got), hits: null };
+    drewLast = tab === "contents" ? made : null;
+    return made;
   });
+  /** What a row's `<Marked>` marks by its words while the ranking's answer is out (`FuzzyOrder.typed`). */
+  const marking = $derived(tab === "deps" ? libOrder.typed(typed, allLibs) : entryOrder.typed(typed, entries));
   const rows = $derived(filtered?.rows ?? []);
   const total = $derived(top !== null && top.ok ? top.listing.names.length : 0);
   const libs = $derived(index?.libs.length ?? 0);
@@ -227,14 +255,32 @@
     return typeof got === "object" && got.ok ? got.listing : null;
   }
 
-  function toggleDir(row: Extract<Row, { kind: "dir" }>) {
+  function toggleDir(row: Extract<Row, { kind: "dir" }>, all = false) {
     const key = `${row.scope}|${row.dir.path}`;
-    if (openDirs.has(key)) openDirs.delete(key);
-    else openDirs.add(key);
+    if (!all) {
+      if (openDirs.has(key)) openDirs.delete(key);
+      else openDirs.add(key);
+      return;
+    }
+    const want = !openDirs.has(key);
+    const dirs = collectDescendants([row.dir], (d: Dir) => d.dirs.map((sub) => chain(sub).end), TREE_EXPAND_CAP);
+    if (want) {
+      for (const d of dirs) openDirs.add(`${row.scope}|${d.path}`);
+      return;
+    }
+    for (const d of dirs) openDirs.delete(`${row.scope}|${d.path}`);
+    const filePrefix = `${row.scope}|${row.dir.path}`;
+    const nestedPrefix = scopeOf(row.scope, row.dir.path);
+    for (const k of [...openFiles]) {
+      if (k.startsWith(filePrefix) || (row.dir.path !== "" && k.startsWith(nestedPrefix))) openFiles.delete(k);
+    }
+    for (const k of [...openDirs]) {
+      if (k.startsWith(filePrefix) || (row.dir.path !== "" && k.startsWith(nestedPrefix))) openDirs.delete(k);
+    }
   }
 
   /** Opens a nested archive below its entry once it is listed, so its tree draws whole. */
-  async function openNested(scope: string, entry: string) {
+  async function openNested(scope: string, entry: string, expandAll = false) {
     const key = `${scope}|${entry}`;
     const inner = scopeOf(scope, entry);
     if (!nested.has(inner)) {
@@ -251,20 +297,32 @@
         reading.delete(key);
       }
     }
+    if (expandAll) {
+      const got = nested.get(inner);
+      if (got !== undefined && typeof got === "object" && got.ok) {
+        const roots = got.listing.tree.dirs.map((sub) => chain(sub).end);
+        for (const d of collectDescendants(roots, (x: Dir) => x.dirs.map((sub) => chain(sub).end), TREE_EXPAND_CAP)) openDirs.add(`${inner}|${d.path}`);
+      }
+    }
     openFiles.add(key);
   }
 
-  async function openEntry(scope: string, entry: string, flags: number) {
+  async function openEntry(scope: string, entry: string, flags: number, all = false) {
     const key = `${scope}|${entry}`;
+    const kind = kindOf(entry);
     if (openFiles.has(key)) {
       openFiles.delete(key);
+      if (all && kind === "archive") {
+        const inner = scopeOf(scope, entry);
+        for (const k of [...openDirs]) if (k.startsWith(`${inner}|`) || k.startsWith(`${inner}!`)) openDirs.delete(k);
+        for (const k of [...openFiles]) if (k.startsWith(`${inner}|`) || k.startsWith(`${inner}!`)) openFiles.delete(k);
+      }
       return;
     }
     if (reading.has(key)) return;
-    const kind = kindOf(entry);
     if (flags & UNSAFE) contents.set(key, { kind: "note", text: "Its name leaves the archive (an absolute path or `..`), so knobas does not open it." });
     else if (flags & UNREADABLE) contents.set(key, { kind: "note", text: "It is encrypted, or packed in a way knobas does not read." });
-    else if (kind === "archive") return openNested(scope, entry);
+    else if (kind === "archive") return openNested(scope, entry, all);
     else if (!contents.has(key)) {
       reading.add(key);
       try {
@@ -399,9 +457,9 @@
         <input placeholder={tab === "deps" ? "Filter dependencies" : "Filter entries"} aria-label={tab === "deps" ? "Filter dependencies" : "Filter entries"} bind:value={typed} {@attach filterKeys()} />
       </label>
       <span class="tf-jar-count" aria-live="polite">
-        {#if tab === "deps"}{words.length === 0 ? `${libs} ${libs === 1 ? "JAR" : "JARs"}` : `${rows.filter((r) => r.kind === "lib").length} of ${libs}`}
-        {:else if words.length === 0}{total.toLocaleString("en")} {total === 1 ? "entry" : "entries"}
-        {:else}{(filtered?.hits ?? 0).toLocaleString("en")} of {total.toLocaleString("en")}{/if}
+        {#if tab === "deps"}{!filtering ? `${libs} ${libs === 1 ? "JAR" : "JARs"}` : `${rows.filter((r) => r.kind === "lib").length} of ${libs}`}
+        {:else if !filtering || filtered?.hits == null}{total.toLocaleString("en")} {total === 1 ? "entry" : "entries"}
+        {:else}{filtered.hits.toLocaleString("en")} of {total.toLocaleString("en")}{/if}
       </span>
       {#if libs > 0}
         <span class="tf-trail">
@@ -414,7 +472,7 @@
     </div>
 
     {#if rows.length === 0}
-      <p class="tf-jar-none">{words.length > 0 ? "Nothing in the archive matches the filter." : "The archive is empty."}</p>
+      <p class="tf-jar-none">{filtering ? "Nothing in the archive matches the filter." : "The archive is empty."}</p>
     {/if}
     <div class="tf-jar-list" {@attach win.list}>
       {#each win.slice(rows) as row (row.k)}
@@ -431,7 +489,7 @@
 {#snippet drawRow(row: Row)}
   {#if row.kind === "dir"}
     <div class="tf-jar-row" data-k={row.k} data-depth={row.depth} {@attach win.row(row.k)} {@attach indent(row.depth)}>
-      <button type="button" class="tf-jar-rbtn" aria-expanded={row.open} onclick={() => toggleDir(row)}>
+      <button type="button" class="tf-jar-rbtn" aria-expanded={row.open} onclick={(event) => toggleDir(row, isAltClick(event))}>
         {@render caret(row.open)}
         <span class="tf-jar-dname">{row.label}/</span>
         <span class="tf-jar-meta">{row.dir.count.toLocaleString("en")} {row.dir.count === 1 ? "file" : "files"}</span>
@@ -444,9 +502,9 @@
     {@const key = `${row.scope}|${row.path}`}
     {@const kind = kindOf(row.path)}
     <div class="tf-jar-row" data-k={row.k} {@attach win.row(row.k)} {@attach indent(row.depth)}>
-      <button type="button" class="tf-jar-rbtn" class:tf-jar-bad-name={(flags & UNSAFE) !== 0} aria-expanded={row.open} onclick={() => void openEntry(row.scope, row.path, flags)}>
+      <button type="button" class="tf-jar-rbtn" class:tf-jar-bad-name={(flags & UNSAFE) !== 0} aria-expanded={row.open} onclick={(event) => void openEntry(row.scope, row.path, flags, isAltClick(event))}>
         {#if kind === "archive"}{@render caret(row.open)}{:else}<span class="tf-jar-nocaret"></span>{/if}
-        <span class="tf-jar-fname" class:tf-jar-class={kind === "class"}>{row.label}</span>
+        <span class="tf-jar-fname" class:tf-jar-class={kind === "class"}><Marked text={row.label} typed={marking} pairs={row.entry === undefined ? [] : labelMarks(row.label, row.path, entryOrder.marks(row.entry))} /></span>
         <span class="tf-jar-meta">
           {#if (flags & UNSAFE) !== 0}<span class="tf-jar-warn">Unsafe name</span>
           {:else if (flags & UNREADABLE) !== 0}<span class="tf-jar-warn">Encrypted</span>
@@ -458,10 +516,10 @@
   {:else if row.kind === "lib"}
     {@const key = `|${row.path}`}
     <div class="tf-jar-row" data-k={row.k} {@attach win.row(row.k)} {@attach indent(row.depth)}>
-      <button type="button" class="tf-jar-rbtn tf-jar-lib" aria-expanded={row.open} onclick={() => void openEntry("", row.path, 0)}>
+      <button type="button" class="tf-jar-rbtn tf-jar-lib" aria-expanded={row.open} onclick={(event) => void openEntry("", row.path, 0, isAltClick(event))}>
         {@render caret(row.open)}
-        <span class="tf-jar-fname">{row.name}</span>
-        <span class="tf-jar-vers">{row.version ?? ""}</span>
+        <span class="tf-jar-fname"><Marked text={row.name} typed={marking} pairs={sliceMarks(row.marks ?? [], 0, row.name.length)} /></span>
+        <span class="tf-jar-vers"><Marked text={row.version ?? ""} typed={marking} pairs={sliceMarks(row.marks ?? [], row.name.length + 1, (row.version ?? "").length)} /></span>
         <span class="tf-jar-size">{reading.has(key) ? "Reading…" : bytes(row.size)}</span>
       </button>
     </div>

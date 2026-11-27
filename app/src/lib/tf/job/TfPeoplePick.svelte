@@ -4,8 +4,8 @@
   and its keys, but it is a form's inline control with toggles; this one picks one value and closes.
 
   It opens at once with *Me*, *Unassigned* (unless the field is required) and the current assignee; the source's people
-  join below them in name order when the list lands, and no row drawn moves. Typing ranks every row by `fuzzyRank` over
-  the name and the account, the matched letters marked, with no request a key; where the source cut its list short, the
+  join below them in name order when the list lands, and no row drawn moves. Typing has the app rank every row over
+  the name and the account (`fuzzy_rank_held`, #2535), the matched letters marked, with no source request a key; where the source cut its list short, the
   page asks the source 150 ms after the last key and what it adds joins at the end.
 
   `↑`/`↓` move, `Enter` picks, `Esc` clears the words and, with none, closes. A pick closes it and focuses the opener.
@@ -17,18 +17,6 @@
 <script lang="ts" module>
   /** How long after the last key the source is asked, where its list is not whole. */
   export const ASK_AFTER_MS = 150;
-
-  /** The first `length` letters of marked runs: a row's name, out of the name and account it was ranked on. */
-  export function cut(runs: readonly { text: string; hit: boolean }[], length: number): { text: string; hit: boolean }[] {
-    const kept: { text: string; hit: boolean }[] = [];
-    let left = length;
-    for (const run of runs) {
-      if (left <= 0) break;
-      kept.push({ text: run.text.slice(0, left), hit: run.hit });
-      left -= run.text.length;
-    }
-    return kept;
-  }
 
   /** Two letters for a person's avatar: the first of the first and last words. */
   export function initials(name: string): string {
@@ -44,7 +32,8 @@
   import { tick, untrack } from "svelte";
   import { HOLD_MS } from "../still-press";
 
-  import { fuzzyRank } from "../filter/fuzzy";
+  import Marked from "../filter/Marked.svelte";
+  import { enterWhenRanked, heldOrder } from "../filter/ranked.svelte";
   import { inFloatHost, placeFloat } from "../floats";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import type { FieldOption } from "../../ipc/entity";
@@ -143,8 +132,23 @@
     return [...lead, ...rest];
   });
 
-  const hits = $derived(fuzzyRank(rows, typed, (row) => (row.hint === null ? row.label : `${row.label} ${row.hint}`)));
+  /** The app ranks the rows by name and account (#2535), the closest first; a row's name leads its text. */
+  const rowText = (row: Row) => (row.hint === null ? row.label : `${row.label} ${row.hint}`);
+  const order = heldOrder<Row>("people-pick");
+  $effect(() => {
+    if (open) order.ask(typed, rows, rowText);
+  });
+  const hits = $derived(order.rows(typed, rows, rowText));
   const drawn = $derived(hits.slice(0, DRAWN_MOST));
+  const marking = $derived(order.typed(typed, rows));
+  /** `Enter` before the ranking answered what was typed picks from that answer, once it lands; typing on drops it. */
+  const enter = enterWhenRanked(
+    () => ({ typed, settled: order.settled(typed, rows) }),
+    () => {
+      const hit = drawn[at];
+      if (hit !== undefined) pick(hit);
+    },
+  );
   const optionId = (index: number) => `${uid}-opt-${index}`;
 
   /** The one line under the list: how many of how many, where the list is read, or why it is not. */
@@ -192,8 +196,7 @@
       event.preventDefault();
       // `Enter` on arrival (the second of a double press on the opener) picks nothing: the press rule.
       if (typed === "" && performance.now() - openedAt < ARRIVAL_MS) return;
-      const hit = drawn[at];
-      if (hit !== undefined) pick(hit.option);
+      enter.press();
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -272,7 +275,7 @@
       {onkeydown}
     />
     <div class="tf-fpick-opts" id="{uid}-opts" role="listbox" aria-label={label}>
-      {#each drawn as { option: row, runs }, index (row.value ?? "")}
+      {#each drawn as row, index (row.value ?? "")}
         <button
           type="button"
           role="option"
@@ -285,7 +288,7 @@
           onclick={() => pick(row)}
         >
           {#if person}<span class="tf-av" aria-hidden="true">{row.value === null ? "–" : initials(row.label)}</span>{/if}
-          <span class="tf-fpick-name">{#each cut(runs, row.label.length) as run, i (i)}{#if run.hit}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}</span>
+          <span class="tf-fpick-name"><Marked text={row.label} typed={marking} pairs={order.marks(row, 0, row.label.length)} /></span>
           {#if row.hint !== null && row.hint !== row.label}<small>{row.hint}</small>{/if}
         </button>
       {/each}

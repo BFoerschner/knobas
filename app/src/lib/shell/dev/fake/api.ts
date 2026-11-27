@@ -25,6 +25,18 @@ const stopped = new Set<number>();
 const fakeImageHosts: { hosts: string[] } = { hosts: [] };
 /** The schema check's two rows (ADR-0058): checking on, nothing pointed to. */
 const fakeSchemas: { check: XmlCheck; locations: SchemaLocations } = { check: { on: true }, locations: { pointed: [] } };
+const LONG_POINTED: SchemaLocations["pointed"] = [
+  {
+    namespace: "http://www.opentrans.example/XMLSchema/2.1/payments-team/vendor-extensions/orders-and-invoices",
+    location: String.raw`C:\Users\someone with a long name\source\repos\folders with spaces in them\edi schemas\opentrans_2_1_vendor_extensions.xsd`,
+    to: { repo: "mock:tidewater/edi-schemas", name: "tidewater/edi-schemas", path: "schemas/vendors/opentrans/folders with spaces in them/opentrans_2_1_vendor_extensions.xsd" },
+  },
+  {
+    namespace: "",
+    location: "https://schemas.tidewater.example/payments-team/folders with spaces in them/settlement-batch-2026.xsd",
+    to: { url: "https://schemas.tidewater.example/payments-team/folders with spaces in them/settlement-batch-2026.xsd", sha256: "3".repeat(64), at: "2026-11-20" },
+  },
+];
 keepSeed(fakeSent, fakeBodies, fakeHeld, fakeServers, stopped, fakeImageHosts, fakeSchemas);
 
 /** The fake's jq sessions: each document's value, parsed once. */
@@ -74,6 +86,9 @@ const local = (host: string) => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test
 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const how = params.get("fake-api");
+  // `?fake-long-paths` (#2518): Settings › Renderers' *Schemas* holds two files pointed to, by a long namespace, a location deep
+  // under folders with spaces and an address, so the table holds each to one line.
+  if (params.has("fake-long-paths") && fakeSchemas.locations.pointed.length === 0) fakeSchemas.locations.pointed = structuredClone(LONG_POINTED);
   return {
     // The bridge awaits what a handler answers; this one waits as a server would, so *Stop* can be pressed.
     api_send: (async (args: Record<string, unknown>) => {
@@ -124,6 +139,13 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       }
       return body;
     },
+    // An answer through a pipeline (#2533): the kept body's text through the steps the fake runs on a value.
+    api_answer_piped: (args) => {
+      const body = fakeBodies.get(Number(args["id"]));
+      if (body === undefined) throw { code: "not_found", message: "The answer is no longer kept." };
+      return fakeValuePiped(new TextDecoder().decode(body), (args["steps"] as PipeStep[] | undefined) ?? []);
+    },
+    api_answer_piped_save: (args) => `~/Downloads/${String(args["saveAs"])}`,
     api_sent: (args) => fakeSent.filter((s) => s.send.file === args["file"]).reverse(),
     api_hold_secret: (args) => {
       const origin = String(args["origin"]);

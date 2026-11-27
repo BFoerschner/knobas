@@ -11,7 +11,7 @@
 import type { AssetDetail, AssetProperty, MonitorRow, MonitorTarget, UnmonitoredAsset } from "../../ipc/assets";
 import type { MonitorKind } from "../../ipc/sources";
 import { BAR_BUCKETS, chipOf as chipStateOf } from "../../assets/monitors";
-import { matchesAll } from "../filter/filter";
+import { joined, type Joined } from "../filter/filter";
 import { stampLabel } from "../../time/format";
 import { stateWord } from "../state-word";
 import type { JobIndex } from "../job/open-jobs";
@@ -234,9 +234,8 @@ export interface MonitorFilter {
   job: string | null;
   /** The state chips on; none keeps every state. */
   states: readonly string[];
-  /** The type chosen, in {@link kindWord}'s words; `""` is *Any*. */
+  /** The type chosen, in {@link kindWord}'s words; `""` is *Any*. The typed words rank {@link monitorText} through the app. */
   type: string;
-  text: string;
 }
 
 /**
@@ -264,17 +263,39 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
       return false;
     }
     if (filter.states.length > 0 && !filter.states.includes(stateWord(stateChip(row).label))) return false;
-    if (filter.type !== "" && kindWord(row.monitor_type) !== filter.type) return false;
-    return monitorMatches(row, filter.text);
+    return filter.type === "" || kindWord(row.monitor_type) === filter.type;
   });
   return { shown: kept.filter((row) => !row.hidden), hidden: kept.filter((row) => row.hidden) };
 }
 
-/** Whether a monitor holds every typed word: in its name, its type, or the name or type of an asset it watches. */
-export function monitorMatches(row: MonitorRow, text: string): boolean {
-  if (text.trim() === "") return true;
-  const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
-  return matchesAll(haystack, text);
+/** What the filter ranks a monitor by (#2535): its name, its type, and the name and type of each asset it watches. */
+export function monitorText(row: MonitorRow): string {
+  return monitorFields(row).text;
+}
+
+function monitorFields(row: MonitorRow): Joined {
+  return joined([row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])]);
+}
+
+/** The ranking's `pairs` over {@link monitorText} cut onto the cells that draw them: the name, and each asset's name. */
+export function monitorMarks(row: MonitorRow, pairs: readonly number[]): { name: readonly number[]; assets: (readonly number[])[] } {
+  const fields = monitorFields(row);
+  return { name: fields.cut(pairs, 0), assets: row.assets.map((_, i) => fields.cut(pairs, 2 + 2 * i)) };
+}
+
+/** What the filter of *Assets nothing watches* ranks an asset by (#2535): its name, type, owner and environment. */
+export function unwatchedText(asset: UnmonitoredAsset): string {
+  return unwatchedFields(asset).text;
+}
+
+function unwatchedFields(asset: UnmonitoredAsset): Joined {
+  return joined([asset.name, asset.type_label, asset.owner ?? "", asset.environment ?? ""]);
+}
+
+/** The ranking's `pairs` over {@link unwatchedText} cut onto the asset's cells. */
+export function unwatchedMarks(asset: UnmonitoredAsset, pairs: readonly number[]): Record<"name" | "type" | "owner" | "environment", readonly number[]> {
+  const fields = unwatchedFields(asset);
+  return { name: fields.cut(pairs, 0), type: fields.cut(pairs, 1), owner: fields.cut(pairs, 2), environment: fields.cut(pairs, 3) };
 }
 
 /**

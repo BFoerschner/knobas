@@ -96,7 +96,10 @@ export class FolderRun {
       const kind = now.start ? "open" : "look";
       untrack(() => {
         // A new folder or commit starts blank; a new state of the same one keeps its drawing until the answer lands.
-        if (asked !== place) this.view = null;
+        if (asked !== place) {
+          this.view = null;
+          this.#tick = 0;
+        }
         place = asked;
         this.#answer(kind);
       });
@@ -127,7 +130,8 @@ export class FolderRun {
           const moved = payload as FolderRenderMoved;
           if (moved.entity_id !== slot.entityId || moved.renderer !== slot.renderer || moved.folder !== slot.folder || moved.lane !== slot.lane) return;
           if (moved.running !== null && this.view !== null) {
-            // Progress: the state alone, no ask.
+            // Progress: the state alone, no ask. Reset local ticks so a fresh backend elapsed_ms never double-counts (#2523).
+            this.#tick = 0;
             this.view = { ...this.view, running: moved.running };
             return;
           }
@@ -146,9 +150,15 @@ export class FolderRun {
       };
     });
 
-    // The run's clock.
+    // The run's clock: resets on every state transition or fresh backend elapsed_ms baseline (#2523).
     $effect(() => {
-      if (this.view?.running?.state !== "running") return;
+      const running = this.view?.running;
+      if (running?.state !== "running") {
+        untrack(() => (this.#tick = 0));
+        return;
+      }
+      void running.elapsed_ms;
+      untrack(() => (this.#tick = 0));
       const every = setInterval(() => (this.#tick += 1), 1000);
       return () => clearInterval(every);
     });
@@ -161,6 +171,7 @@ export class FolderRun {
     this.#ports.render({ entityId: now.entityId, renderer: now.renderer, folder: now.folder, commit: now.commit, paths: now.paths, ask: kind, ...(now.lane ? { lane: now.lane } : {}) }).then(
       (next) => {
         if (asked !== this.#askedAt) return;
+        this.#tick = 0;
         this.view = next;
         this.refused = null;
       },
@@ -183,9 +194,11 @@ export class FolderRun {
     if (now === null) return;
     // The press answers in its own frame; the backend's answer (and its events) replace this.
     if (this.view?.running) {
+      this.#tick = 0;
       this.view = { ...this.view, running: null };
       void this.#ports.stop(now.entityId, now.renderer, now.folder, now.lane || undefined);
     } else {
+      this.#tick = 0;
       if (this.view !== null) this.view = { ...this.view, running: { state: "queued" }, failure: null };
       this.#answer("again");
     }

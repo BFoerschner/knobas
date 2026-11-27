@@ -120,9 +120,11 @@ export function scopeOf(parent: string, entry: string): string {
 /** One row the list draws. `k` is unique across scopes and kinds. */
 export type Row =
   | { k: string; kind: "dir"; depth: number; scope: string; label: string; dir: Dir; open: boolean }
-  | { k: string; kind: "file"; depth: number; scope: string; i: number; label: string; path: string; open: boolean }
+  /** `entry`: what the filter ranked for it (#2532), whose marks are in `path`, which ends `label`; none outside a filter. */
+  | { k: string; kind: "file"; depth: number; scope: string; i: number; label: string; path: string; open: boolean; entry?: Entry }
   | { k: string; kind: "detail"; depth: number; scope: string; path: string }
-  | { k: string; kind: "lib"; depth: number; scope: string; path: string; name: string; version: string | null; size: number; open: boolean }
+  /** `marks`: the filter's matched letters in {@link libText}, pairs of start and end (#2532). */
+  | { k: string; kind: "lib"; depth: number; scope: string; path: string; name: string; version: string | null; size: number; open: boolean; marks?: readonly number[] }
   | { k: string; kind: "note"; depth: number; scope: string; text: string };
 
 /** What the view has open, as plain sets read once a pass. */
@@ -136,17 +138,29 @@ export interface Open {
 /** A nested archive's state: listed, being read, or refused. */
 export type Nested = { ok: true; listing: Listing } | { ok: false; error: string } | "reading";
 
-const NO_WORDS: readonly string[] = [];
-
-/** The filter's words: lowercase, every one must match. */
-export function terms(typed: string): readonly string[] {
-  const words = typed.toLowerCase().split(/\s+/).filter((w) => w !== "");
-  return words.length === 0 ? NO_WORDS : words;
+/** One entry the filter ranks (#2532): its archive's listing and scope, and its place and path there. */
+export interface Entry {
+  l: Listing;
+  scope: string;
+  i: number;
+  name: string;
 }
 
-export function matches(hay: string, words: readonly string[]): boolean {
-  for (const w of words) if (!hay.includes(w)) return false;
-  return true;
+/** Every entry of the top archive and of each nested one listed: what the filter ranks, each by its path (`name`). */
+export function entriesOf(top: Listing, nested: ReadonlyMap<string, Nested>): Entry[] {
+  const out: Entry[] = [];
+  const scan = (l: Listing, scope: string) => {
+    for (let i = 0; i < l.names.length; i += 1) out.push({ l, scope, i, name: l.names[i]! });
+  };
+  scan(top, "");
+  for (const [scope, got] of nested) if (typeof got === "object" && got.ok) scan(got.listing, scope);
+  return out;
+}
+
+/** A path's marks moved onto the label that names its archive first (`scope!path`): what a drawn row marks. */
+export function labelMarks(label: string, path: string, pairs: readonly number[]): readonly number[] {
+  const by = label.length - path.length;
+  return by === 0 || pairs.length === 0 ? pairs : pairs.map((at) => at + by);
 }
 
 /**
@@ -167,11 +181,13 @@ export function treeRows(l: Listing, scope: string, depth: number, open: Open, n
   return out;
 }
 
-function fileRow(l: Listing, scope: string, i: number, depth: number, open: Open, nested: ReadonlyMap<string, Nested>, out: Row[], label: string) {
+function fileRow(l: Listing, scope: string, i: number, depth: number, open: Open, nested: ReadonlyMap<string, Nested>, out: Row[], label: string, entry?: Entry) {
   const path = l.names[i]!;
   const key = `${scope}|${path}`;
   const isOpen = open.files.has(key);
-  out.push({ k: `f${key}#${i}`, kind: "file", depth, scope, i, label, path, open: isOpen });
+  const row: Extract<Row, { kind: "file" }> = { k: `f${key}#${i}`, kind: "file", depth, scope, i, label, path, open: isOpen };
+  if (entry !== undefined) row.entry = entry;
+  out.push(row);
   if (!isOpen) return;
   if (kindOf(path) === "archive") nestedRows(scopeOf(scope, path), depth + 1, open, nested, out);
   else out.push({ k: `d${key}#${i}`, kind: "detail", depth, scope, path });
@@ -188,31 +204,39 @@ function nestedRows(scope: string, depth: number, open: Open, nested: ReadonlyMa
   treeRows(got.listing, scope, depth, open, nested, out);
 }
 
-/** The filter's rows: every entry of the top archive and of each nested one listed, matching every word, by path. */
-export function filteredRows(top: Listing, words: readonly string[], open: Open, nested: ReadonlyMap<string, Nested>): { rows: Row[]; hits: number } {
+/**
+ * The filter's rows: the entries the ranking `kept`, in its order, each named by its path (a nested one's after its
+ * archive's, `!` between) and carrying its entry, whose marks a drawn row reads ({@link labelMarks}): of thousands
+ * kept, only the rows drawn ask; `hits` counts the top archive's.
+ */
+export function filteredRows(kept: readonly Entry[], open: Open, nested: ReadonlyMap<string, Nested>): { rows: Row[]; hits: number } {
   const out: Row[] = [];
   let hits = 0;
-  const scan = (l: Listing, scope: string) => {
-    for (let i = 0; i < l.names.length; i += 1) {
-      const name = l.names[i]!;
-      if (!matches(name.toLowerCase(), words)) continue;
-      if (scope === "") hits += 1;
-      fileRow(l, scope, i, 0, { dirs: open.dirs, files: kindOf(name) === "archive" ? new Set() : open.files }, nested, out, scope === "" ? name : `${scope}!${name}`);
-    }
-  };
-  scan(top, "");
-  for (const [scope, got] of nested) if (typeof got === "object" && got.ok) scan(got.listing, scope);
+  const shut: Open = { dirs: open.dirs, files: new Set<string>() };
+  for (const entry of kept) {
+    const { l, scope, i, name } = entry;
+    if (scope === "") hits += 1;
+    const label = scope === "" ? name : `${scope}!${name}`;
+    fileRow(l, scope, i, 0, kindOf(name) === "archive" ? shut : open, nested, out, label, entry);
+  }
   return { rows: out, hits };
 }
 
-/** The dependency list: the archive's nested JARs, each opening to its tree in place. */
-export function libRows(index: ArchiveIndex, words: readonly string[], open: Open, nested: ReadonlyMap<string, Nested>): Row[] {
+type Lib = ArchiveIndex["libs"][number];
+
+/** What the dependency filter ranks a nested JAR by: its name, version and entry, a space between each (#2532). */
+export function libText(lib: Lib): string {
+  return `${lib.name} ${lib.version ?? ""} ${lib.entry}`;
+}
+
+/** The dependency list: the nested JARs given (the ranking's, filtering), each opening to its tree in place. */
+export function libRows(libs: readonly Lib[], open: Open, nested: ReadonlyMap<string, Nested>, marksOf: (lib: Lib) => readonly number[] = () => []): Row[] {
   const out: Row[] = [];
-  for (const lib of index.libs) {
-    if (words.length > 0 && !matches(`${lib.name} ${lib.version ?? ""} ${lib.entry}`.toLowerCase(), words)) continue;
+  for (const lib of libs) {
     const key = `|${lib.entry}`;
     const isOpen = open.files.has(key);
-    out.push({ k: `l${key}`, kind: "lib", depth: 0, scope: "", path: lib.entry, name: lib.name, version: lib.version, size: lib.size, open: isOpen });
+    const marks = marksOf(lib);
+    out.push({ k: `l${key}`, kind: "lib", depth: 0, scope: "", path: lib.entry, name: lib.name, version: lib.version, size: lib.size, open: isOpen, ...(marks.length === 0 ? {} : { marks }) });
     if (isOpen) nestedRows(scopeOf("", lib.entry), 1, open, nested, out);
   }
   return out;

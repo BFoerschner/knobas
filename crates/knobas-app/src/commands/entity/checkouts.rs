@@ -543,6 +543,40 @@ pub async fn entity_local_file(
     crate::checkout::local_file(&pool, &entity_id, &commit, &path).await
 }
 
+/// *Text search* in the tree the Files tab shows for `entity_id` (ADR-0062):
+/// every line holding `query`, read from the clone's copy of `commit` (the
+/// mirror's tip without one), from the working tree when `working`, or
+/// from the files index's copy of the default branch where no clone holds
+/// it. `branch` is the branch's name. A newer search of the same place
+/// stops this one, which then answers `stale`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::text_search::search`] refuses with.
+#[tauri::command]
+pub async fn entity_text_search(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    commit: Option<String>,
+    working: bool,
+    branch: Option<String>,
+    query: crate::checkout::text_search::TextQuery,
+) -> Result<crate::checkout::text_search::TextFound, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::text_search::search(
+        &pool,
+        lifecycle.registry(),
+        &lifecycle.files(),
+        &entity_id,
+        commit.as_deref(),
+        working,
+        branch.as_deref(),
+        &query,
+    )
+    .await
+}
+
 /// What *Clone all* would clone now (the smoothness pass, PR #2479): how
 /// many repositories, from which sources, which are already here and which
 /// cannot be cloned and why. Reads the mirror and the disk only.

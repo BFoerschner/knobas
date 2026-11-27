@@ -28,6 +28,20 @@ export async function apiAnswerBody(id: number, pretty: boolean): Promise<Uint8A
   return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
 }
 
+/**
+ * The body of send `id` through the file pipeline `steps` (#2533): read from the kept answer in the app's memory, run as
+ * a file's bytes are, under the name `name` (`answer-200.json`). A step that fails is an answer; rejects once the body
+ * is no longer kept.
+ */
+export function apiAnswerPiped(id: number, name: string, steps: PipeStep[]): Promise<PipeRun> {
+  return invoke<PipeRun>("api_answer_piped", { id, name, steps });
+}
+
+/** *Save to Downloads* on an answer with a pipeline: {@link apiAnswerPiped}'s answer saved as `saveAs`; answers the path. */
+export function apiAnswerPipedSave(id: number, name: string, steps: PipeStep[], saveAs: string): Promise<string> {
+  return invoke<string>("api_answer_piped_save", { id, name, steps, saveAs });
+}
+
 /** What was sent from `file` since knobas started, the newest first. */
 export function apiSent(file: string): Promise<SentLine[]> {
   return invoke<SentLine[]>("api_sent", { file });

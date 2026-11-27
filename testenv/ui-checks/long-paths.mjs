@@ -30,9 +30,16 @@
 // A screen with `under` (the small-fixes sweep, 2026-11-21: *Add a default*'s two dropdowns grew to 1,370 px with long names)
 // holds a row of controls to a table's columns: [a control in the row, the table], and each control of that row must stand
 // inside the table's column of the same place, its long names cut in their box.
-// A screen with `whole` (the ux30 end gate, 2026-11-23: Passwords' *Open web interface W* cut at the entry panel's edge in a
+// A screen with `whole` (the ux30 end gate, 2026-11-23: Secrets' *Open web interface W* cut at the entry panel's edge in a
 // 1100 px window) holds every button under the selectors it names to the window and to every box that clips it, sideways: a
 // control is drawn whole or the screen misses.
+// A screen with `oneline` (#2531: a Secrets attachment's long name wrapped into a block of lines) holds every element it names to
+// one line: its text drawn on a single line, a long one cut in its middle (`.tf-path-head`), never wrapped.
+// A screen with `grows` (#2518: an application's *It will run* trapped a long command in a two-line box that scrolled) holds every
+// element it names to showing all it holds: as tall as its lines, nothing scrolled inside it.
+// A screen with `notes` (#2518: Updates' release notes were padded twice, in a file page's large type, in a 250 px slot) holds the
+// Markdown in the box it names to the box's padding alone, the box's type for its text, headings at most a step over it, and a
+// room at least 300 px tall.
 //
 // Writes <out dir>/long-paths.json and exits 1 on any miss, or if a screen's step finds nothing.
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -65,7 +72,7 @@ const BUILD_SIZES = [
   [1440, 868, 1],
   [1100, 600, 1],
 ];
-// Passwords' screens add the window's smallest at a usual height and 1440x868, the sizes the ux30 end gate read.
+// Secrets' screens add the window's smallest at a usual height and 1440x868, the sizes the ux30 end gate read.
 const PW_SIZES = [...SIZES, [1100, 800, 1], [1440, 868, 1]];
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 const PIPELINE = "builds/teamcity%3AbuildType%3APayout_Docker";
@@ -87,7 +94,17 @@ const SCREENS = [
   { id: "code", route: "code" },
   { id: "pr", route: "pr/mock%3Apayout-service%23142" },
   { id: "pr-open-in", route: "pr/mock%3Apayout-service%23142", press: "Open in…" },
-  { id: "settings-checkouts", route: "settings/checkouts" },
+  // Settings › Checkouts (#2518): the Open in… table's commands, a long program's among them, and the worktrees' paths, each on
+  // one line in columns that hold.
+  { id: "settings-checkouts", route: "settings/checkouts", tables: ".tf-stg-body .tf-tbl" },
+  // An application's page whose program is deep under folders with spaces (#2518): each *It will run* shows the whole command.
+  { id: "settings-app-page", route: "settings/checkouts/app/rider", wait: 600, grows: ".tf-apprun-box" },
+  // Backup's restore and import dialogs (#2518): the folder's path and each file's long name, cut in their middle.
+  { id: "settings-backup", route: "settings/backup" },
+  { id: "settings-backup-restore", route: "settings/backup", press: "Restore from a file…" },
+  { id: "settings-backup-import", route: "settings/backup", press: "Import…" },
+  // Updates' release notes (#2518).
+  { id: "settings-updates-notes", route: "settings/updates", fake: "&fake-update=available", wait: 600, notes: ".tf-upd-notes" },
   { id: "settings-remove-worktree", route: "settings/checkouts", press: "Remove…" },
   // Settings › Appearance › Code colours (2026-11-21): the slots, the role list and the preview held to their boxes.
   { id: "settings-code-colours", route: "settings/appearance/code-colours" },
@@ -151,7 +168,7 @@ const SCREENS = [
   { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
   // A site's saved sign-in (ux29): Settings' row naming a long username, held to its column.
   { id: "settings-site-signin", route: "settings/source/confluence" },
-  // Passwords (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
+  // Secrets (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
   // The check in the XML view (2026-11-24): the rail's head and its switch whole at the window's smallest.
   { id: "xml-checked", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", wait: 3000, whole: ".tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   // The schema explorer's picker and its example (S3, S4), and the JSON view's jq field (J2), 2026-11-24: their controls whole.
@@ -162,7 +179,7 @@ const SCREENS = [
   { id: "xsd-example-open", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", press: "opentrans_2_1.xsd", then: ["~ORDER", ".tf-xsd .tf-oas-pageseg button:last-child", "~Open in XML view"], wait: 3000, whole: ".tf-fileview header .tf-trail, .tf-xsd-opened .tf-xv-head", sizes: SMALLEST },
   // Zen mode everywhere in Code (Z1): its button in the top bar whole, and a file in Zen, its header's path whole.
   { id: "zen-code-file", route: `${REPO}/files/src/sepa/retry.rs`, press: ".tf-top > .tf-zenbtn", wait: 500, whole: ".tf-top, .tf-fileview header", sizes: SMALLEST },
-  { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-qbar, .tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
+  { id: "json-jq", route: `${REPO}/files/exports/orders-2026-11.json`, fake: "&fake-xml", wait: 1500, whole: ".tf-xv-bar, .tf-xv-qbar, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   // Commands (ADR-0060): Settings › Commands with a command whose program is deep under folders with spaces, its page, and
   // a run's dialog in a long Windows checkout, its run line naming the program, the checkout and the file by their whole paths.
   { id: "settings-commands", route: "settings/commands", fake: "&fake-oneoff", wait: 600, whole: ".tf-stg-body", sizes: SMALLEST },
@@ -173,8 +190,9 @@ const SCREENS = [
   { id: "docs-blocks", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["XML view", "JSON view"], wait: 1500, whole: ".tf-pre-bar, .tf-doc-xv .tf-xv-bar, .tf-xsd-inline .tf-xsd-irow", sizes: SMALLEST },
   { id: "docs-blocks-decl", route: "page/confluence%3Aedi-formats", press: "Schema", then: ["~AmountType"], wait: 1500, whole: ".tf-pre-bar, .tf-xsd-iopen .tf-xsd-h, .tf-xsd-iopen .tf-oas-meta", sizes: SMALLEST },
   { id: "viewer-junit", route: "ticket/mock%3APAY-228", press: '[aria-labelledby="tf-tkatt"] summary', then: ["~junit.xml"], wait: 1500, whole: ".tf-viewer, .tf-vdoc .tf-xv-bar", sizes: SMALLEST },
-  { id: "passwords-entry", route: "passwords/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", sizes: PW_SIZES },
-  { id: "passwords-folder", route: "passwords/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
+  // The entry's attachments (#2531): under ?fake-long-paths it holds two with long names, each held to one line.
+  { id: "passwords-entry", route: "secrets/entry/team%3Apl-payout-db", whole: ".tf-pw-ehead, .tf-pw-head", oneline: ".tf-pw-filename > :first-child", sizes: PW_SIZES },
+  { id: "passwords-folder", route: "secrets/in/team%3Af%2FTidewater%2FPayments%2FProd%2FDatabases", whole: ".tf-pw-head", sizes: PW_SIZES },
 ];
 
 // Runs in the page: the cells of `selector`'s tables that take more than one line, each table's column widths, and the tables
@@ -226,8 +244,9 @@ const UNDER = ([control, table]) => String.raw`(() => {
 const CHECK = String.raw`(() => {
   const MARK = /folders with spaces|repository-name-that-is-long|Git for Windows|\/Users\/mara\/src|Orchestra Renderer|service-account-with-a-long-name/;
   // What gives way on purpose, its whole in a title: a path's start, a toast's middle, and a command's program start and its
-  // arguments after the program's file (TfCommand, the renderers-columns pass).
-  const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args", "tf-site-path"];
+  // arguments after the program's file (TfCommand, the renderers-columns pass), and with keepEnd the words after the last path's
+  // end (#2518).
+  const CUT = ["tf-path-head", "tf-toast-head", "tf-cmd-head", "tf-cmd-args", "tf-cmd-after", "tf-site-path"];
   // A renderer's long name: held to its boxes as a path is, but it may end in an ellipsis.
   const NAME = /payments team's/;
   const roots = [document.querySelector(".tf-kept:not([hidden])") ?? document.querySelector(".tf-main") ?? document.body, document.querySelector(".tf-floats"), document.querySelector(".tf-toasts"), document.querySelector(".tf-acks"), document.querySelector(".tf-launch"), ...[...document.querySelectorAll(".tf-modal")].filter((m) => !m.closest(".tf-main, .tf-kept"))].filter(Boolean);
@@ -357,6 +376,52 @@ const WHOLE = (selector) => String.raw`(() => {
   return JSON.stringify(out);
 })()`;
 
+// Runs in the page: each element under `selector` that is drawn and whose text takes more than one line. Null when none is drawn.
+const ONELINE = (selector) => String.raw`(() => {
+  const name = (el) => el.tagName.toLowerCase() + [...el.classList].map((c) => "." + c).join("");
+  const where = (el) => { const parts = []; for (let e = el; e && e !== document.body && parts.length < 4; e = e.parentElement) parts.unshift(name(e)); return parts.join(" > "); };
+  const boxes = [...document.querySelectorAll(${JSON.stringify(selector)})].filter((e) => e.getBoundingClientRect().width > 0);
+  if (boxes.length === 0) return "null";
+  const out = [];
+  for (const box of boxes) {
+    const centres = [];
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.textContent.trim() === "") continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) if (r.width > 0) centres.push((r.top + r.bottom) / 2);
+    }
+    if (centres.length > 1 && Math.max(...centres) - Math.min(...centres) > 6)
+      out.push({ at: where(box), text: box.textContent.trim().slice(-48), lines: Math.round((Math.max(...centres) - Math.min(...centres)) / 16) + 1 });
+  }
+  return JSON.stringify(out);
+})()`;
+
+// Runs in the page: each element under `selector` that is drawn and scrolls what it holds, or cuts it, downwards. Null when none is
+// drawn.
+const GROWS = (selector) => String.raw`(() => {
+  const boxes = [...document.querySelectorAll(${JSON.stringify(selector)})].filter((e) => e.getBoundingClientRect().width > 0);
+  if (boxes.length === 0) return "null";
+  return JSON.stringify(boxes.filter((e) => e.scrollHeight > e.clientHeight + 1).map((e) => ({ at: e.getAttribute("aria-label") ?? e.className, text: e.textContent.trim().slice(-48), over: e.scrollHeight - e.clientHeight })));
+})()`;
+
+// Runs in the page: what is cramped in the Markdown box `selector`. Null when it holds no Markdown.
+const NOTES = (selector) => String.raw`(() => {
+  const box = document.querySelector(${JSON.stringify(selector)});
+  const md = box?.querySelector(".tf-md");
+  if (!box || !md) return "null";
+  const out = [];
+  const size = (e) => parseFloat(getComputedStyle(e).fontSize);
+  const pad = getComputedStyle(md);
+  if ([pad.paddingTop, pad.paddingRight, pad.paddingBottom, pad.paddingLeft].some((p) => parseFloat(p) > 0)) out.push({ at: "the Markdown", text: "pads inside the box's own padding: " + pad.padding });
+  const text = md.querySelector(":scope > p, :scope li");
+  if (text && Math.abs(size(text) - size(box)) > 0.5) out.push({ at: "its text", text: size(text) + " px in a box of " + size(box) + " px type" });
+  for (const h of md.querySelectorAll("h1, h2, h3, h4, h5, h6")) if (size(h) > size(box) * 1.25 + 0.5) out.push({ at: h.tagName.toLowerCase(), text: h.textContent.trim().slice(0, 40) + ": " + size(h) + " px over a " + size(box) + " px box" });
+  if (box.clientHeight < 300) out.push({ at: "the box", text: "is " + box.clientHeight + " px tall" });
+  return JSON.stringify(out);
+})()`;
+
 // Opens the launcher (⌘K) under *Everything* (⌘D when it is under *Titles*), types `words` and waits for the pane to follow the
 // first row. False when the launcher or its rows never come.
 const LAUNCHER = (words) => String.raw`(async () => {
@@ -444,7 +509,13 @@ for (const [at, screen] of SCREENS.entries()) {
       if (screen.under && under === null) stepped = false;
       const whole = screen.whole ? JSON.parse(await evaluate(WHOLE(screen.whole))) : null;
       if (screen.whole && whole === null) stepped = false;
-      return { stepped, tables, under, whole, ...JSON.parse(await evaluate(CHECK)) };
+      const oneline = screen.oneline ? JSON.parse(await evaluate(ONELINE(screen.oneline))) : null;
+      if (screen.oneline && oneline === null) stepped = false;
+      const grows = screen.grows ? JSON.parse(await evaluate(GROWS(screen.grows))) : null;
+      if (screen.grows && grows === null) stepped = false;
+      const notes = screen.notes ? JSON.parse(await evaluate(NOTES(screen.notes))) : null;
+      if (screen.notes && notes === null) stepped = false;
+      return { stepped, tables, under, whole, oneline, grows, notes, ...JSON.parse(await evaluate(CHECK)) };
     };
     const shoot = async (name) => {
       if (!shots) return;
@@ -458,12 +529,15 @@ for (const [at, screen] of SCREENS.entries()) {
     await shoot(`${screen.id}-${size}`);
     const scrolls = long.scrolls.filter((box) => !short.scrolls.includes(box));
     const misses = [
-      ...(long.stepped ? [] : [{ kind: "step", at: [screen.whole, screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
+      ...(long.stepped ? [] : [{ kind: "step", at: [screen.whole, screen.oneline, screen.grows, screen.notes, screen.under?.join(" under "), screen.launcher, screen.press, ...(screen.then ?? []), screen.focus, screen.hover, screen.context?.join(" "), screen.item, screen.toast].filter(Boolean).join(" then "), text: "found nothing to press" }]),
       ...long.misses,
       ...scrolls.map((at) => ({ kind: "scrolls", at, text: "scrolls sideways only with the long paths" })),
       ...(long.page && !short.page ? [{ kind: "page", at: "html", text: "the page is wider than the window" }] : []),
       ...(long.under ?? []).map((u) => ({ kind: "under", at: u.at, text: "stands outside the table's column", over: u.over })),
       ...[...(short.whole ?? []), ...(long.whole ?? [])].map((w) => ({ kind: "whole", at: w.at, text: `"${w.text}" is cut`, over: w.over })),
+      ...(long.oneline ?? []).map((w) => ({ kind: "oneline", at: w.at, text: `${w.text} (${w.lines} lines)` })),
+      ...[...(short.grows ?? []), ...(long.grows ?? [])].map((w) => ({ kind: "grows", at: w.at, text: `${w.text} scrolls inside its box`, over: w.over })),
+      ...(long.notes ?? []).map((w) => ({ kind: "notes", at: w.at, text: w.text })),
       ...(long.tables?.wraps ?? []).map((w) => ({ kind: "wraps", at: w.at, text: `${w.text} (${w.lines} lines)` })),
       ...(long.tables?.wider ?? []).map((w) => ({ kind: "wider", at: w.at, text: "the table is wider than its box", over: w.over })),
       ...Object.entries(long.tables?.widths ?? {})

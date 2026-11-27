@@ -120,6 +120,7 @@ const PIPELINE: PipelineRow = {
   pinned: false,
   web_url: null,
   recent: [THE_RUN],
+  unread: [],
 };
 
 function draw(tab: string) {

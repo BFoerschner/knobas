@@ -31,6 +31,7 @@
     onpoint = null,
     ondownload = null,
     json = false,
+    expectsSchema = true,
     onschemamenu = null,
   }: {
     st: DocState;
@@ -53,6 +54,8 @@
     ondownload?: ((namespace: string | null, address: string) => Promise<void>) | null;
     /** A JSON document: no schema is looked for (the design's section 25). */
     json?: boolean;
+    /** Whether the document's first tag names a schema or namespace (holds full head room on frame 1). */
+    expectsSchema?: boolean;
     /** *Schema ▾* opened: what its items will need can be read while the person reaches for one. */
     onschemamenu?: (() => void) | null;
   } = $props();
@@ -78,6 +81,19 @@
   const opened = $derived(st.opened);
   const broken = $derived(opened?.error ?? null);
   const root = $derived(opened?.root ?? null);
+  /** *Findings* appears only when a schema check is running/ran or the document has a parse error. */
+  const showFindings = $derived(broken !== null || departures.length > 0 || head?.k === "looking" || head?.k === "checked");
+  const activeMode = $derived(showFindings ? mode : "results");
+  /** JSON files show no schema header unless malformed. */
+  const showHead = $derived(!json || broken !== null);
+  /** Well-formed XML with no schema draws a single compact line instead of the three-line status box. */
+  const compactHead = $derived(
+    !json &&
+      broken === null &&
+      (opened === null
+        ? !expectsSchema
+        : head?.k === "no-schema" || ((head === null || head.k === "idle") && (root === null || (root.location === null && root.namespace === "")))),
+  );
   /** The rail opens on *Findings* for a document that is not well formed: its break is the one row there. */
   let shownFor: unknown = null;
   $effect(() => {
@@ -86,11 +102,19 @@
     shownFor = o;
     mode = o.error !== null ? "findings" : "results";
   });
-  /** A check that finds departures opens the rail on them, once. */
+  /** When *Findings* is hidden (e.g. checking stopped), keep bound `mode` on *Results*. */
+  $effect(() => {
+    if (!showFindings && mode !== "results") mode = "results";
+  });
+  /** A check that finds departures opens the rail on them, once per check run. */
   let findingsFor: unknown = null;
   $effect(() => {
     const h = head;
-    if (h === null || h.k !== "checked" || h.count === 0 || findingsFor === check) return;
+    if (h === null || h.k === "idle" || h.k === "off" || h.k === "looking") {
+      findingsFor = null;
+      return;
+    }
+    if (h.k !== "checked" || h.count === 0 || findingsFor === check) return;
     findingsFor = check;
     mode = "findings";
   });
@@ -105,85 +129,97 @@
 {/snippet}
 
 <div class="tf-oas-rail tf-xv-rail">
-  <div class="tf-xv-head" aria-live="polite">
-    {#if opened === null}
-      <div class="tf-xv-verdict"><span class="tf-dim">Reading…</span></div>
-      <p>&nbsp;</p>
-      <p>&nbsp;</p>
-    {:else if broken !== null}
-      <div class="tf-xv-verdict tf-xv-bad"><b>Not well formed</b></div>
-      <p>
-        <button type="button" class="tf-oas-ref" onclick={() => ongo(broken.line)}>At line {broken.line.toLocaleString("en")}</button>, {@render said(broken.message.charAt(0).toLowerCase() + broken.message.slice(1))}
-      </p>
-      <p>&nbsp;</p>
-    {:else if json}
-      <div class="tf-xv-verdict"><b class="tf-xv-quiet">Well formed</b></div>
-      <p>JSON is not checked against a schema.</p>
-      <p>&nbsp;</p>
-    {:else if head !== null && head.k !== "idle"}
-      {#if head.k === "looking"}
-        <div class="tf-xv-verdict"><span class="tf-dim">Checking…</span></div>
-        <p>{#if head.found !== null}Against <code class="tf-xv-code">{head.found}</code>, found {head.how}.{:else}Looking for its schema.{/if}</p>
-        <p>&nbsp;</p>
-      {:else if head.k === "checked"}
-        <div class="tf-xv-verdict" class:tf-xv-ok={head.count === 0} class:tf-xv-bad={head.count > 0}>
-          <b>{head.count === 0 ? "Valid" : `${NUM.format(head.total)} ${head.total === 1 ? "departure" : "departures"}`}</b>
-          {@render menu()}
-        </div>
-        <p>Against {#if onschema !== null}<button type="button" class="tf-oas-ref" title="Open the schema" onclick={() => onschema?.()}>{head.against}</button>{:else}<code class="tf-xv-code">{head.against}</code>{/if}, found {head.how}.</p>
-        <p>Checked by libxml2 in {ms(head.ms)}; the schema's {head.files} {head.files === 1 ? "file" : "files"} read in {ms(head.readMs)}.</p>
-      {:else if head.k === "not-checked"}
-        <div class="tf-xv-verdict"><b class={head.warn ? "tf-xv-warn" : "tf-xv-quiet"}>Not checked</b>{@render menu()}</div>
-        <p>{#if head.against !== null}Against <code class="tf-xv-code">{head.against}</code>: {/if}{@render said(head.lines[0] ?? "")}</p>
-        <p>{#if head.lines.length > 1}{@render said(head.lines[1]!)}{:else}&nbsp;{/if}</p>
-      {:else if head.k === "not-found"}
-        <div class="tf-xv-verdict"><b class="tf-xv-warn">Schema not found here</b></div>
-        <p>It names <code class="tf-xv-code">{head.location}</code>, and no file is there.</p>
-        <p>{#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{:else}&nbsp;{/if}</p>
-      {:else if head.k === "address"}
-        <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
-        <p>Its schema is at an address, <code class="tf-xv-code">{head.address}</code>. knobas fetches nothing by itself.</p>
-        <p>
-          {#if ondownload !== null}{@const address = head.address}{@const namespace = head.namespace}<button type="button" class="tf-oas-ref" disabled={downloading} title="One request to {address}, kept on this computer" onclick={() => void download(namespace, address)}>{downloading ? "Downloading…" : "Download it"}</button>{/if}
-          {#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{/if}
-          {#if ondownload === null && onpoint === null}&nbsp;{/if}
-        </p>
-      {:else if head.k === "two"}
-        <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
-        <p>Two repositories declare <code class="tf-xv-code">{head.namespace}</code>.</p>
-        <p>{#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{:else}&nbsp;{/if}</p>
-      {:else if head.k === "no-schema"}
-        <div class="tf-xv-verdict"><b class="tf-xv-quiet">No schema</b></div>
-        <p>{#if head.namespace !== null}Nothing in a synced repository declares <code class="tf-xv-code">{head.namespace}</code>.{:else}&nbsp;{/if}</p>
-        <p>&nbsp;</p>
-      {:else}
-        <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
-        <p>Checking is off for this file.</p>
-        <p>{#if oncheck !== null}<button type="button" class="tf-oas-ref" onclick={() => oncheck?.()}>Check it</button>{:else}&nbsp;{/if}</p>
-      {/if}
-    {:else if root !== null && root.location !== null}
-      <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
-      <p>It names <code class="tf-xv-code">{root.location}</code>.</p>
-      <p>{check === null ? "knobas does not check a document against a schema here." : " "}</p>
-    {:else if root !== null && root.namespace !== ""}
-      <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
-      <p>Its namespace is <code class="tf-xv-code">{root.namespace}</code>.</p>
-      <p>{check === null ? "knobas does not check a document against a schema here." : " "}</p>
+  {#if showHead}
+    {#if compactHead}
+      <div
+        class="tf-xv-head tf-xv-compact"
+        aria-live="polite"
+        title={head?.k === "no-schema" && head.namespace !== null ? `Nothing in a synced repository declares ${head.namespace}.` : undefined}
+      >
+        {#if opened === null}
+          <span class="tf-dim">Reading…</span>
+        {:else}
+          <span class="tf-xv-verdict"><b class="tf-xv-quiet">No schema</b></span>
+          {#if onpoint !== null}
+            <span class="tf-xv-dot" aria-hidden="true">·</span>
+            <button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>
+          {/if}
+        {/if}
+      </div>
     {:else}
-      <div class="tf-xv-verdict"><b class="tf-xv-quiet">No schema</b></div>
-      <p>&nbsp;</p>
-      <p>&nbsp;</p>
+      <div class="tf-xv-head" aria-live="polite">
+        {#if opened === null}
+          <div class="tf-xv-verdict"><span class="tf-dim">Reading…</span></div>
+          <p>&nbsp;</p>
+          <p>&nbsp;</p>
+        {:else if broken !== null}
+          <div class="tf-xv-verdict tf-xv-bad"><b>Not well formed</b></div>
+          <p>
+            <button type="button" class="tf-oas-ref" onclick={() => ongo(broken.line)}>At line {broken.line.toLocaleString("en")}</button>, {@render said(broken.message.charAt(0).toLowerCase() + broken.message.slice(1))}
+          </p>
+          <p>&nbsp;</p>
+        {:else if head !== null && head.k !== "idle"}
+          {#if head.k === "looking"}
+            <div class="tf-xv-verdict"><span class="tf-dim">Checking…</span></div>
+            <p>{#if head.found !== null}Against <code class="tf-xv-code">{head.found}</code>, found {head.how}.{:else}Looking for its schema.{/if}</p>
+            <p>&nbsp;</p>
+          {:else if head.k === "checked"}
+            <div class="tf-xv-verdict" class:tf-xv-ok={head.count === 0} class:tf-xv-bad={head.count > 0}>
+              <b>{head.count === 0 ? "Valid" : `${NUM.format(head.total)} ${head.total === 1 ? "departure" : "departures"}`}</b>
+              {@render menu()}
+            </div>
+            <p>Against {#if onschema !== null}<button type="button" class="tf-oas-ref" title="Open the schema" onclick={() => onschema?.()}>{head.against}</button>{:else}<code class="tf-xv-code">{head.against}</code>{/if}, found {head.how}.</p>
+            <p>Checked by libxml2 in {ms(head.ms)}; the schema's {head.files} {head.files === 1 ? "file" : "files"} read in {ms(head.readMs)}.</p>
+          {:else if head.k === "not-checked"}
+            <div class="tf-xv-verdict"><b class={head.warn ? "tf-xv-warn" : "tf-xv-quiet"}>Not checked</b>{@render menu()}</div>
+            <p>{#if head.against !== null}Against <code class="tf-xv-code">{head.against}</code>: {/if}{@render said(head.lines[0] ?? "")}</p>
+            <p>{#if head.lines.length > 1}{@render said(head.lines[1]!)}{:else}&nbsp;{/if}</p>
+          {:else if head.k === "not-found"}
+            <div class="tf-xv-verdict"><b class="tf-xv-warn">Schema not found here</b></div>
+            <p>It names <code class="tf-xv-code">{head.location}</code>, and no file is there.</p>
+            <p>{#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{:else}&nbsp;{/if}</p>
+          {:else if head.k === "address"}
+            <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
+            <p>Its schema is at an address, <code class="tf-xv-code">{head.address}</code>. knobas fetches nothing by itself.</p>
+            <p>
+              {#if ondownload !== null}{@const address = head.address}{@const namespace = head.namespace}<button type="button" class="tf-oas-ref" disabled={downloading} title="One request to {address}, kept on this computer" onclick={() => void download(namespace, address)}>{downloading ? "Downloading…" : "Download it"}</button>{/if}
+              {#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{/if}
+              {#if ondownload === null && onpoint === null}&nbsp;{/if}
+            </p>
+          {:else if head.k === "two"}
+            <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
+            <p>Two repositories declare <code class="tf-xv-code">{head.namespace}</code>.</p>
+            <p>{#if onpoint !== null}<button type="button" class="tf-oas-ref" onclick={() => onpoint?.()}>Point to a file…</button>{:else}&nbsp;{/if}</p>
+          {:else}
+            <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
+            <p>Checking is off for this file.</p>
+            <p>{#if oncheck !== null}<button type="button" class="tf-oas-ref" onclick={() => oncheck?.()}>Check it</button>{:else}&nbsp;{/if}</p>
+          {/if}
+        {:else if root !== null && root.location !== null}
+          <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
+          <p>It names <code class="tf-xv-code">{root.location}</code>.</p>
+          <p>{check === null ? "knobas does not check a document against a schema here." : " "}</p>
+        {:else if root !== null && root.namespace !== ""}
+          <div class="tf-xv-verdict"><b class="tf-xv-quiet">Not checked</b></div>
+          <p>Its namespace is <code class="tf-xv-code">{root.namespace}</code>.</p>
+          <p>{check === null ? "knobas does not check a document against a schema here." : " "}</p>
+        {/if}
+      </div>
     {/if}
-  </div>
+  {/if}
   <div class="tf-oas-modes">
-    <span class="tf-seg" role="group" aria-label="The list shows">
-      <button type="button" aria-pressed={mode === "findings"} onclick={() => (mode = "findings")}>Findings{" "}<span class="tf-xv-fcount">{#if broken !== null}1{:else if departures.length > 0}{NUM.format(head?.k === "checked" ? head.total : departures.length)}{/if}</span></button>
-      <button type="button" aria-pressed={mode === "results"} onclick={() => (mode = "results")}>Results</button>
-    </span>
-    {#if mode === "results" && copy !== null}{@render copy()}{/if}
+    {#if showFindings}
+      <span class="tf-seg" role="group" aria-label="The list shows">
+        <button type="button" aria-pressed={activeMode === "findings"} onclick={() => (mode = "findings")}>Findings{" "}<span class="tf-xv-fcount">{#if broken !== null}1{:else if departures.length > 0}{NUM.format(head?.k === "checked" ? head.total : departures.length)}{/if}</span></button>
+        <button type="button" aria-pressed={activeMode === "results"} onclick={() => (mode = "results")}>Results</button>
+      </span>
+    {:else}
+      <span class="tf-xv-modes-title">Results</span>
+    {/if}
+    {#if activeMode === "results" && copy !== null}{@render copy()}{/if}
   </div>
-  <div class="tf-oas-list tf-xv-list" role="listbox" aria-label={mode === "findings" ? "Findings" : "Results"}>
-    {#if mode === "findings"}
+  <div class="tf-oas-list tf-xv-list" role="listbox" aria-label={activeMode === "findings" ? "Findings" : "Results"}>
+    {#if activeMode === "findings"}
       {#if broken !== null}
         <button type="button" class="tf-oas-row tf-xv-frow" role="option" aria-selected={st.cursor === broken.line} onclick={() => ongo(broken.line)}>
           <span class="tf-xv-fline">{broken.line.toLocaleString("en")}</span>

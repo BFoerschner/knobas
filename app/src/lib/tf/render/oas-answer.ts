@@ -1,39 +1,58 @@
 /**
- * An answer's words in the API explorer (ux31, section 19): the tone its status takes, its size in words, and a JSON
- * line's tokens for the syntax colours. Pure, for its tests and its mutants.
+ * An answer's words in the API explorer (ux31, section 19): the tone its status takes, its size in words, the file it
+ * goes by and the view it is drawn by (#2533). Pure, for its tests and its mutants.
  */
+import type { PipeStep } from "../../ipc/entity";
+import { isJsonFile } from "../../render/json-sniff";
+import { isXmlMedia } from "../../render/openapi-xml";
+import { isXmlFile } from "../../render/xml-sniff";
 
 /** A status's tone: `ok` under 300, `warn` under 400, `err` from 400. An outcome that happened, so it has one. */
 export function statusTone(status: number): "ok" | "warn" | "err" {
   return status < 300 ? "ok" : status < 400 ? "warn" : "err";
 }
 
-/** A size in words: `512 B`, `2.1 KB`, `3.4 MB`. */
-export function sizeWords(n: number): string {
-  return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+/** The ending an answer's file takes for its content type. */
+function endingOf(contentType: string): string {
+  const t = contentType.split(";")[0]!.trim().toLowerCase();
+  if (/(^|[/+])json$/.test(t)) return "json";
+  if (/html/.test(t)) return "html";
+  if (isXmlMedia(t)) return "xml";
+  if (/gzip$/.test(t)) return "gz";
+  if (/zstd$/.test(t)) return "zst";
+  if (t.startsWith("text/")) return "txt";
+  return "bin";
 }
 
-/** One run of a JSON line: `k` a key, `s` a string, `n` a number, `b` true, false or null, `""` the rest. */
-export interface Token {
-  t: string;
-  k: "" | "k" | "s" | "n" | "b";
+/**
+ * The file an answer goes by (#2533): `answer-200.json`. Its ending is what the pipeline bar's defaults and a saved
+ * answer read, as a file's would be.
+ */
+export function answerName(status: number, contentType: string): string {
+  return `answer-${status}.${endingOf(contentType)}`;
 }
 
-const TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)/g;
+/** How an answer's body is drawn: the JSON view, the XML view, or its text as written. */
+export type BodyKind = "json" | "xml" | "text";
 
-/** A JSON line's tokens, as text: never markup, so an answer cannot draw an element of its own. */
-export function jsonTokens(line: string): Token[] {
-  const out: Token[] = [];
-  let at = 0;
-  for (const m of line.matchAll(TOKEN)) {
-    const start = m.index;
-    if (start > at) out.push({ t: line.slice(at, start), k: "" });
-    if (m[1] !== undefined) {
-      out.push({ t: m[1], k: m[2] !== undefined ? "k" : "s" });
-      if (m[2] !== undefined) out.push({ t: m[2], k: "" });
-    } else out.push({ t: m[0], k: m[3] !== undefined ? "b" : "n" });
-    at = start + m[0].length;
-  }
-  if (at < line.length) out.push({ t: line.slice(at), k: "" });
-  return out;
+/**
+ * The view an answer's body is drawn by where the person picks none (#2533): the one its content type names, else what
+ * its text is (a `text/plain` body that is JSON), read by the file name it goes by (a pipeline's run renames it). HTML
+ * is only ever its text: knobas never renders an answer's page, nor reads it as an XML document.
+ */
+export function bodyKind(contentType: string, name: string, text: string): BodyKind {
+  if (/html/i.test(contentType)) return "text";
+  const ending = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+  if (ending === "html" || ending === "htm") return "text";
+  if (ending === "json" && isJsonFile(text, name)) return "json";
+  if (ending === "xml" && isXmlFile(text, name)) return "xml";
+  if (isJsonFile(text, "answer.json")) return "json";
+  if (isXmlFile(text, "answer.xml")) return "xml";
+  return "text";
+}
+
+/** What the person set on an answer's body: the pipeline's steps (`null` while the bar is shut) and *Render as*. */
+export interface BodyView {
+  steps: PipeStep[] | null;
+  as: BodyKind | null;
 }

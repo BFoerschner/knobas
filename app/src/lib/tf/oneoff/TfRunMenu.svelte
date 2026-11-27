@@ -18,7 +18,7 @@
   import type { OneOff, OneOffTarget } from "../../ipc/oneoff";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import TfMenu from "../TfMenu.svelte";
-  import TfPath from "../TfPath.svelte";
+  import TfCommand from "../TfCommand.svelte";
   import { ago, endedShort, fill, shown, stateOf, takesCommit, takesFile, takesFolder, takesMadeFile, takesMadeFolder, takesRange, takesRepository } from "../../render/oneoff";
   import { BATCH_MAX } from "../../render/oneoff.svelte";
   import { oneoffs as sharedStore, type OneOffs } from "../../render/oneoff.svelte";
@@ -178,7 +178,7 @@
 {#snippet row(command: OneOff, t: OneOffTarget)}
   {@const done = last(command, t)}
   <button role="menuitem" onclick={() => run(command, t)}
-    ><b>{command.name}</b><TfPath path={willRun(command, t)} />{#if done !== undefined}<span class="tf-oo-last"><span class="tf-dot {tone(command, t)}"></span>{endedShort(done.ended)}, {ago(done.started_at, Date.now())}</span>{/if}</button
+    ><b>{command.name}</b><TfCommand command={willRun(command, t)} keepEnd />{#if done !== undefined}<span class="tf-oo-last"><span class="tf-dot {tone(command, t)}"></span>{endedShort(done.ended)}, {ago(done.started_at, Date.now())}</span>{/if}</button
   >
 {/snippet}
 
@@ -222,7 +222,7 @@
     {#each takes as command (command.id)}
       {@const row = last(command)}
       <button role="menuitem" onclick={() => run(command)}
-        ><b>{command.name}</b><TfPath path={willRun(command)} />{#if row !== undefined}<span class="tf-oo-last"><span class="tf-dot {tone(command)}"></span>{endedShort(row.ended)}, {ago(row.started_at, Date.now())}</span>{/if}</button
+        ><b>{command.name}</b><TfCommand command={willRun(command)} keepEnd />{#if row !== undefined}<span class="tf-oo-last"><span class="tf-dot {tone(command)}"></span>{endedShort(row.ended)}, {ago(row.started_at, Date.now())}</span>{/if}</button
       >
     {:else}
       <span class="tf-oo-none">No command of yours runs on this. A command is a program of yours, such as a linter, run here on a press.</span>
