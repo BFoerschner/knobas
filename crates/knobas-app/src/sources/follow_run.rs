@@ -457,7 +457,10 @@ mod tests {
                     .expect("a free slot")
             })
             .collect();
-        assert!(follows.join("tc", "tc:build:1").is_none(), "followed already");
+        assert!(
+            follows.join("tc", "tc:build:1").is_none(),
+            "followed already"
+        );
         assert!(
             follows.join("tc", "tc:build:9").is_none(),
             "no slot is free: it waits for one"
@@ -477,7 +480,9 @@ mod tests {
         );
 
         // A write's run makes room as before: the oldest, the started run, stops.
-        follows.begin("tc", "tc:build:20").expect("a new write's run");
+        follows
+            .begin("tc", "tc:build:20")
+            .expect("a new write's run");
         assert!(started.load(Ordering::SeqCst));
         assert_eq!(follows.of_source("tc").len(), PER_SOURCE);
     }

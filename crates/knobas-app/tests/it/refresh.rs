@@ -57,6 +57,10 @@ enum Reads {
 }
 
 /// The fake's remote system, shared by every adapter the registry builds.
+/// A run of BUILD-2's chain at the source: its state (`None` once the source
+/// no longer has it) and the keys it waits on in turn.
+type ChainRun = (Option<&'static str>, Vec<String>);
+
 struct Remote {
     /// PAY-1's title as the source holds it. A comment that lands sets it.
     title: Mutex<String>,
@@ -88,7 +92,7 @@ struct Remote {
     waits: Mutex<Vec<String>>,
     /// Those runs as the source holds them, by key: each one's state (`None`
     /// once the source no longer has it) and the keys it waits on in turn.
-    chain: Mutex<std::collections::BTreeMap<String, (Option<&'static str>, Vec<String>)>>,
+    chain: Mutex<std::collections::BTreeMap<String, ChainRun>>,
 }
 
 fn ticket(key: &str, title: &str) -> SyncItem {
@@ -207,9 +211,11 @@ impl Source for Fake {
                 TICKET => RefreshAnswer::Item(ticket("PAY-1", &self.0.title.lock().unwrap())),
                 BUILD => RefreshAnswer::Item(build()),
                 RUN => match *self.0.run_state.lock().unwrap() {
-                    Some(state) => {
-                        RefreshAnswer::Item(chain_run("BUILD-2", state, &self.0.waits.lock().unwrap()))
-                    }
+                    Some(state) => RefreshAnswer::Item(chain_run(
+                        "BUILD-2",
+                        state,
+                        &self.0.waits.lock().unwrap(),
+                    )),
                     None => RefreshAnswer::Gone,
                 },
                 other if other.starts_with("refreshing:BUILD-") => {
@@ -1713,7 +1719,10 @@ async fn a_run_started_here_brings_the_runs_it_waits_on_to_their_end() {
     f.open_the_door();
     *f.remote.waits.lock().unwrap() = vec!["BUILD-3".to_owned()];
     f.remote.chain.lock().unwrap().extend([
-        ("BUILD-3".to_owned(), (Some("queued"), vec!["BUILD-4".to_owned()])),
+        (
+            "BUILD-3".to_owned(),
+            (Some("queued"), vec!["BUILD-4".to_owned()]),
+        ),
         ("BUILD-4".to_owned(), (Some("queued"), Vec::new())),
     ]);
     trigger_the_run(&f).await;
@@ -1722,10 +1731,13 @@ async fn a_run_started_here_brings_the_runs_it_waits_on_to_their_end() {
         followed(&f) == [RUN, dep, deeper]
     })
     .await;
-    until("the mirror holds both queued, each read at once", || async {
-        state_of(&f.state.pool, dep).await.as_deref() == Some("queued")
-            && state_of(&f.state.pool, deeper).await.as_deref() == Some("queued")
-    })
+    until(
+        "the mirror holds both queued, each read at once",
+        || async {
+            state_of(&f.state.pool, dep).await.as_deref() == Some("queued")
+                && state_of(&f.state.pool, deeper).await.as_deref() == Some("queued")
+        },
+    )
     .await;
 
     // The first step runs and finishes: read within a read of each.
@@ -1735,13 +1747,20 @@ async fn a_run_started_here_brings_the_runs_it_waits_on_to_their_end() {
         state_of(&f.state.pool, deeper).await.as_deref() == Some("running")
     })
     .await;
-    assert!(moved.elapsed() < Duration::from_secs(4), "{:?}", moved.elapsed());
+    assert!(
+        moved.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        moved.elapsed()
+    );
     chain_moves(&f, "BUILD-4", "finished");
     until("BUILD-4's follow ends with it", || async {
         followed(&f) == [RUN, dep]
     })
     .await;
-    assert_eq!(state_of(&f.state.pool, deeper).await.as_deref(), Some("finished"));
+    assert_eq!(
+        state_of(&f.state.pool, deeper).await.as_deref(),
+        Some("finished")
+    );
 
     chain_moves(&f, "BUILD-3", "running");
     until("the mirror says BUILD-3 runs", || async {
@@ -1749,8 +1768,14 @@ async fn a_run_started_here_brings_the_runs_it_waits_on_to_their_end() {
     })
     .await;
     chain_moves(&f, "BUILD-3", "finished");
-    until("BUILD-3's follow ends with it", || async { followed(&f) == [RUN] }).await;
-    assert_eq!(state_of(&f.state.pool, dep).await.as_deref(), Some("finished"));
+    until("BUILD-3's follow ends with it", || async {
+        followed(&f) == [RUN]
+    })
+    .await;
+    assert_eq!(
+        state_of(&f.state.pool, dep).await.as_deref(),
+        Some("finished")
+    );
 
     // A finished run of the chain is not brought again by the next reads.
     let reads = f.remote.refreshes.load(Ordering::SeqCst);
@@ -1776,15 +1801,25 @@ async fn a_chain_longer_than_the_cap_is_followed_a_slot_at_a_time_behind_the_sta
     let f = fixture("refresh_follow_long_chain").await;
     mirrored(&f).await;
     f.open_the_door();
-    let keys: Vec<String> = (11..11 + PER_SOURCE + 2).map(|n| format!("BUILD-{n}")).collect();
+    let keys: Vec<String> = (11..11 + PER_SOURCE + 2)
+        .map(|n| format!("BUILD-{n}"))
+        .collect();
     *f.remote.waits.lock().unwrap() = keys.clone();
     f.remote.chain.lock().unwrap().extend(
         keys.iter()
             .map(|key| (key.clone(), (Some("queued"), Vec::new()))),
     );
     trigger_the_run(&f).await;
-    until("the cap is full", || async { followed(&f).len() == PER_SOURCE }).await;
-    assert_eq!(followed(&f)[0], RUN, "the started run first: {:?}", followed(&f));
+    until("the cap is full", || async {
+        followed(&f).len() == PER_SOURCE
+    })
+    .await;
+    assert_eq!(
+        followed(&f)[0],
+        RUN,
+        "the started run first: {:?}",
+        followed(&f)
+    );
 
     for key in &keys {
         let entity = format!("{SOURCE}:{key}");
@@ -1801,10 +1836,15 @@ async fn a_chain_longer_than_the_cap_is_followed_a_slot_at_a_time_behind_the_sta
         })
         .await;
     }
-    until("only the started run is left", || async { followed(&f) == [RUN] }).await;
+    until("only the started run is left", || async {
+        followed(&f) == [RUN]
+    })
+    .await;
     for key in &keys {
         assert_eq!(
-            state_of(&f.state.pool, &format!("{SOURCE}:{key}")).await.as_deref(),
+            state_of(&f.state.pool, &format!("{SOURCE}:{key}"))
+                .await
+                .as_deref(),
             Some("finished"),
             "{key}"
         );
