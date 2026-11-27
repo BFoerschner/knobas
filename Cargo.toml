@@ -6,7 +6,7 @@ exclude = ["vendor/sqlx-core"]
 
 [workspace.package]
 edition = "2024"
-version = "3.3.0-rc1"
+version = "3.3.0-rc2"
 license = "UNLICENSED"
 
 [workspace.dependencies]
