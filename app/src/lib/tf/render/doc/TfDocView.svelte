@@ -83,6 +83,7 @@
     jq = null,
     onpipeline = null,
     inline = false,
+    compact = false,
     verdict = undefined,
     against = null,
     warming = false,
@@ -114,6 +115,12 @@
      * Folds and their keys, *Levels*, values and links are the view's own.
      */
     inline?: boolean;
+    /**
+     * The compact form (#2533, an API answer in its column): the document and its query (XPath, or jq where a session
+     * opens) in its box's height, with no rail and no side column. The query's hits are marked in the lines and stepped
+     * through with `N` and `P`; their list and the schema's findings stand in the full view (the answer's *Expand*).
+     */
+    compact?: boolean;
     /**
      * A verdict made elsewhere (the example column's *Check*): its departures stand at their lines' ends. Left out, the
      * document's own schema is looked for (`schema`).
@@ -155,6 +162,8 @@
   } = $props();
 
   const kept = $derived(pipelines ?? namedPipelines);
+  /** The document alone in its box: the miniature form, or the compact one that keeps its query. */
+  const bare = $derived(inline || compact);
   // A document opened for real: what is still to warm is left (`doc-warm.ts`).
   if (!untrack(() => warming)) documentOpened();
 
@@ -997,10 +1006,10 @@
 {#snippet tail(n: number, len: number)}{#if len > 0}<button type="button" class="tf-xv-more" title="The line is {NUM.format(len)} characters long.">{NUM.format(len - CLIP.keep)} more</button>{/if}{#if st !== null && st.shut(n)}{@const said = countOf(st, n)}{@const f = st.folds.byLine[n]!}<button type="button" class="tf-xv-fold" data-xv-fold={n} title="{NUM.format(st.folds.end[f]! - n)} lines folded. Press to unfold.">{#if said !== null}<b class="tf-xv-occ">{said.count}</b>{" "}<span>{said.word}</span>{/if}{#if st.hitLines.length > 0}{@const inside = countInside(st.folds, f, st.hitLines)}{#if inside > 0}<span class="tf-xv-in tf-xv-inhit">{NUM.format(inside)} {inside === 1 ? "match" : "matches"}</span>{/if}{/if}</button><span class="tf-xv-shut">{st.folds.closers[st.folds.closer[f]!]}</span>{/if}{/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class={inline ? "tf-xv tf-xv-inline" : `tf-oas tf-xv tf-oas-${cols >= 3 ? 3 : 2}`} data-cols={inline ? undefined : cols} onkeydown={keys} {@attach inline ? null : pane} {@attach inline ? null : sideWidth("doc-rail")}>
+<div class={bare ? `tf-xv tf-xv-inline${compact ? " tf-xv-compactview" : ""}` : `tf-oas tf-xv tf-oas-${cols >= 3 ? 3 : 2}`} data-cols={bare ? undefined : cols} onkeydown={keys} {@attach bare ? null : pane} {@attach bare ? null : sideWidth("doc-rail")}>
   {#if st !== null}
     {@const state = st}
-    {#if !inline}
+    {#if !bare}
     <TfDocRail
       st={state}
       json={kind !== "xml"}
@@ -1083,6 +1092,8 @@
         bind:field
         onstep={step}
         onlist={() => {
+          // The compact form has no list: the first hit is gone to.
+          if (compact) return step(1);
           mode = "results";
           void tick().then(() => resultList?.querySelector<HTMLElement>(".tf-oas-row")?.focus());
         }}
@@ -1120,7 +1131,7 @@
       </div>
       {/if}
     </div>
-    {#if !inline && cols >= 3}
+    {#if !bare && cols >= 3}
       {@const here = check?.byLine.get(state.cursor)}
       <!-- One column, whatever it holds: a stepped-to departure whole, over what the schema says of the element. -->
       <div class="tf-xv-sidecol">

@@ -562,7 +562,7 @@
               onfocus={() => (last = row.field)}
             />
             {#if line.run !== null || line.wait !== null}
-              <!-- One box of two lines in every state, with Try it beside it: the command filling in moves nothing (2026-11-17). A longer one scrolls in its box. -->
+              <!-- One box at least two lines high in every state, with Try it beside it: the usual command filling in moves nothing (2026-11-17). A longer one grows the box to show all of it (#2518). -->
               <div class="tf-apprun">
                 <div class="tf-apprun-box" role="textbox" aria-readonly="true" aria-multiline="true" tabindex="0" aria-label="It will run, {row.label.toLowerCase()}">
                   {#if line.run !== null}<code class="tf-mono">{line.run}</code>{:else}<span class="tf-dim">{line.wait}</span>{/if}

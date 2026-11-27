@@ -218,6 +218,11 @@ test("a range whose two shas the checkout holds offers the Diff tool, and it run
   await openMenu({ kind: "range", base: "7be0e4f15c60^", head: "c90d11e4a7b2" });
   expect(names()).toEqual(["VS Code (default)", "Diff tool"]);
   expect(text(items()[1])).toContain("git -C /Users/mara/code/payout-service difftool --dir-diff --gui --no-prompt 7be0e4f15c60^ c90d11e4a7b2");
+  // One line (#2518): the checkout's folder stays, the words after it give way at their end, the whole line in its title.
+  const line = items()[1]!.querySelector(".tf-cmd")!;
+  expect(line.getAttribute("title")).toBe("git -C /Users/mara/code/payout-service difftool --dir-diff --gui --no-prompt 7be0e4f15c60^ c90d11e4a7b2 --");
+  expect(text(line.querySelector(".tf-cmd-end"))).toBe("payout-service");
+  expect(text(line.querySelector(".tf-cmd-after"))).toBe("difftool --dir-diff --gui --no-prompt 7be0e4f15c60^ c90d11e4a7b2 --");
   items()[1]!.click();
   await settle();
   expect(calls.diffs).toEqual([["7be0e4f15c60^", "c90d11e4a7b2"]]);

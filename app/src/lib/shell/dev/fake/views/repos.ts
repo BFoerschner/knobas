@@ -23,7 +23,7 @@ import { lineDiff } from "../../../../tf/diff/line-diff";
 import { ago, agoStamp } from "../../../time";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
-import { DEEP_30_JSON, ITEMS_YAML, MODEL_31_JSON, ORDER_YAML, PETS_30_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
+import { DEEP_30_JSON, ITEMS_YAML, MODEL_31_JSON, ORDER_YAML, PETS_30_YAML, PETS_XML_YAML, SPLIT_31_YAML, bigSpec } from "../../../../render/openapi-fixture";
 import { fakePage } from "../folder-render";
 
 const RETRY_MAIN = `use std::time::Duration;
@@ -502,6 +502,7 @@ const openapiFiles: () => Record<string, string> = (() => {
   return () => {
     specs ??= {
       "api/openapi.yaml": PETS_30_YAML,
+      "api/pets-xml.yaml": PETS_XML_YAML,
       "api/split.yaml": SPLIT_31_YAML,
       "api/schemas/order.yaml": ORDER_YAML,
       "api/paths/items.yaml": ITEMS_YAML,

@@ -57,6 +57,42 @@ pub fn api_answer_body(id: u64, pretty: bool) -> Result<tauri::ipc::Response, Ip
         .ok_or_else(|| IpcError::new(IpcErrorCode::NotFound, "The answer is no longer kept."))
 }
 
+/// The body of send `id` through the file pipeline `steps` (#2533): *Pipeline* on an answer, as on a file. The bytes
+/// are the kept answer's, read in memory ([`send::piped`]); `name` is the file the answer goes by. A command step runs
+/// as saved.
+///
+/// # Errors
+/// `not_found` once the body is no longer kept; the saved command steps cannot be read. A step that fails is an answer.
+#[tauri::command]
+pub async fn api_answer_piped<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: u64,
+    name: String,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+) -> Result<crate::file_pipeline::PipeRun, IpcError> {
+    let commands = commands_for(&app, &steps).await?;
+    send::piped(id, &name, &steps, &commands)
+        .await
+        .ok_or_else(|| IpcError::new(IpcErrorCode::NotFound, "The answer is no longer kept."))
+}
+
+/// [`api_answer_piped`]'s answer saved to the Downloads folder as `save_as`, only when the person presses *Download*;
+/// answers the path. A saved file is the person's; knobas keeps no copy.
+///
+/// # Errors
+/// As [`api_answer_piped`]; a failed run; the folder or the write.
+#[tauri::command]
+pub async fn api_answer_piped_save<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: u64,
+    name: String,
+    steps: Vec<crate::file_pipeline::PipeStep>,
+    save_as: String,
+) -> Result<String, IpcError> {
+    let run = api_answer_piped(app, id, name, steps).await?;
+    crate::commands::entity::save_run(run, &save_as).await
+}
+
 /// What was sent from the spec `file` since knobas started, the newest first.
 #[tauri::command]
 pub fn api_sent(file: String) -> Vec<kept::SentLine> {

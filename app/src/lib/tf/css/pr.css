@@ -31,8 +31,6 @@
 .tf-appmenu .tf-menulab { display: block; padding: 6px 12px 2px; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
 .tf-appmenu .tf-plain { font-weight: var(--wt-ui, 400); }
 .tf-appmenu .tf-mono { font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-/* The Diff tool's command holds the clone's path in its middle: it wraps, whole. */
-.tf-appmenu .tf-mono.tf-appmenu-argv { white-space: normal; overflow-wrap: anywhere; }
 .tf-appmenu-note { display: block; padding: 6px 12px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-dialog.tf-app-dialog { width: min(640px, calc(100vw - 32px)); }
 .tf-app-dialog .tf-body { display: flex; flex-direction: column; gap: 8px; }

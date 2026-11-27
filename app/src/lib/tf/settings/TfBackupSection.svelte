@@ -40,6 +40,8 @@
   import { SavedWord, savedField } from "./saved-field.svelte";
   import { boundedNumber, clampNote, lastBackupWords, scheduleWords, shareTicks } from "./sections";
   import TfDialog from "./TfDialog.svelte";
+  import TfPath from "../TfPath.svelte";
+  import { nameParts, pathParts } from "../path";
 
   let {
     ports,
@@ -350,7 +352,7 @@
     >
       {#snippet body()}
         <p class="tf-dsub">
-          {choosing === "share" ? "Share exports" : "Backups"} in <span class="tf-mono">{current.directory}</span>. Put a
+          {choosing === "share" ? "Share exports" : "Backups"} in <TfPath path={current.directory} />. Put a
           file there to see it here.
         </p>
         <p class="tf-dsub">
@@ -364,6 +366,8 @@
         {:else}
           <div class="tf-picks tf-stg-gap" role="radiogroup" aria-label={choosing === "share" ? "Share exports" : "Backups"} {@attach firstPickFocus}>
             {#each listed as archive (archive.file)}
+              <!-- The file's name alone, on a Mac's path or a Windows one, giving up its middle so its date and extension stay (#2518). -->
+              {@const cut = nameParts(pathParts(archive.file).tail)}
               <label class="tf-pickrow">
                 <input
                   type="radio"
@@ -372,7 +376,9 @@
                   checked={chosen?.file === archive.file}
                   onchange={() => (pickedFile = archive.file)}
                 />
-                <span class="tf-mono tf-bak-name" title={archive.file}>{archive.file.slice(archive.file.lastIndexOf("/") + 1)}</span>
+                <span class="tf-path tf-mono tf-bak-name" title={archive.file}
+                  >{#if cut.head !== ""}<span class="tf-path-head">{cut.head}</span>{/if}<span class="tf-path-tail">{cut.tail}</span></span
+                >
                 <span class="tf-dim tf-num tf-bak-size">{formatBytes(archive.bytes)}</span>
               </label>
             {/each}

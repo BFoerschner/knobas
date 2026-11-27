@@ -525,10 +525,11 @@ const source = (file: string) => readFileSync(join(process.cwd(), "src", file), 
 
 test("the lists of code's lines hear code's size, and the text measured in script takes its role's size", () => {
   // A run's log, a file's source and a diff's lines: rows that are line boxes, held at the new size (Fable's ruling 3).
-  for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/diff/TfDiffCard.svelte", "lib/tf/render/TfJarCode.svelte", "lib/tf/render/TfOasAnswer.svelte"]) {
+  for (const file of ["lib/tf/builds/TfRunLog.svelte", "lib/tf/diff/TfDiffCard.svelte", "lib/tf/render/TfJarCode.svelte"]) {
     expect(source(file), file).toMatch(/const rowsOf = codeRows\((13, 1\.6|12, 1\.55|12, 1\.6)\);\s*const win = new Windowed<\w+>\(\{[^}]*estimate: rowsOf\.estimate[^}]*textSize: rowsOf\.textSize[^}]*\}\)/);
   }
-  // A file's source is drawn by `TfLines` (Source and the XML view share it): its rows hear code's size, and so does a
+  // A file's source is drawn by `TfLines` (Source and the XML view share it, and an API answer's body through the XML
+  // and JSON views, #2533): its rows hear code's size, and so does a
   // view's one height of its own, given at 100 % (`TfLines.rows.test.svelte.ts`).
   expect(source("lib/tf/code/TfLines.svelte")).toMatch(/const rowsOf = codeRows\(13, 1\.6\);[\s\S]*?const win = new Windowed<\w+>\(\{[^}]*estimate: tall \?\? rowsOf\.estimate[^}]*textSize:\s*fixed === null\s*\?\s*rowsOf\.textSize\s*:\s*\(heard\) =>\s*fonts\.onCodeRows\(/);
   expect(source("lib/tf/repo/TfRepoFiles.svelte")).toMatch(/<TfLines\b/);

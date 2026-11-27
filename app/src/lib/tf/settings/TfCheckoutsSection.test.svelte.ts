@@ -190,9 +190,28 @@ test("a set root and real commands draw in mono; Not set and opens the checkout 
   // The root is a path drawn to keep its end (`TfPath`), whole in its title.
   expect(inMono(target.querySelector('.tf-path[title="/Users/mara/code"]'))).toBe(true);
   expect(text(target.querySelector('.tf-path[title="/Users/mara/code"]'))).toBe("/Users/mara/code");
-  expect(inMono(mark(target, "code {path}"))).toBe(true);
-  expect(inMono(mark(target, "open -a Fork {path}"))).toBe(true);
+  expect(inMono(target.querySelector('.tf-stg-apps .tf-cmd[title="code {path}"]'))).toBe(true);
+  expect(inMono(target.querySelector('.tf-stg-apps .tf-cmd[title="open -a Fork {path}"]'))).toBe(true);
   expect(inMono(mark(target, "opens the checkout"))).toBe(false);
+});
+
+test("each command in the Open in… table is one line that keeps its end, the whole command its title (#2518)", async () => {
+  stored.applications.push({
+    id: "idea",
+    name: "IntelliJ IDEA",
+    command: String.raw`"C:\Program Files\JetBrains\IntelliJ IDEA\bin\idea64.exe" "{path}"`,
+    file_command: String.raw`"C:\Program Files\JetBrains\IntelliJ IDEA\bin\idea64.exe" --line {line} "C:\Users\mara\notes\{file}"`,
+  });
+  await draw();
+  const row = [...target.querySelectorAll(".tf-stg-apps tbody tr")].find((tr) => text(tr).startsWith("IntelliJ IDEA"))!;
+  const [checkout, file] = [...row.querySelectorAll(".tf-cmd")];
+  expect(checkout?.getAttribute("title")).toBe(String.raw`"C:\Program Files\JetBrains\IntelliJ IDEA\bin\idea64.exe" "{path}"`);
+  // The program's file stays, its folders give way first; the line is all there, so a selection copies it as typed.
+  expect(text(checkout?.querySelector(".tf-cmd-file"))).toBe('idea64.exe"');
+  expect(text(checkout)).toBe(String.raw`"C:\Program Files\JetBrains\IntelliJ IDEA\bin\idea64.exe" "{path}"`);
+  // A path in the arguments keeps its end: the file the command opens.
+  expect(text(file?.querySelector(".tf-cmd-end"))).toBe('{file}"');
+  expect(row.querySelector(".tf-wrapall")).toBeNull();
 });
 
 test("with no clones root, Not set is not in the mono face (#1444)", async () => {

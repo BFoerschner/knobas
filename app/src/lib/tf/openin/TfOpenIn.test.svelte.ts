@@ -246,6 +246,17 @@ test("at a file, the menu shows and runs the file command", async () => {
   expect(acks.item?.text).toBe("Opening retry.rs in VS Code");
 });
 
+test("each application's line is its command on one line, the program's file and the folder or file it opens kept, whole in its title (#2518)", async () => {
+  await draw(view("/Users/mara/code/payout-service"), "src/sepa/retry.rs");
+  target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
+  await settle();
+  const line = items()[0]!.querySelector(".tf-cmd")!;
+  expect(line.getAttribute("title")).toBe("code --goto /Users/mara/code/payout-service/src/sepa/retry.rs:1");
+  expect(text(line.querySelector(".tf-cmd-file"))).toBe("code");
+  expect(text(line.querySelector(".tf-cmd-end"))).toBe("retry.rs:1");
+  expect(items()[0]!.querySelector(".tf-path")).toBeNull();
+});
+
 test("at a file, an application with no file command opens the file's folder, and says so on its line (2026-11-16)", async () => {
   await draw(view("/Users/mara/code/payout-service"), "src/sepa/retry.rs");
   target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();

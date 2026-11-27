@@ -27,8 +27,10 @@
 .tf-stg-nav a.tf-stg-child { padding-left: 24px; }
 /* A closed fold holding the open page: the open row's fill as an edge, as Docs' tree marks it. */
 .tf-stg-fold > summary.tf-holds { box-shadow: inset 2px 0 0 var(--sel-row); }
-.tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
-.tf-stg-h { margin-bottom: 16px; }
+/* The column (#2518, Björn: Settings felt cramped): wide enough for a table of commands or paths to show them, the gutter
+   growing with the window, and room above and under each section. A paragraph keeps its own measure (`.tf-stg-p`). */
+.tf-stg-body { padding: 24px clamp(24px, 3vw, 44px) 64px; max-width: 1080px; min-width: 0; }
+.tf-stg-h { margin-bottom: 20px; }
 .tf-stg-h h1 {
   font-size: calc(var(--t-3xl) * var(--fs)); line-height: var(--control-h); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 85; font-stretch: 85%; display: flex; align-items: center; gap: 10px;
 }
@@ -37,10 +39,10 @@
    title line (#2284), laid out by the canonical header's rule in dialogs.css. */
 .tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
-.tf-stg-sec { margin-top: 26px; }
-.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 8px; }
-.tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
-.tf-stg-gap { margin-top: 14px; }
+.tf-stg-sec { margin-top: 34px; }
+.tf-stg-sec h2 { font-size: calc(var(--t-lg) * var(--fs)); font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 88; font-stretch: 88%; margin: 0 0 10px; }
+.tf-stg-p { font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin: 0 0 12px; max-width: 72ch; line-height: 1.5; }
+.tf-stg-gap { margin-top: 16px; }
 /* *Load the Tidewater dataset* (`TfLoadDemo`, ux31): both labels in one cell, the hidden one keeping its room, so
    *Loading…* does not narrow the button and move what stands beside it. */
 .tf-ld-demo { display: inline-grid; }
@@ -49,7 +51,7 @@
 /* A control sits at the top of its row, its text on one line with its label's first, however long the description runs.
    A switch and a textarea have no line of text to share, so they start at the top instead. */
 .tf-stg-row {
-  display: grid; grid-template-columns: minmax(240px, 46%) minmax(0, 1fr); gap: 16px; padding: 11px 0;
+  display: grid; grid-template-columns: minmax(240px, 44%) minmax(0, 1fr); gap: 24px; padding: 14px 0;
   border-bottom: 1px solid var(--rule-2); align-items: first baseline;
 }
 .tf-stg-row:has(.tf-stg-sw, textarea) { align-items: start; }
@@ -58,7 +60,7 @@
 .tf .tf-stg-body textarea.tf-stg-in.tf-stg-in { height: auto; padding-block: 5px; }
 /* Where the section's column is too narrow for both, the label goes above its control: a control keeps its whole width. */
 @container (max-width: 720px) {
-  .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 }
 .tf-stg-l { font-weight: 500; }
 .tf-stg-l small { display: block; font-weight: var(--wt-ui, 400); font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
@@ -75,7 +77,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* Named at this weight because the one field height in dialogs.css is an `:is()` list that outweighs a two-class rule. */
 .tf .tf-stg-c.tf-stg-row1 .tf-stg-in { height: var(--control-h-sm); padding-block: 0; min-width: 70px; flex: 1 1 0; }
 .tf-stg-row1 .tf-select { flex: none; }
-.tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 12px 0 0; }
+.tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 16px 0 0; }
 .tf-stg-sw {
   width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
   position: relative; cursor: pointer; flex: none; padding: 0;
@@ -156,11 +158,18 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* *Make default*, ↑ and *Edit* (PR #2479, 2026-11-13). */
 .tf-stg-apps th:nth-child(4) { width: 212px; }
 .tf-stg-apps .tf-chip { white-space: nowrap; }
+/* Pull request worktrees (#2518): the columns are set here, not by the paths, so a long worktree cuts its middle and moves
+   no column; the number with its *closed* chip, and *Remove…*, keep their line at every UI size. */
+.tf-tbl.tf-stg-trees { table-layout: fixed; }
+.tf-stg-trees th:nth-child(1) { width: calc(132px * var(--size-ui)); }
+.tf-stg-trees th:nth-child(3) { width: calc(108px * var(--size-ui)); }
+.tf-stg-trees td:first-child { white-space: nowrap; }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
 /* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line.
-   Renderers' tables hold each cell to one line instead (below). */
-.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono) { white-space: normal; overflow-wrap: anywhere; }
+   Renderers' tables hold each cell to one line instead (below), and so does a `TfCommand` or a `TfPath` in any table (#2518):
+   each gives up its middle on one line, whole in its title, so it is never told to wrap here. */
+.tf-stg-body .tf-tbl:not(.tf-rnd-tbl) :is(td.tf-mono, td .tf-mono):not(.tf-cmd, .tf-path) { white-space: normal; overflow-wrap: anywhere; }
 .tf-stg-body .tf-tbl td.tf-right { white-space: nowrap; }
 /* Settings › Renderers' tables (the renderers-columns pass, 2026-11-20; Björn: "the command, the files, and so on completely
    explode the columns"): each cell is one line, as Code's *Local checkout* column is. A command is a `TfCommand`, a list a
@@ -181,6 +190,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-rnd-steps th:nth-child(3) { width: calc(80px * var(--size-ui)); }
 .tf-rnd-pipes th:nth-child(1) { width: 24%; }
 .tf-rnd-pipes th:nth-child(3) { width: 24%; }
+/* Schemas (#2518): a namespace, a location and the file answering them, each a `TfPath` that gives up its middle. */
+.tf-rnd-schemas th:nth-child(1), .tf-rnd-schemas th:nth-child(2) { width: 28%; }
+/* A downloaded file's row has *Download again* and *Forget*: both on one line at every UI size. */
+.tf-rnd-tbl.tf-rnd-schemas th:last-child { width: calc(212px * var(--size-ui)); }
 .tf-rnd-defaults th:nth-child(2), .tf-rnd-defaults th:nth-child(3) { width: 24%; }
 .tf-rnd-defaults th:last-child { width: calc(100px * var(--size-ui)); }
 .tf-rnd-defaults .tf-select { max-width: 100%; }
@@ -247,13 +260,13 @@ select.tf-stg-in { padding-inline-start: 4px; }
 /* The application page (PR #2479, 2026-11-13): each command's field over the line it will run, with *Try it* beside that line. */
 .tf-stg-c.tf-appcmd { flex-direction: column; align-items: stretch; gap: 6px; }
 .tf-appcmd .tf-stg-in { width: 100%; }
-/* *It will run*: one box two lines high in every state, waiting or filled, so the repository answering moves nothing under it, and a
-   command typed or a repository picked doesn't either (2026-11-17). Two lines hold the usual command whole; a longer one scrolls in
-   its box. A scrollbar coming may wrap the words again inside it, which moves nothing outside (no page keeps a gutter, tf-css.test). */
+/* *It will run*: at least two lines high in every state, waiting or filled, so the repository answering moves nothing under it for the
+   usual command (2026-11-17), and as tall as the command it shows past that (#2518, Björn: a long command was trapped in a two-line
+   box that scrolled): every line of it is read where it stands, no scrollbar in it. */
 .tf-apprun { display: flex; align-items: flex-start; gap: 8px; font-size: calc(var(--t-sm) * var(--fs)); }
 .tf-apprun-box {
-  flex: 1 1 auto; min-width: 0; box-sizing: border-box; height: 44px; line-height: 19px; padding: 3px 8px;
-  overflow-y: auto; background: var(--sheet-2); border-radius: 4px;
+  flex: 1 1 auto; min-width: 0; box-sizing: border-box; min-height: 44px; line-height: 19px; padding: 3px 8px;
+  background: var(--sheet-2); border-radius: 4px;
 }
 .tf-apprun code { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-apppage .tf-phs { margin: 4px 0 6px; }
@@ -514,8 +527,15 @@ button.tf-thm-sw { cursor: pointer; }
 .tf-upd-h2 { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
 .tf-upd-h2 h2 { margin: 0; }
 .tf-upd-h2 a { margin-left: auto; font-size: calc(var(--t-sm) * var(--fs)); }
-/* The notes: a room of one height, scrolled inside, so a long release never grows the page. */
-.tf-upd-notes { border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); height: 250px; overflow: auto; padding: 12px 16px; font-size: calc(var(--t-sm) * var(--fs)); line-height: 1.5; }
+/* The notes: a room of one height, scrolled inside, so a long release never grows the page; the height follows the window, not the
+   notes, so it moves nothing either (#2518: 250 px read as a slot). The room pads the notes and gives them its type, as a panel
+   does its Markdown (markdown.css): the Markdown adds no padding of its own, and its headings are steps of the room's size, not
+   a file page's. */
+.tf-upd-notes { border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); height: clamp(320px, 52vh, 640px); overflow: auto; padding: 14px 20px 18px; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.55; }
+.tf-upd-notes .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); line-height: 1.55; }
+.tf-upd-notes .tf-md h1 { font-size: calc(var(--t-xl) * var(--fs)); padding-bottom: 6px; }
+.tf-upd-notes .tf-md h2 { font-size: calc(var(--t-lg) * var(--fs)); margin-top: 20px; padding-bottom: 4px; }
+.tf-upd-notes .tf-md :is(h3, h4, h5, h6) { font-size: calc(var(--t-md) * var(--fs)); margin-top: 16px; }
 .tf-upd-lost { margin: 8px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule-2); }
 .tf-upd-lost li { padding: 7px 0; border-bottom: 1px solid var(--rule-2); font-size: calc(var(--t-sm) * var(--fs)); }
 /* ---------- Settings › Appearance › Theme (ADR-0055; the mockups' `theme-mock.css`, `.tf-apt-*`). Everything else on
