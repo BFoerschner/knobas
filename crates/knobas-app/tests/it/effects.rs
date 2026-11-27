@@ -697,3 +697,48 @@ async fn a_branch_update_reads_back_the_head_branch_tip_without_a_run() {
     the_run_still_follows(&state, &shared, id).await;
     state.scheduler.shutdown().await;
 }
+
+/// **An effect waits behind a run of its source only so long** (ADR-0064
+/// rule 3, said rather than waited on): with the tracker's lock held, as a
+/// run that may not stand aside holds it (one a person pressed, a first sync,
+/// a backfill), the merge's repository is still read back and the run of the
+/// forge after the write still begins and finishes while that lock is held.
+/// The linked ticket is not read; that run or the tracker's next brings it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_effect_behind_a_run_that_does_not_stand_aside_holds_up_nothing() {
+    let (state, shared) = fixture("effects_patience").await;
+    let mut tracker_run = state.pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(TRACKER)
+        .execute(&mut *tracker_run)
+        .await
+        .unwrap();
+    shared.door.add_permits(1_000);
+
+    let id = landed(
+        &state,
+        json!({ "MergePullRequest": { "entity": PULL, "style": "merge", "delete_branch": true } }),
+    )
+    .await;
+
+    eventually(
+        "a run of the forge that began after the write finishes while the tracker is held",
+        || async { runs_since(&state, FORGE, id).await.1 > 0 },
+    )
+    .await;
+    assert_eq!(
+        mirrored(&state, MAIN).await.unwrap()["commit"]["id"],
+        MERGED_MAIN
+    );
+    assert!(
+        !shared
+            .seen
+            .refreshed
+            .lock()
+            .unwrap()
+            .contains(&TICKET.to_owned()),
+        "the ticket was not read while its source was held"
+    );
+    tracker_run.rollback().await.unwrap();
+    state.scheduler.shutdown().await;
+}

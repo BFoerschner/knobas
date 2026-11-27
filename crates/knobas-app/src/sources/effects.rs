@@ -10,17 +10,27 @@
 //! not, walks the item as a parent (ADR-0047). So a pull request's repository
 //! is walked and a linked ticket read by id. **No read here runs a source.**
 //!
-//! Each read waits behind a run of its own source in flight
-//! ([`Lock::Wait`], ADR-0031's serialization), and stops a run that may stand
-//! aside once it waits, as the item's read-back does (ADR-0031 as amended
-//! 2026-11-24). Each one that read tells the shell on `item:refreshed` with
-//! the write's id, so a page holding the write's echo reads again.
+//! Each read waits behind a run of its own source in flight (ADR-0031's
+//! serialization), and stops a run that may stand aside once it waits, as the
+//! item's read-back does (ADR-0031 as amended 2026-11-24). It waits at most
+//! [`EFFECT_PATIENCE`] ([`Lock::WaitAtMost`]): a run that may not stand
+//! aside (one a person pressed, a first sync, a backfill) can last minutes,
+//! and the run of the write's own source and every caller that waits out the
+//! write's follow-up wait on this read. One that runs out answers
+//! [`EffectAnswer::RunInFlight`], said rather than waited on (ADR-0064 rule
+//! 3). Each one that read tells the shell on `item:refreshed` with the
+//! write's id, so a page holding the write's echo reads again.
 
 use knobas_core::delivery::Effect;
 use knobas_core::write_queue::QueuedWrite;
 use knobas_source::WriteOp;
 use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::Scheduler;
+
+/// How long an effect's read waits behind a run of its source before it
+/// gives up: past a run that stands aside, and past the other effects read
+/// in the same source, which are one item or one parent's walk each.
+const EFFECT_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The kind a ticket is mirrored as, whichever source holds it: what a
 /// [`Effect::LinkedTickets`] reads.
@@ -70,6 +80,9 @@ pub enum EffectAnswer {
     /// Its adapter reads neither it by id nor it as a parent: it shows after
     /// the next run of its source.
     NotOffered,
+    /// A run of its source held it past [`EFFECT_PATIENCE`], so nothing was
+    /// read: it shows when that run, or the next, ends.
+    RunInFlight,
     /// Its source is turned off, so nothing was read.
     TurnedOff,
     /// The read failed, or could not be asked, and nothing changed.
@@ -96,8 +109,7 @@ impl EffectAnswer {
             Ok(RefreshOutcome::Refreshed | RefreshOutcome::Gone) => Self::Read,
             Ok(RefreshOutcome::Unchanged) => Self::Unchanged,
             Ok(RefreshOutcome::NotOffered) => Self::NotOffered,
-            // Not under `Lock::Wait`; were it, the run in flight brings it.
-            Ok(RefreshOutcome::RunInFlight) => Self::NotOffered,
+            Ok(RefreshOutcome::RunInFlight) => Self::RunInFlight,
             Err(RefreshError::TurnedOff(_)) => Self::TurnedOff,
             Err(error) => Self::Failed {
                 reason: error.to_string(),
@@ -176,7 +188,8 @@ async fn named(
 }
 
 /// Read each effect `write` declares, all at once, each at its own source
-/// under that source's lock; `read_back` is the item already read back, which
+/// under that source's lock, waited for at most [`EFFECT_PATIENCE`];
+/// `read_back` is the item already read back, which
 /// is not read again. Answers what each read answered, in the order the op
 /// declares them.
 pub(crate) async fn read(
@@ -190,7 +203,12 @@ pub(crate) async fn read(
             .split_once(':')
             .map_or_else(String::new, |(source, _)| source.to_owned());
         let outcome = {
-            let refresh = super::refresh::refresh(scheduler, &entity, Some(write.id), Lock::Wait);
+            let refresh = super::refresh::refresh(
+                scheduler,
+                &entity,
+                Some(write.id),
+                Lock::WaitAtMost(EFFECT_PATIENCE),
+            );
             tokio::pin!(refresh);
             // As the item's read-back: once this read waits on a run that may
             // stand aside, that run is stopped (ADR-0031 as amended 2026-11-24).
