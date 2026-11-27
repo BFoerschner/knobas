@@ -1,0 +1,141 @@
+<!doctype html>
+<!--
+  Builds with Recent integrated (#2554): the layouts that were weighed, as small frames, and the bubbles as #2555
+  rules them, as the top bar draws them. A sheet to read, not a clickdummy; index.html is the chosen layout.
+  ?theme=light|dark.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Builds with Recent integrated: what was weighed</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../../app/src/lib/tf/tf.css">
+<style>
+  html, body { height: auto; overflow: auto; }
+  .sheet { max-width: 1180px; margin: 0 auto; padding: 28px 24px 64px; --fs: var(--size-ui); font: calc(var(--t-md) * var(--fs))/1.5 var(--sans); color: var(--ink); }
+  .sheet h1 { font: 600 calc(var(--t-3xl) * var(--fs))/1.2 var(--head); }
+  .sheet h2 { font: 600 calc(var(--t-xl) * var(--fs))/1.3 var(--head); margin: 34px 0 4px; }
+  .sheet > p { color: var(--ink-2); max-width: 76ch; margin-top: 6px; }
+  .sheet > p a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+  .tops .tf-nav a { cursor: default; }
+  .frames { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 18px; }
+  @media (max-width: 900px) { .frames { grid-template-columns: minmax(0, 1fr); } }
+  figure { margin: 0; }
+  figcaption { margin-top: 10px; }
+  figcaption b { font-weight: 600; }
+  figcaption .v { display: inline-block; margin-left: 6px; }
+  figcaption p { color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); margin-top: 3px; max-width: 68ch; }
+
+  /* A small window: the app's surfaces at a third of their size, words only where they carry the idea. */
+  .w { height: 300px; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--paper); display: grid; grid-template-rows: 18px minmax(0, 1fr); font-size: 10px; line-height: 1.2; }
+  .w.pick { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .w-top { background: var(--sheet); border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 8px; padding: 0 8px; color: var(--ink-2); }
+  .w-top b { color: var(--ink); font-weight: 800; }
+  .w-top u { text-decoration: none; color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); padding: 3px 0; }
+  .w-body { display: grid; grid-template-columns: 118px minmax(0, 1fr); min-height: 0; }
+  .w-body.three { grid-template-columns: 118px minmax(0, 1fr) 150px; }
+  .w-rail { background: var(--sheet); border-right: 1px solid var(--rule); padding: 6px; display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: hidden; }
+  .w-main { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; overflow: hidden; }
+  .w-side { background: var(--sheet); border-left: 1px solid var(--rule); padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden; }
+  .r { height: 11px; display: flex; align-items: center; gap: 4px; border-radius: 3px; padding: 0 4px; color: var(--ink-2); white-space: nowrap; }
+  .r.on { background: var(--sel-row); color: var(--on-sel-row); }
+  .r.in { margin-left: 8px; } .r.in2 { margin-left: 16px; }
+  .r > s { text-decoration: none; margin-left: auto; display: inline-flex; gap: 2px; }
+  .d { width: 5px; height: 5px; border-radius: 50%; flex: none; background: var(--ok); }
+  .d.e { background: var(--err); } .d.i { background: var(--info); } .d.n { background: var(--rule); }
+  .l { height: 4px; border-radius: 2px; background: var(--rule); flex: none; }
+  .l.k { background: var(--ink-2); opacity: .55; }
+  .seg { align-self: flex-start; display: inline-flex; border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; margin-bottom: 2px; }
+  .seg span { padding: 1px 5px; color: var(--ink-2); background: var(--sheet); }
+  .seg .on { background: var(--fill); color: var(--on-fill); }
+  .t { font-weight: 600; color: var(--ink); font-size: 11px; }
+  .cap { color: var(--ink-2); }
+  .tbl { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; flex: none; }
+  .tr { height: 13px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border-bottom: 1px solid var(--rule-2); flex: none; }
+  .tr:last-child { border-bottom: 0; }
+  .bar { background: var(--sheet); border: 1px solid var(--rule); border-radius: 3px; height: 13px; flex: none; }
+  .lanes { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; flex: 1; display: flex; flex-direction: column; background-image: repeating-linear-gradient(90deg, var(--rule-2) 0 1px, transparent 1px 12.5%); }
+  .lane { height: 14px; border-bottom: 1px solid var(--rule-2); position: relative; flex: none; }
+  .lane i { position: absolute; top: 4px; height: 6px; border-radius: 2px; background: var(--ok); opacity: .8; }
+  .lane i.e { background: var(--err); } .lane i.i { background: var(--info); }
+
+  /* The bubbles, on the app's own top bar. */
+  .tops { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 14px; }
+  @media (max-width: 900px) { .tops { grid-template-columns: minmax(0, 1fr); } }
+  .tops .tf-top { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .tops p { color: var(--ink-2); font-size: calc(var(--t-sm) * var(--fs)); margin-top: 6px; }
+  .tf-count.tf-ok { background: var(--ok-bg); color: var(--ok); }
+  .tf-nav-ub { display: inline-flex; gap: 3px; }
+  table.what { margin-top: 16px; border-collapse: collapse; font-size: calc(var(--t-sm) * var(--fs)); max-width: 900px; }
+  table.what th, table.what td { text-align: left; vertical-align: top; padding: 7px 14px 7px 0; border-bottom: 1px solid var(--rule); }
+  table.what th { color: var(--ink-2); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <h1>Builds with Recent integrated: what was weighed</h1>
+  <p>Four ways to put the pipelines and the newest runs on one page (#2554). The first is drawn in full in <a href="index.html">the clickdummy</a>. README.md argues the choice.</p>
+
+  <div class="frames">
+    <figure>
+      <div class="w pick" id="fa"></div>
+      <figcaption><b>A. The rail scopes one stream.</b><span class="tf-chip tf-ok v">Chosen</span>
+        <p>The rail's first row is <i>All pipelines</i>. Whatever row is selected, everything, a folder or a pipeline, is whose runs the one table lists, newest first. The switch is gone because there is nothing left to switch: Recent is what the page shows when nothing narrower is picked.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="w" id="fb"></div>
+      <figcaption><b>B. A shelf of the newest runs over the pipeline.</b>
+        <p>Always in view, and the pipeline's page stays as it is. But it is two run tables stacked: at 1100 × 600 the shelf takes the rows above the fold and the pipeline's own runs start under it, a pipeline that just ran shows the same run twice, and the two tables need different columns, so they never line up.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="w" id="fc"></div>
+      <figcaption><b>C. The newest runs as a third column.</b>
+        <p>Works from about 1500 px. At 1100 three columns leave the pipeline's table about 420 px, so the column has to fold behind a button, which is the switch again in a new place. And a 280 px column gives a run two short lines, where the folders are the first thing cut: the complaint this ticket starts from.</p></figcaption>
+    </figure>
+    <figure>
+      <div class="w" id="fd"></div>
+      <figcaption><b>D. Lanes: pipelines down, time across.</b>
+        <p>A run can't be mistaken for another pipeline's, it sits in its lane, and overlap shows. But with dozens of pipelines most lanes are empty on any day, the newest run is no longer at the top, and branch, who started it and tests have nowhere to stand. It answers "what ran at the same time", not "what ran last". Maybe later, as a view of one folder.</p></figcaption>
+    </figure>
+  </div>
+  <p>Also weighed, not drawn: keep both views and only pin the switch to one place. It stops the jump and nothing else. Recent still has no rail, a folder still can't be asked for its runs, and the two views keep two filters and two <i>Mark all as read</i>.</p>
+
+  <h2>The bubbles, as #2555 rules them</h2>
+  <p>Up to three numbers after <i>Builds</i>, blue, green, red, each gone at zero. The same three stand at the end of every rail row, each in its own column, and <i>All pipelines</i> carries the same totals as the top bar.</p>
+  <div class="tops" id="tops"></div>
+  <table class="what">
+    <tr><th></th><th>Counts</th><th>Goes when</th></tr>
+    <tr><td><span class="tf-count tf-info">2</span></td><td>Runs running that you have not opened.</td><td>The run ends, you open it, or a <i>Mark as read</i> takes it. One you opened while it ran ends read. One you did not open ends red or green.</td></tr>
+    <tr><td><span class="tf-count tf-ok">2</span></td><td>Runs that passed since Builds was last in front. A count, with no row of its own to tick off.</td><td>You look at Builds: the top bar's number goes at once, and the rail's and the dots stay for that visit so you can see what they were. Or <i>Mark all as read</i>.</td></tr>
+    <tr><td><span class="tf-count tf-err">4</span></td><td>Failed runs you have not read.</td><td>You open the run, or a <i>Mark as read</i>: the run's, a pipeline's or a folder's <i>Mark N runs as read</i>, or <i>Mark all as read</i>. Scrolling past it does nothing.</td></tr>
+  </table>
+</div>
+
+<script>
+document.documentElement.dataset.theme = new URLSearchParams(location.search).get("theme") ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+const bar0 = `<div class="w-top"><b>knobas</b><span>Tickets</span><span>Inbox</span><span>Code</span><u>Builds</u><span>Docs</span></div>`;
+const line = (w, k = "") => `<span class="l ${k}" style="width:${w}px"></span>`;
+const row = (tone, widths) => `<div class="tr"><span class="d ${tone}"></span>${widths.map((w, i) => (w > 8 ? line(w, i === 1 ? "k" : "") : "")).join("")}</div>`;
+const rows = (n, shape) => Array.from({ length: n }, (_, i) => row(["i", "e", "", "", "e", "", "", "i", "", ""][i % 10], shape.map((w) => w + ((i * 7) % 11) - 5))).join("");
+const tree = (on) => [["Data", "", 0], ["Logistics", "", 0], ["Booking", "in", 1], ["Customs", "in", 0], ["Payments", "", 0], ["Payouts", "in", 2], ["Integration tests", "in2", 3], ["Build", "in2", 0], ["Platform", "", 0]]
+  .map(([name, cls, mark], i) => `<div class="r ${cls}${on === i ? " on" : ""}">${name}${mark ? `<s>${mark & 1 ? '<span class="d i"></span>' : ""}${mark & 2 ? '<span class="d e"></span>' : ""}</s>` : ""}</div>`).join("");
+const rail = (on, head) => `<div class="w-rail">${head}${tree(on)}</div>`;
+const all = (on) => `<div class="r${on ? " on" : ""}"><b>All pipelines</b><s><span class="d i"></span><span class="d"></span><span class="d e"></span></s></div>`;
+
+document.getElementById("fa").innerHTML = bar0 + `<div class="w-body">${rail(-1, all(true))}<div class="w-main"><span class="t">All pipelines</span><div class="bar"></div><span class="cap">Today</span><div class="tbl">${rows(13, [30, 52, 70, 44, 22])}</div></div></div>`;
+document.getElementById("fb").innerHTML = bar0 + `<div class="w-body">${rail(6, "")}<div class="w-main"><span class="cap">Newest runs, every pipeline</span><div class="tbl">${rows(5, [30, 52, 70, 44, 22])}</div><span class="t">Integration tests</span><div class="bar"></div><div class="tbl">${rows(7, [26, -9, 90, 44, 22])}</div></div></div>`;
+document.getElementById("fc").innerHTML = bar0 + `<div class="w-body three">${rail(6, "")}<div class="w-main"><span class="t">Integration tests</span><div class="bar"></div><div class="tbl">${rows(13, [26, -9, 60, 30])}</div></div><div class="w-side"><span class="t">Newest runs</span>${Array.from({ length: 9 }, (_, i) => `<div><div class="r">${`<span class="d ${["i", "e", "", ""][i % 4]}"></span>`}${line(70 + (i * 13) % 30, "k")}</div><div class="r">${line(96 - (i * 9) % 26)}</div></div>`).join("")}</div></div>`;
+const lane = (blocks) => `<div class="lane">${blocks.map(([x, w, t]) => `<i class="${t ?? ""}" style="left:${x}%;width:${w}%"></i>`).join("")}</div>`;
+document.getElementById("fd").innerHTML = bar0 + `<div class="w-body"><div class="w-rail"><div class="r"></div>${tree(-1)}</div><div class="w-main"><span class="cap">Thu · Fri · today</span><div class="lanes">`
+  + [[[12, 6]], [], [[30, 4], [61, 4], [88, 5, "i"]], [[8, 9, "e"], [55, 9]], [], [[20, 3], [42, 3], [70, 3], [90, 4, "i"]], [[22, 5, "e"], [72, 5, "e"]], [[19, 3], [41, 3], [69, 3]], [[50, 2]], [], [[5, 12]], []].map(lane).join("") + `</div></div></div>`;
+
+const bar = (counts) => `<header class="tf-top"><span class="tf-brand">knobas</span><nav class="tf-nav" aria-label="Main"><a href="#"${counts.here ? "" : ' aria-current="page"'}>Tickets</a><a href="#"${counts.here ? ' aria-current="page"' : ""}>Builds${counts.n.length ? ` <span class="tf-nav-ub">${counts.n.map(([tone, n]) => `<span class="tf-count tf-${tone}">${n}</span>`).join("")}</span>` : ""}</a><a href="#">Docs</a></nav></header>`;
+document.getElementById("tops").innerHTML = [
+  [{ here: false, n: [["info", 2], ["ok", 2], ["err", 4]] }, "From any other page: two running, two passed since you last looked, four failed and unread."],
+  [{ here: true, n: [["info", 2], ["err", 4]] }, "With Builds in front: looking at the page is what clears the green."],
+  [{ here: true, n: [] }, "After Mark all as read: nothing, until a run starts or fails."],
+].map(([counts, words]) => `<div>${bar(counts)}<p>${words}</p></div>`).join("");
+addEventListener("click", (event) => { if (event.target.closest('a[href="#"]')) event.preventDefault(); });
+</script>
+</body>
+</html>

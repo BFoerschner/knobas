@@ -1,0 +1,132 @@
+/* Builds with Recent integrated (#2554). Everything else on the page is the app's own stylesheet (tf.css).
+
+   ================================================================================
+   Proposed additions to builds.css. They replace the "Builds' *Recent*" block
+   (`.tf-bview`, `.tf-bv-recent`, `.tf-run-pname`, `.tf-run-place` and its container
+   steps); `.tf-recentbar` and `.tf-recent-count`'s room rule stay.
+   ================================================================================ */
+
+/* ---------- the rail: *All pipelines* first, then the tools, then the tree ---------- */
+/* The first row stands outside the list, so the tools never narrow it and it never scrolls away. 16 px on the right is
+   the list's 8 px and its scrollbar's 8 px, kept whether it scrolls or not, so the three columns line up down the rail. */
+.tf-pl-home { padding: 8px 16px 0 8px; }
+.tf-pl-home + .tf-pl-top { padding-top: 8px; }
+.tf-pl .tf-pl-list { scrollbar-gutter: stable; }
+.tf-pl-root .tf-pi-nm { font-weight: 600; }
+.tf-pl-rooticon { flex: none; width: 12px; height: 12px; color: var(--ink-2); }
+.tf-pi[aria-current="true"] .tf-pl-rooticon { color: inherit; }
+
+/* The three columns at every row's end: blue, green, red, each in its own place on every row, so a number that comes
+   or goes moves nothing, and a scan down one column reads one colour. Two figures' room each. */
+.tf-ub { flex: none; display: inline-grid; grid-template-columns: repeat(3, 20px); column-gap: 2px; margin-left: auto; padding-left: 6px; }
+.tf-pi-when + .tf-ub, .tf-pi-why + .tf-ub { margin-left: 0; }
+.tf-ub > i {
+  height: 16px; border-radius: 8px; font-style: normal; font-weight: 600; font-size: calc(var(--t-2xs) * var(--fs)); line-height: 16px;
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.tf-ub > i:empty { visibility: hidden; }
+.tf-ub-b { background: var(--info-bg); color: var(--info); }
+.tf-ub-g { background: var(--ok-bg); color: var(--ok); }
+.tf-ub-r { background: var(--err-bg); color: var(--err); }
+/* On the selected row the tint is the sheet's, so it goes; the tone stays (design system, *A status tag on the pill*). */
+.tf-pi[aria-current="true"] .tf-ub > i { background: color-mix(in srgb, currentColor 20%, transparent); }
+/* Unseen until the tallies are read: the room is the row's from its first frame. */
+.tf-ub.tf-unseen { visibility: hidden; }
+
+/* A folder is a place now: its name selects it, its chevron folds it. The chevron is the app's one fold mark. */
+.tf-fold-tog { flex: none; width: 20px; height: 100%; margin: 0 -4px; display: grid; place-items: center; cursor: pointer; color: var(--ink-2); }
+.tf-fold-tog::before { content: ""; width: 6px; height: 6px; margin-bottom: 1px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
+.tf-tfold[aria-expanded="true"] > .tf-fold-tog::before { transform: rotate(45deg); margin-bottom: 3px; }
+/* How many pipelines it holds stands after its name, quiet, so the row's end is the three columns alone. */
+.tf-pl .tf-fold-n { flex: none; min-width: 0; text-align: left; color: var(--ink-2); font-size: calc(var(--t-2xs) * var(--fs)); font-weight: var(--wt-ui, 400); font-variant-numeric: tabular-nums; }
+.tf-fold-n.tf-unseen { visibility: hidden; }
+.tf-pi[aria-current="true"] :is(.tf-fold-nm, .tf-fold-tog) { color: inherit; }
+.tf-pi[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
+
+/* What a fold's pipelines share gives way before what tells them apart: the columns cost each row 64 px, and the dim
+   prefix is the part the folder above already says. */
+.tf-pl .tf-pi-nm { display: flex; }
+.tf-pl .tf-pi-pre { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.tf-pi-rest { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* Where the rail is at its narrow width the time gives way to the columns too: the stream beside it says every time,
+   and the row's title still has it. */
+@media (max-width: 1240px) { .tf-pl .tf-pi-when { display: none; } }
+
+/* ---------- the top bar: up to three numbers after *Builds* ---------- */
+.tf-count.tf-ok { background: var(--ok-bg); color: var(--ok); }
+.tf-nav-ub { display: inline-flex; gap: 3px; }
+
+/* ---------- the stream: one run table, whatever the rail has selected ---------- */
+/* The dot in the gutter takes the colour of the bubble that counts its run. */
+.tf-runtbl .tf-unread.tf-u-b { background: var(--info); }
+.tf-runtbl .tf-unread.tf-u-g { background: var(--ok); }
+.tf-runs.tf-stream .tf-run-no { width: 96px; }
+.tf-runs.tf-stream tr.tf-row:focus-within td { background: var(--sheet-2); }
+
+/* Who ran: the folders end at one line and the names start at it, on every row. The folders are cut at their start, so
+   the folder nearest the name stays; they are a link to that folder. The name gives up its middle, never its last word. */
+.tf-run-id { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr); column-gap: 7px; align-items: baseline; min-width: 0; }
+.tf-stream[data-paths="short"] .tf-run-id { grid-template-columns: minmax(0, .36fr) minmax(0, 1fr); }
+.tf-stream[data-paths="none"] .tf-run-id { grid-template-columns: minmax(0, 1fr); }
+.tf-run-path {
+  justify-self: end; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+  font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); text-decoration: none;
+}
+.tf-run-path > bdi { direction: ltr; unicode-bidi: isolate; }
+.tf .tf-run-path:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.tf-run-who { display: flex; align-items: baseline; gap: 1ch; min-width: 0; }
+/* `pre`: a name's own spaces stand at the seam of its two parts. Only the lead shrinks, down to its ellipsis; the last
+   word is cut only where it alone is wider than the cell. */
+.tf-run-nm { display: flex; min-width: 0; white-space: pre; font-weight: 500; color: var(--ink); }
+.tf-run-nmh { flex: 0 1 auto; min-width: 2.4em; overflow: hidden; text-overflow: ellipsis; }
+.tf-run-nmt { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tf-run-nmh + .tf-run-nmt { max-width: calc(100% - 2.4em); }
+.tf-run-pno { flex: none; color: var(--ink-2); text-decoration: none; font-variant-numeric: tabular-nums; }
+.tf .tf-run-pno:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The stream sheds by its own width, later than a pipeline's runs do, because the name's cell comes first: it never has
+   less than about 300 px. The duration's bar goes under 1300, the tests under 1180, who started it under 1000. */
+.tf-runs.tf-stream .tf-run-br { width: 180px; }
+.tf-runs.tf-stream .tf-run-trig { width: 150px; }
+.tf-runs.tf-stream .tf-run-tests { width: 130px; }
+.tf-runs.tf-stream .tf-run-dur { width: 150px; }
+@container (min-width: 1300px) { .tf-runs.tf-stream .tf-run-br { width: 22%; } }
+@container (max-width: 1299px) {
+  .tf-runs.tf-stream .tf-run-dur { width: 78px; }
+  .tf-runs.tf-stream .tf-durbar { display: none; }
+}
+@container (max-width: 1179px) { .tf-runs.tf-stream td.tf-run-tests { display: none; } }
+@container (max-width: 999px) {
+  .tf-runs.tf-stream td.tf-run-trig { display: none; }
+  .tf-runs.tf-stream .tf-run-br { width: 150px; }
+}
+
+/* A run in flight says how long it has run, in the place its duration will stand: a bar of the pipeline's usual time
+   filling in the info tone, then the clock, tabular. When it ends the same bar and the same words say what it took. */
+.tf-durbar.tf-live .tf-durbar-track { fill: var(--rule-2); opacity: 1; }
+.tf-durbar.tf-live .tf-durbar-fill { fill: var(--info); opacity: 1; }
+.tf-run-dur .tf-info { color: var(--info); }
+
+/* Waiting: the table's box and its rows at their own height from the first frame, one line saying what is read. */
+.tf-runtbl.tf-readrows td { height: 34px; }
+.tf-dayh.tf-unseen, .tf-fcount-n.tf-unseen { visibility: hidden; }
+/* Nothing to list: the words stand in the table's box, so the header and the bar above are where they always are. */
+.tf-stream-none { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; min-height: 170px; display: grid; place-items: center; }
+/* *Mark all as read* says so in words where the bar has the room, and is the rail's two ticks where it has not. */
+.tf-readall { gap: 6px; }
+.tf-readall svg { width: 16px; height: 16px; flex: none; }
+@media (max-width: 1240px) { .tf-readall { width: var(--control-h-sm); padding: 0; justify-content: center; } .tf-readall > span { display: none; } }
+
+/* ================================================================================
+   Mockup only: the yellow bar, and what it switches.
+   ================================================================================ */
+.mk {
+  position: fixed; right: 12px; bottom: 40px; z-index: 50; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; max-width: min(860px, 82vw);
+  background: var(--card); color: var(--card-ink); border: 1px solid var(--card-2); border-radius: 6px; padding: 6px 8px; font: 12px var(--sans); box-shadow: var(--shadow);
+}
+.mk b { font-weight: 700; margin-right: 4px; }
+.mk i { font-style: normal; opacity: .65; margin-left: 6px; }
+.mk :is(button, a) { border: 1px solid color-mix(in srgb, var(--card-ink) 30%, transparent); border-radius: 4px; padding: 2px 8px; background: color-mix(in srgb, var(--card-lift) 30%, transparent); color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
+.mk button[aria-pressed="true"] { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+.mk-said { flex-basis: 100%; min-height: 1.4em; opacity: .8; }
+:root[data-bar="0"] .mk { display: none; }
