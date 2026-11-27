@@ -41,6 +41,7 @@ mod demo;
 mod demo_delete_during_load;
 mod dependencies_ipc;
 mod docs_ipc;
+mod effects;
 mod entity;
 mod entity_role;
 mod entity_view;

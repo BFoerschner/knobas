@@ -892,7 +892,10 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// reporting the follow-up read's failure as the write's would tell the user
 /// their edit did not go when it did. A failed refresh still leaves the run,
 /// and the next scheduled sync re-reads the source either way.
-pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
+pub(crate) async fn after_landing(
+    scheduler: &Scheduler,
+    write: &QueuedWrite,
+) -> Vec<super::effects::EffectRead> {
     let entity = read_back(&scheduler.deps().pool, write).await;
     let refresh = crate::sources::refresh::refresh(
         scheduler,
@@ -909,7 +912,7 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     let refreshed = tokio::select! {
         biased;
         refreshed = &mut refresh => refreshed,
-        () = stand_aside_once_waiting(scheduler, write) => refresh.await,
+        () = stand_aside_once_waiting(scheduler, &write.source_id, write.id) => refresh.await,
     };
     if let Err(error) = refreshed {
         tracing::warn!(
@@ -925,6 +928,10 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     // fix, 2026-11-25): that run catches the build where it stands then, and
     // the next scheduled one is minutes away.
     super::follow_run::follow_if_in_flight(scheduler, &write.source_id, &entity).await;
+    // What else the write moved, as its op declares it, each read at its own
+    // source before the run (ADR-0064): the run reads only the write's own
+    // source, takes minutes at size, and stands aside for a later write.
+    let effects = super::effects::read(scheduler, write, &entity).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
@@ -933,6 +940,7 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             "a write landed but the mirror could not be re-read for it"
         );
     }
+    effects
 }
 
 /// How long a landed write's read-back is watched for its wait on the run's
@@ -943,8 +951,12 @@ const ASIDE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 /// Stop the run of `write`'s source in flight, where one that may stand
 /// aside goes and the read-back's ask for the lock is waiting on it
 /// ([`Scheduler::stand_aside`]); answers once that is done or given up on.
-async fn stand_aside_once_waiting(scheduler: &Scheduler, write: &QueuedWrite) {
-    if !scheduler.may_stand_aside(&write.source_id).await {
+pub(super) async fn stand_aside_once_waiting(
+    scheduler: &Scheduler,
+    source_id: &str,
+    write_id: i64,
+) {
+    if !scheduler.may_stand_aside(source_id).await {
         return;
     }
     let pool = &scheduler.deps().pool;
@@ -956,10 +968,10 @@ async fn stand_aside_once_waiting(scheduler: &Scheduler, write: &QueuedWrite) {
         .fetch_one(pool)
         .await;
         if matches!(waiting, Ok(true)) {
-            if scheduler.stand_aside(&write.source_id, write.id).await {
+            if scheduler.stand_aside(source_id, write_id).await {
                 tracing::info!(
-                    source = %write.source_id,
-                    write_id = write.id,
+                    source = %source_id,
+                    write_id,
                     "a run stood aside so the landed write's read-back went first"
                 );
             }
