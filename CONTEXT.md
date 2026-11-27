@@ -545,7 +545,7 @@ A curated export in the backup's own format restricted to tables, named `knobas-
 ## Surfaces
 
 **Site**:
-A [source](#source)'s own website shown inside knobas: a native web view under the top bar, one per source, on a page at `#/site/<source id>`, offered once *Open its pages inside knobas* is on for the source. It can reach nothing of knobas, and knobas reads nothing of it but its address and its title. Going to another knobas page hides it and keeps its page alive; closing it is the bar's × or ⌘W, and asks first when the page holds unsaved changes. `Esc` is the site's, and a second `Esc` within half a second goes back (ADR-0050).
+A [source](#source)'s own website shown inside knobas: a native web view under the top bar, one per source, on a page at `#/site/<source id>`, offered once *Open its pages inside knobas* is on for the source. It can reach nothing of knobas, and knobas reads nothing of it but its address and its title. Going to another knobas page hides it and keeps its page alive; closing it is the bar's × or ⌘W, and asks first when the page holds unsaved changes. `Esc` is the site's, and a second `Esc` within half a second goes to the page knobas holds for where the site stands, else for the item it was opened at, never to what opened the site (ADR-0050; #2559).
 _Avoid_: browser, tab, web view (the mechanism), embed (a page's own HTML in a frame), room (retired)
 
 **Site session**:
