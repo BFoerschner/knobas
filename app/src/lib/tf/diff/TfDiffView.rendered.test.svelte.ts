@@ -83,6 +83,45 @@ test("a card's own press stands until the toggle is pressed again, which clears 
   expect([shows("README.md"), shows("docs/b.md")]).toEqual(["lines", "lines"]);
 });
 
+const png = (path: string): DiffFile => ({ path, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] });
+
+test("a Compare holding a binary file opens with the toggle on, drawing what it drew before; one press shows every file as lines (#2556)", () => {
+  draw([png("assets/logo.png"), file("README.md")]);
+  expect([shows("assets/logo.png"), shows("README.md")], "nothing renders differently on the open").toEqual(["rendered", "lines"]);
+  expect(pill().getAttribute("aria-pressed"), "the toggle says a file is drawn rendered").toBe("true");
+  expect(rendering.on, "nothing is kept for the open").toBe(false);
+  pill().click();
+  flushSync();
+  expect(pill().getAttribute("aria-pressed")).toBe("false");
+  expect(shows("assets/logo.png"), "the binary file follows the press").not.toBe("rendered");
+  expect(shows("README.md")).toBe("lines");
+  expect(rendering.on).toBe(false);
+  pill().click();
+  flushSync();
+  expect(pill().getAttribute("aria-pressed")).toBe("true");
+  expect([shows("assets/logo.png"), shows("README.md")]).toEqual(["rendered", "rendered"]);
+  expect(rendering.on).toBe(true);
+  key("d");
+  flushSync();
+  expect(pill().getAttribute("aria-pressed")).toBe("false");
+  expect(shows("assets/logo.png"), "turned off, a binary file goes to lines too").not.toBe("rendered");
+  expect(rendering.on).toBe(false);
+});
+
+test("a Compare with no file drawn rendered opens with the toggle off (#2556)", () => {
+  draw([file("README.md"), png("assets/blob.bin")]);
+  expect(shows("assets/blob.bin"), "no renderer draws it").not.toBe("rendered");
+  expect(pill().getAttribute("aria-pressed")).toBe("false");
+});
+
+test("a card's own Bytes on the only binary file leaves the toggle as it opened: a card's press overrides the toggle (#2556)", () => {
+  draw([png("assets/logo.png")]);
+  press("assets/logo.png", "Bytes");
+  flushSync();
+  expect(shows("assets/logo.png")).not.toBe("rendered");
+  expect(pill().getAttribute("aria-pressed")).toBe("true");
+});
+
 test("d toggles it, and is ignored while typing in a field", () => {
   draw([file("README.md")]);
   key("d");

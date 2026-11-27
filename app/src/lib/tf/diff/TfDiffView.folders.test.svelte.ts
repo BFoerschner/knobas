@@ -234,6 +234,25 @@ test("with every folder's output current, Run folder renders stays enabled and r
   expect(runAll().textContent).toBe("Stop all");
 });
 
+test("a binary file turns the toggle on at the open but groups no folder and draws no band; the kept choice does (#2556)", async () => {
+  const fake = fakeCompareBackend();
+  const png: DiffFile = { path: "assets/logo.png", old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] };
+  draw([png, file("docs/index.md")], fake);
+  await settle();
+  const pill = target.querySelector<HTMLButtonElement>(".tf-drendered")!;
+  expect(pill.getAttribute("aria-pressed")).toBe("true");
+  expect(target.querySelector(".tf-dfolder"), "nothing renders differently from before").toBeNull();
+  expect(target.querySelector(".tf-drun")).toBeNull();
+  pill.click();
+  await settle();
+  expect(pill.getAttribute("aria-pressed")).toBe("false");
+  pill.click();
+  await settle();
+  expect(pill.getAttribute("aria-pressed")).toBe("true");
+  expect(target.querySelector(".tf-dfolder")).not.toBeNull();
+  expect(target.querySelector(".tf-drun")).not.toBeNull();
+});
+
 test("Real files puts the folder's files back, and the pill clears it", async () => {
   const fake = fakeCompareBackend();
   rendering.set(true);

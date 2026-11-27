@@ -1078,14 +1078,28 @@
   /** The mode the reader picked per file; a binary file with a rendered mode opens in it (it has no lines). */
   let modes = $state.raw<Record<string, DiffMode>>({});
   /**
-   * A card's own press, else *Rendered* where the band's toggle is on or the file is binary (it has no lines) and a
+   * The reader pressed the band's *Rendered* (or `d`) in this diff (#2556): from then a file with no lines follows the
+   * toggle as every other file does.
+   */
+  let pressedHere = $state(false);
+  /** A file with no lines (binary, or its pipeline's output binary): until a press here it opens rendered, toggle or not. */
+  const noLines = (file: DrawnFile) => !pressedHere && (file.change === "binary" || pipedOf(file)?.file.change === "binary");
+  /**
+   * A card's own press, else *Rendered* where the band's toggle is on or the file has no lines ({@link noLines}) and a
    * renderer can draw both of its sides, else its lines.
    */
   // A sniffed card's plan gives it the switch and nothing else: the band never turns it, so nothing moves once drawn.
-  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary" || pipedOf(file)?.file.change === "binary") && hintPlanOf(file) ? "rendered" : "lines");
+  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || noLines(file)) && hintPlanOf(file) ? "rendered" : "lines");
+  /**
+   * What the toggle shows (#2556, Björn's option B): on where it is kept on, and on where a file of the list opens
+   * rendered with it off, so one press shows every file as lines. A card's own press does not move it. Such an open
+   * keeps nothing and groups no folder: folders group, and the folder-run band shows, where the kept choice is on.
+   */
+  const renderedShown = $derived(rendering.on || realFiles.some((file) => noLines(file) && hintPlanOf(file) !== null));
   /** The band's *Rendered*, and `d`: every card's own press goes, so the toggle says how every file shows. */
   function toggleRendered() {
-    rendering.set(!rendering.on);
+    rendering.set(!renderedShown);
+    pressedHere = true;
     modes = {};
     // A folder's *Real files* is an override as a card's press is; and a press groups again what came late (section 20).
     realFolders = new Set();
@@ -1535,7 +1549,7 @@
   const fileRoom = $derived.by(() => {
     // What each file's room reads, read once for all of them: a list of 10,000 files asked each of every file (the
     // stored-compare pass, 2026-11-14).
-    const [filling, read, shutBy, loaded, all, chosen, high, pill] = [fill !== null, lined, folds, loads, counted, modes, viewHeight, rendering.on];
+    const [filling, read, shutBy, loaded, all, chosen, high, pill, here] = [fill !== null, lined, folds, loads, counted, modes, viewHeight, rendering.on, pressedHere];
     const viewedNow = viewedSet;
     return new Map(
       cardRows.map((row) => {
@@ -1545,7 +1559,7 @@
         const key = keyOf(file);
         // A card open rendered is its header, the caption, the stage and the foot: constants known before a side is read.
         // Planned only where it may be rendered (picked so, or binary): a list of thousands plans none as it opens.
-        const planned = (chosen[key] ?? (pill || file.change === "binary" ? "rendered" : "lines")) === "rendered" ? planOf(file) : null;
+        const planned = (chosen[key] ?? (pill || (!here && file.change === "binary") ? "rendered" : "lines")) === "rendered" ? planOf(file) : null;
         const got = read[key];
         const waiting =
           file.made !== undefined
@@ -2126,7 +2140,7 @@
   <div class="tf-fchips">
     {#if list}
       <!-- Always drawn where the diff has its list: worked out per file, it would land late and move *Run pipelines*. -->
-      <button type="button" class="tf-drendered" aria-pressed={rendering.on} aria-keyshortcuts="d" title="Show files and folders as their renderers draw them: d" onclick={toggleRendered}
+      <button type="button" class="tf-drendered" aria-pressed={renderedShown} aria-keyshortcuts="d" title="Show files and folders as their renderers draw them: d" onclick={toggleRendered}
         >Rendered</button
       >
     {/if}
