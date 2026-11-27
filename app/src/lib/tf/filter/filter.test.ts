@@ -4,7 +4,7 @@
  */
 import { expect, test } from "vitest";
 
-import { countLine, emptyFilter, isFiltering, markPairs, marks, matchesAll, sliceMarks, toQuery, type FilterConfig } from "./filter";
+import { countLine, emptyFilter, isFiltering, markPairs, marks, matchesAll, runPairs, sliceMarks, toQuery, wordPairs, type FilterConfig } from "./filter";
 
 const config: FilterConfig = {
   id: "tickets-all",
@@ -113,4 +113,10 @@ test("markPairs splits text into plain and hit runs from UTF-16 pairs and an opt
   ]);
   // No overlapping marks returns one plain run
   expect(markPairs("ADProxy", [20, 25])).toEqual([{ text: "ADProxy", hit: false }]);
+});
+
+test("runs become the UTF-16 pairs of their marked ones, as the ranking answers (#2532)", () => {
+  expect(runPairs([{ text: "pay", hit: true }, { text: "out-", hit: false }, { text: "s", hit: true }, { text: "ervice", hit: false }])).toEqual([0, 3, 7, 8]);
+  expect(runPairs([{ text: "nothing", hit: false }])).toEqual([]);
+  expect(wordPairs("Payout payout", "pay")).toEqual([0, 3, 7, 10]);
 });

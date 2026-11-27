@@ -17,6 +17,7 @@ import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { runPairs } from "../../../tf/filter/filter";
 import { fuzzyRank } from "../../../tf/filter/fuzzy";
 import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
 
@@ -667,15 +668,7 @@ function manyProjects(): { key: string; value: string; detail: string }[] {
  */
 export function fakeFuzzyRank(text: string, haystacks: readonly string[]): { index: number; loose: boolean; marks: number[] }[] {
   const indexed = haystacks.map((haystack, index) => ({ haystack, index }));
-  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => {
-    const marks: number[] = [];
-    let at = 0;
-    for (const run of runs) {
-      if (run.hit) marks.push(at, at + run.text.length);
-      at += run.text.length;
-    }
-    return { index: option.index, loose: false, marks };
-  });
+  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => ({ index: option.index, loose: false, marks: runPairs(runs) }));
 }
 
 /**

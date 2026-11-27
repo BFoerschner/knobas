@@ -11,20 +11,13 @@
 import { flushSync } from "svelte";
 
 import type { FuzzyRanked } from "../../ipc/generated/search";
+import { runPairs } from "./filter";
 import { fuzzyRank } from "./fuzzy";
 
 /** `texts` ranked by `text`: each kept text's index and its matched letters as UTF-16 pairs. */
 export function rankLetters(text: string, texts: readonly string[]): FuzzyRanked[] {
   const indexed = texts.map((haystack, index) => ({ haystack, index }));
-  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => {
-    const marks: number[] = [];
-    let at = 0;
-    for (const run of runs) {
-      if (run.hit) marks.push(at, at + run.text.length);
-      at += run.text.length;
-    }
-    return { index: option.index, loose: false, marks };
-  });
+  return fuzzyRank(indexed, text, (entry) => entry.haystack).map(({ option, runs }) => ({ index: option.index, loose: false, marks: runPairs(runs) }));
 }
 
 /** The four ranking commands of `ipc/search`, over lists held in memory, and what each was sent. */

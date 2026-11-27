@@ -154,9 +154,14 @@ export function marks(text: string, typed: string): Mark[] {
 
 /** {@link marks} as pairs of start and end (#2532): what a ranked list's rows mark where the ranking did not answer. */
 export function wordPairs(text: string, typed: string): number[] {
+  return runPairs(marks(text, typed));
+}
+
+/** Runs cut from one text, as the UTF-16 pairs of start and end of the marked ones: what the ranking answers. */
+export function runPairs(runs: readonly Mark[]): number[] {
   const pairs: number[] = [];
   let at = 0;
-  for (const run of marks(text, typed)) {
+  for (const run of runs) {
     if (run.hit) pairs.push(at, at + run.text.length);
     at += run.text.length;
   }

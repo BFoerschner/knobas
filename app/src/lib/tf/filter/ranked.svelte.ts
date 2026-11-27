@@ -21,9 +21,7 @@ import { untrack } from "svelte";
 
 import { fuzzyDrop, fuzzyHold, fuzzyRank, fuzzyRankHeld } from "../../ipc/search";
 import type { FuzzyRanked } from "../../ipc/generated/search";
-import { markPairs, matcherOf, sliceMarks, wordPairs } from "./filter";
-
-export { markPairs, sliceMarks };
+import { matcherOf, sliceMarks, wordPairs } from "./filter";
 
 /**
  * Most texts the app ranks in one list (`MOST_RANKED` in `commands/search.rs`): a longer list is not held, and its

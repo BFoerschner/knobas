@@ -54,7 +54,8 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { filterKeys } from "../filter-keys";
   import Marked from "../filter/Marked.svelte";
-  import { heldOrder, sliceMarks } from "../filter/ranked.svelte";
+  import { sliceMarks } from "../filter/filter";
+  import { heldOrder } from "../filter/ranked.svelte";
   import { imageType, typedImageBlob } from "../../render/image";
   import {
     DUPLICATE,
