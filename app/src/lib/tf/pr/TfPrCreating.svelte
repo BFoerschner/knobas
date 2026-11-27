@@ -12,7 +12,8 @@
     until it shows, so a create never pulls the reader off another page.
   - **A create that won't go**: the source's words, and what the write queue
     offers for that row: *Send mine anyway* (*Send again* for a send that may
-    have arrived, #1966) for a held one, and *Discard*.
+    have arrived, #1966) for a held one, and *Discard*; *Cancel* for one
+    waiting on its source.
   - `Esc` goes to the repository, as from the pull request (#2559).
 -->
 <script lang="ts" module>
@@ -188,7 +189,7 @@
                 act(async () => {
                   await ports.discardWrite(write);
                   noteWithdrawn(write);
-                })}>Discard</button
+                })}>{stopped !== null || unsure !== null ? "Discard" : "Cancel"}</button
             >
           {/if}
           {#if stopped !== null || unsure !== null}

@@ -136,3 +136,18 @@ test("a held create offers Send again and Discard, as the queue does (#2584)", a
   expect(applied).toEqual([1]);
   expect(button("Discard")).not.toBeUndefined();
 });
+
+test("a create waiting on its source offers Cancel, as the queue does (#2584)", async () => {
+  const queue = echoFollower();
+  const discarded: number[] = [];
+  await draw({ follower: queue.follower, discardWrite: async (id) => void discarded.push(id) });
+  queue.hear(1, row());
+  await settle();
+  expect(button("Cancel")).toBeUndefined();
+  queue.hear(1, row({ wait_reason: "unreachable", detail: "connection timed out", attempts: 1 }));
+  await settle();
+  expect(text(target.querySelector(".tf-prcreating [role=status]"))).toBe("Creating this pull request… Waiting: connection timed out");
+  button("Cancel")!.click();
+  await settle();
+  expect(discarded).toEqual([1]);
+});
