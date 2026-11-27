@@ -590,7 +590,7 @@ The names and the text of every mirrored repository's files, at its default bran
 _Avoid_: code search, grep
 
 **Text search**:
-A repository's Files tab searching the text of its files, every line holding a literal or a pattern, in the tree the tab shows: the branch's commit in a clone on this computer, the working tree as git lists it, or, where no clone holds the default branch, the [files index](#files-index)'s copy of it, which the answer names. Smart case unless *Aa*; *.\** for a pattern. *Files | Text* in the tree's search box, `Mod+Shift+F`, and *Search in repository* on selected code in a file or a diff (ADR-0062). Not the launcher's search, which finds a repository by its files and never a line in one branch.
+A repository's Files tab searching the text of its files, every line holding the words typed or a pattern, in the tree the tab shows: the branch's commit in a clone on this computer, the working tree as git lists it, or, where no clone holds the default branch, the [files index](#files-index)'s copy of it, which the answer names. Words typed apart match in the order typed on one line with anything between (`xy room` finds `xy_room` and `xyRoom`), a `"`-quoted phrase as typed (ADR-0062, amended 2026-11-27). Smart case unless *Aa*; *.\** for a pattern. *Files | Text* in the tree's search box, `Mod+Shift+F`, and *Search in repository* on selected code in a file or a diff (ADR-0062). Not the launcher's search, which finds a repository by its files and never a line in one branch.
 _Avoid_: grep, code search, find in files (*Find in file* is ⌘F in one file)
 
 **Section's place**:

@@ -5053,7 +5053,9 @@ text: string, hit: boolean, };
  */
 export type TextQuery = { 
 /**
- * What is typed: a literal, or a pattern when `regex` is on.
+ * What is typed: words, matched in order on one line with anything
+ * between (a `"`-quoted phrase as typed, text with no space as one
+ * literal), or a pattern when `regex` is on.
  */
 text: string, 
 /**
