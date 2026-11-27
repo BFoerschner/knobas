@@ -2060,10 +2060,9 @@ impl Drop for FiledIssue {
 /// comment on it, a created pull request and its merge, which deletes its
 /// head branch. The merge's effects are read back before that run too
 /// (ADR-0064, #2592): the repository's walk brings the base branch's new
-/// head, the head branch gone and the issue the pull request closes as
-/// Gitea holds it (Gitea may close it only on a merge into the default
-/// branch, which this test never makes, so the issue is compared, not
-/// assumed closed). The app is started
+/// head, the head branch gone and the issue the pull request closes shown
+/// closed, as Gitea and Forgejo both close it on this merge into a scratch
+/// base. The app is started
 /// the way the app starts it (`start_scheduler`, so `after_landing` follows
 /// each landing), its tick held off; the refresh's end is held until the
 /// mirror is read, and no run of the source has begun since the write was
@@ -2297,10 +2296,11 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
         at_walk[&head_branch], None,
         "the head branch is gone from the mirror"
     );
+    assert_eq!(issue_at_gitea["state"], "closed", "{issue_at_gitea}");
     assert_eq!(
         at_walk[&ticket].as_ref().map(|p| p["state"].clone()),
-        Some(issue_at_gitea["state"].clone()),
-        "the issue the pull request closes, as Gitea holds it"
+        Some(json!("closed")),
+        "the issue the pull request closes"
     );
     println!(
         "the merge's effects: {} read back; the issue Gitea holds as {}",
