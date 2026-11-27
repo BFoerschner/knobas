@@ -117,7 +117,7 @@
         {#if count}
           <span class="tf-count {count.err ? 'tf-err' : ''}">{count.n}</span>
         {:else if section === "builds" && bubble !== null}
-          <span class="tf-bubble" title="Unread runs: {bubbleWords}" data-tone={bubble.tone}>
+          <span class="tf-bubble" title="Unread runs: {bubbleWords}" data-tone={bubble.tone} data-testid="builds-bubble">
             <span class="tf-count {TONE[bubble.tone]}" aria-hidden="true">{bubble.total}</span>
             <span class="tf-bubble-more" aria-hidden="true">
               {#each bubble.parts as part (part.bubble)}

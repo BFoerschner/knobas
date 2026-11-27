@@ -234,5 +234,6 @@ test("the counts by state show on hover over the bubble and on the entry's keybo
   const more = builds.querySelector<HTMLElement>(".tf-bubble-more")!;
   expect(getComputedStyle(more).position, "out of the flow: nothing moves").toBe("absolute");
   expect(getComputedStyle(more).display, "hidden at rest").toBe("none");
+  expect(getComputedStyle(more).pointerEvents, "never in the way of the entry beside it").toBe("none");
   expect(builds.tabIndex >= 0 || builds.hasAttribute("href"), "the entry takes the keyboard's focus").toBe(true);
 });
