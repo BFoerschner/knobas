@@ -276,7 +276,10 @@ async fn a_walk_of_a_configuration_finds_a_build_queued_since_the_run() {
     let (_, cursor) = sync(source.as_ref(), None).await;
     let entity = format!("teamcity:buildType:{cfg}");
     match source.refresh_under(&entity, Some(&cursor)).await {
-        Ok(UnderAnswer::Walked { items, cursor: None }) => {
+        Ok(UnderAnswer::Walked {
+            items,
+            cursor: None,
+        }) => {
             assert!(items.is_empty(), "nothing new yet; got {:?}", keys(&items));
         }
         other => panic!("the walk of {entity}, not {other:?}"),
@@ -284,7 +287,10 @@ async fn a_walk_of_a_configuration_finds_a_build_queued_since_the_run() {
 
     let queued = server.state().queue_build(&cfg, "main");
     let walked = match source.refresh_under(&entity, Some(&cursor)).await {
-        Ok(UnderAnswer::Walked { items, cursor: None }) => items,
+        Ok(UnderAnswer::Walked {
+            items,
+            cursor: None,
+        }) => items,
         other => panic!("the walk of {entity}, not {other:?}"),
     };
     assert_eq!(keys(&walked), [format!("build:{queued}")]);
