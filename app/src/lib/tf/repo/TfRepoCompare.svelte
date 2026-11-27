@@ -11,8 +11,9 @@
     mirror has (`proposal` in `repo.ts`), and then *Link the PR to <key> in
     knobas* (#984), ticked: `submit_write` links the pull request to that
     ticket once it has gone and a sync has brought it in. *Create pull
-    request* queues `CreatePullRequest` in the repository and lands on its
-    pull requests.
+    request* queues `CreatePullRequest` in the repository and lands on the
+    new pull request's page (#2584), addressed by its write until the source
+    answers (`pr/creating.svelte.ts`).
   - **A pull request already open** from the branch is the source's overview's
     row: *Into* and *From* stay, so another branch can be picked, and one line
     with *Open PR #N* stands where the rest of the form would.
@@ -89,6 +90,7 @@
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
   import { echoWrite, echoesOn, watchEchoes } from "../queued.svelte";
+  import { noteCreate } from "../pr/creating.svelte";
   import { placeRestoring } from "../return-place";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -860,7 +862,7 @@
       const linkTo = ticket !== null && link ? ticket.id : undefined;
       const write = await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
       const prs = repoHash(repoId, "prs");
-      // The press lands on the tab that shows it, so the toast has nowhere to offer.
+      // The press lands on the page that shows it, so the toast has nowhere to offer.
       toastQueued(`open PR ${words}`, source, { write });
       // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
       echoWrite(repoId, MADE_PR, words, { write, base: head, into: base, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
@@ -875,7 +877,7 @@
             action: { label: "Pull requests", run: () => (location.hash = prs) },
           });
       });
-      location.hash = prs;
+      location.hash = noteCreate(write.id, { entity: repoId, title: words, head, base }, ports.listen);
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;

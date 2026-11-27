@@ -2,7 +2,8 @@
   One write a source declares on an entity's view (ADR-0020 rule 4), in the
   new shell's dialog: the pull request's toolbar writes (#841, R-8.15:
   *Update branch…*, *Edit…*, *Close*, *Reopen*, a source action) and an
-  item's source actions (#1407, a custom role's writes, ADR-0029). The source
+  item's source actions (#1407, a custom role's writes, ADR-0029). A
+  `create_pull_request` lands on the new pull request's page (#2584). The source
   names the fields, the sentence and the tone; this draws them and queues the
   write `detail/view/actions.ts` builds from the answers, against the entity.
 
@@ -23,6 +24,7 @@
   import { push } from "../shell/toasts.svelte";
   import { actionName, actionPayload, answeredAsDrawn, initialValues, missingFields } from "../detail/view/actions";
   import { drafts } from "./drafts.svelte";
+  import { noteCreate } from "./pr/creating.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
 
   let {
@@ -111,6 +113,8 @@
       toastQueued(typeof what === "function" ? what(chose) : what, source, { write });
       onqueued?.(write, chose);
       cancel();
+      // A pull request lands on its own page, addressed by its write until the source answers (#2584).
+      if ("CreatePullRequest" in payload) location.hash = noteCreate(write.id, payload.CreatePullRequest);
     } catch (cause) {
       push({ text: `Could not queue the write: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;

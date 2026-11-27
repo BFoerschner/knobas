@@ -64,6 +64,8 @@ const ADDRESSES = [
   ["#/repo/gitea%3Atidewater%2Fpayout-service/files/src/lib.rs", "repo"],
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "pr"],
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142/commits", "pr"],
+  // A pull request being created (#2584), until its source answers.
+  ["#/pr/new/7", "pr"],
   ["#/branch/gitea%3Atidewater%2Fpayout-service%40refs%2Fheads%2Fmain", "code row"],
   ["#/commit/mock%3A9f2c1ab", "code row"],
   ["#/diff/gitea%3Atidewater%2Fpayout-service/main/feature%2Fsepa", "diff"],
@@ -110,6 +112,13 @@ test("no address is matched by two pages", () => {
     const route = parseTfHash(hash);
     expect(PAGES.filter((page) => page.matches(route)).length, hash).toBeLessThanOrEqual(1);
   }
+});
+
+test("each create's page is a page of its own, apart from every pull request's (#2584)", () => {
+  const address = (hash: string) => prPage.address?.(parseTfHash(hash));
+  expect(address("#/pr/new/7")).not.toBe(address("#/pr/new/8"));
+  expect(address("#/pr/new/7")).not.toBe(address("#/pr/gitea%3Atidewater%2Fpayout-service%23142"));
+  expect(address("#/pr/gitea%3Atidewater%2Fpayout-service%23142/commits")).toBe(address("#/pr/gitea%3Atidewater%2Fpayout-service%23142"));
 });
 
 test("the job page hands TfJob the address's key, and no tab: the page has none (#2399)", () => {
