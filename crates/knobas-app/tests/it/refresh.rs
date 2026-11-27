@@ -1893,9 +1893,11 @@ async fn a_run_of_a_chain_is_read_at_once_and_keeps_the_started_runs_clock() {
     tokio::time::sleep(Duration::from_secs(31)).await;
 
     let keys = ["BUILD-3", "BUILD-5"];
-    f.remote.chain.lock().unwrap().extend(
-        keys.map(|key| (key.to_owned(), (Some("queued"), Vec::new()))),
-    );
+    f.remote
+        .chain
+        .lock()
+        .unwrap()
+        .extend(keys.map(|key| (key.to_owned(), (Some("queued"), Vec::new()))));
     *f.remote.waits.lock().unwrap() = keys.map(str::to_owned).to_vec();
     let named = std::time::Instant::now();
     for key in keys {

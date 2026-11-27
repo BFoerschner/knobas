@@ -449,13 +449,24 @@ mod tests {
     #[test]
     fn a_turned_away_read_tries_again_soon_a_few_times_then_waits_the_cadence() {
         let s = Duration::from_secs;
-        assert_eq!(wait_before(s(5), true, 0), Duration::ZERO, "a chain's first read");
+        assert_eq!(
+            wait_before(s(5), true, 0),
+            Duration::ZERO,
+            "a chain's first read"
+        );
         assert_eq!(wait_before(s(5), false, 0), s(5));
         for busy in 1..=BUSY_RETRIES {
             assert_eq!(wait_before(s(5), false, busy), BUSY, "turned away {busy}");
         }
-        assert_eq!(wait_before(s(5), false, BUSY_RETRIES + 1), s(5), "a run holds it");
-        assert_eq!(wait_before(Duration::from_millis(100), false, 1), Duration::from_millis(100));
+        assert_eq!(
+            wait_before(s(5), false, BUSY_RETRIES + 1),
+            s(5),
+            "a run holds it"
+        );
+        assert_eq!(
+            wait_before(Duration::from_millis(100), false, 1),
+            Duration::from_millis(100)
+        );
     }
 
     #[test]
