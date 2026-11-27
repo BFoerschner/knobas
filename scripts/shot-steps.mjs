@@ -1,6 +1,9 @@
 // One screenshot after steps, driven over the Chrome DevTools protocol (used by
 // scripts/shot.sh when a route carries steps; issue #989).
 // Usage: node scripts/shot-steps.mjs <port> <debug port> <profile> <size w,h> <theme> <file> <spec>
+//   debug port `0`: Chrome takes a free one and names it in <profile>/DevToolsActivePort, which is read. A port picked
+//   free beforehand and closed can be taken by another process before Chrome binds it; Chrome then runs on with no
+//   endpoint until the start guard runs out (#2589).
 //   spec: `#/job/PAY-231 > #/builds + click:Some button`
 //     ` > ` separates routes opened in turn inside one page (in-memory state
 //     survives, so a job opened first scopes the next route);
@@ -56,7 +59,8 @@
 //   it through.
 import { spawn } from "node:child_process";
 import { chromePath as findChrome } from "./chrome-path.mjs";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
 const [width, height] = size.split(",").map(Number);
@@ -207,16 +211,27 @@ process.on("exit", closeChrome);
 try {
   // What the DevTools endpoint last answered, for the failure when none is a page.
   let seen;
+  // The port Chrome took, once it has written it, for a debug port of `0`.
+  let at = debug === "0" ? null : debug;
   const page = await poll(
     START_WAIT_S,
     async () => {
-      seen = `:${debug} has not answered`;
+      if (at === null) {
+        try {
+          at = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0].trim() || null;
+        } catch {}
+        if (at === null) {
+          seen = "no DevToolsActivePort written";
+          return null;
+        }
+      }
+      seen = `:${at} has not answered`;
       try {
-        const targets = await (await fetch(`http://localhost:${debug}/json`, { signal: AbortSignal.timeout(10000) })).json();
-        seen = `:${debug} listed ${targets.length} target(s)${targets.length ? `: ${targets.map((t) => t.type).join(", ")}` : ""}`;
+        const targets = await (await fetch(`http://localhost:${at}/json`, { signal: AbortSignal.timeout(10000) })).json();
+        seen = `:${at} listed ${targets.length} target(s)${targets.length ? `: ${targets.map((t) => t.type).join(", ")}` : ""}`;
         return targets.find((t) => t.type === "page");
       } catch (e) {
-        seen = `:${debug} did not answer (${e.cause?.code ?? e.message})`;
+        seen = `:${at} did not answer (${e.cause?.code ?? e.message})`;
       }
     },
     () => chromeGone,

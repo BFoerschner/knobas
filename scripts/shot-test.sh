@@ -152,13 +152,20 @@ addEventListener("mouseup", (e) => {
 });
 </script>
 HTML
-free_port() { node -e 'const s = require("net").createServer().listen(0, () => { console.log(s.address().port); s.close(); })'; }
-web=$(free_port)
-node -e 'const [file, port] = process.argv.slice(1); const html = require("fs").readFileSync(file);
-  require("http").createServer((q, s) => s.end(html)).listen(Number(port));' "$fixture/index.html" "$web" &
+# The fixture's server takes its own port and names it, as Chrome does below: one found free and closed first can be
+# taken before the server binds it (#2589).
+node -e 'const [file, out] = process.argv.slice(1); const html = require("fs").readFileSync(file);
+  const s = require("http").createServer((q, r) => r.end(html)).listen(0, () => require("fs").writeFileSync(out, `${s.address().port}\n`));' \
+  "$fixture/index.html" "$fixture/web.port" &
 server=$!
+until web=$(cat "$fixture/web.port" 2>/dev/null) && [ -n "$web" ]; do
+    kill -0 "$server" 2>/dev/null || { echo "shot-test: the fixture's server did not start" >&2; exit 1; }
+    sleep 0.1
+done
 steps() { # <name> <spec>: run the steps script on the fixture; its stderr lands in $fixture/<name>.err
-    node "$here/shot-steps.mjs" "$web" "$(free_port)" "$fixture/profile-$1" 800,600 '' "$fixture/$1.png" "$2" 2>"$fixture/$1.err"
+    # Debug port 0, so Chrome takes its own: a port found free here and closed was taken by another process in a full
+    # gate before Chrome bound it, and Chrome ran on with no endpoint until the start guard ran out (#2589).
+    node "$here/shot-steps.mjs" "$web" 0 "$fixture/profile-$1" 800,600 '' "$fixture/$1.png" "$2" 2>"$fixture/$1.err"
 }
 # A stalled start (#1957): a Chrome that comes up 20 s late, past the 15 s the
 # first page's wait once allowed, as a loaded machine's gate saw it, on a page
@@ -180,7 +187,7 @@ SHOT_SCALE=2 steps scaled '#/' & scaled=$!
 # does not fail naming the step, as a page that is gone must.
 steps seen '#/ + see:a title, its key the only exact text' & seen=$!
 SHOT_STEP_WAIT_S=3 steps unseen '#/ + see:Nothing lives here' & unseen=$!
-node "$here/shot-steps.mjs" "$web" "$(free_port)" "$fixture/profile-webp" 800,600 '' "$fixture/webp.webp" '#/' 2>"$fixture/webp.err" & webp=$!
+node "$here/shot-steps.mjs" "$web" 0 "$fixture/profile-webp" 800,600 '' "$fixture/webp.webp" '#/' 2>"$fixture/webp.err" & webp=$!
 for bad in 'SHOT_SCALE=9' 'SHOT_NOW=whenever'; do
     if env "$bad" node "$here/shot-steps.mjs" "$web" 1 "$fixture/profile-bad" 800,600 '' "$fixture/bad.png" '#/' 2>"$fixture/bad.err"; then
         fail "$bad passed"
@@ -237,12 +244,16 @@ else
     grep -q "Chrome offered no page within 2 s (SHOT_START_WAIT_S); last seen: " "$fixture/mute.err" || fail "a mute Chrome's failure: $(cat "$fixture/mute.err")"
 fi
 # One that takes the connection and never answers: the probe hangs, and the
-# guard still ends it.
+# guard still ends it. Given port 0, it names the one it took as Chrome does.
 cat >"$fixture/hung-chrome" <<'SH'
 #!/bin/sh
 exec node -e '
-const port = process.argv.find((a) => a.startsWith("--remote-debugging-port=")).split("=")[1];
-require("net").createServer(() => {}).listen(Number(port));
+const flag = (name) => process.argv.find((a) => a.startsWith(`--${name}=`)).split("=")[1];
+const fs = require("fs");
+const server = require("net").createServer(() => {}).listen(Number(flag("remote-debugging-port")), () => {
+  fs.mkdirSync(flag("user-data-dir"), { recursive: true });
+  fs.writeFileSync(`${flag("user-data-dir")}/DevToolsActivePort`, `${server.address().port}\n/devtools/browser/hung\n`);
+});
 ' -- "$@"
 SH
 chmod +x "$fixture/hung-chrome"
