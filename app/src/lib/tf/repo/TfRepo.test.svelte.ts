@@ -284,7 +284,8 @@ async function draw(rest: string[], stand: RepoPorts = ports()) {
 async function settle() {
   for (let round = 0; round < 4; round += 1) {
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+    else await new Promise((resolve) => setTimeout(resolve, 0));
     flushSync();
   }
 }
@@ -296,7 +297,14 @@ test("the header and the tabs draw once, whole: unseen in their room until the f
   let answer!: () => void;
   const late = new Promise<void>((resolve) => (answer = resolve));
   const stand = ports();
-  await draw([REPO], { ...stand, codeFacts: async (ids) => (await late, stand.codeFacts(ids)) });
+  // The hold lets go after `HEAD_HOLD_MS` whatever is out: on a fake clock that time passes only when the test says, so a
+  // loaded machine's slow `draw()` cannot spend it before the hold is asserted (#2552).
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await draw([REPO], { ...stand, codeFacts: async (ids) => (await late, stand.codeFacts(ids)) });
+  } finally {
+    vi.useRealTimers();
+  }
   const head = target.querySelector(".tf-repohead")!;
   const tabs = target.querySelector(".tf-tabs")!;
   expect(head.classList.contains("tf-unread"), "held while the facts are read").toBe(true);
