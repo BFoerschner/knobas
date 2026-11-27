@@ -151,3 +151,18 @@ test("a create waiting on its source offers Cancel, as the queue does (#2584)", 
   await settle();
   expect(discarded).toEqual([1]);
 });
+
+test("after a reload a create still queued takes the pull request's address once its read-back names it (#2584)", async () => {
+  // Nothing noted this window: the page notes the open row itself, so the read-back is heard.
+  const events = echoEvents(settle);
+  const queue = echoFollower();
+  await draw({ follower: queue.follower, listen: events.listen });
+  queue.hear(1, row());
+  await settle();
+  expect(text(target.querySelector("h1"))).toBe("PR Instant SEPA spike");
+  queue.sent(1);
+  await settle();
+  await events.refreshed(MADE, 1);
+  await settle();
+  expect(location.hash).toBe(prHash(MADE));
+});

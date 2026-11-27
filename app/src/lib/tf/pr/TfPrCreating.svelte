@@ -19,6 +19,7 @@
 <script lang="ts" module>
   import type { EntityDetail } from "../../ipc/entity";
   import type { WriteFollower } from "../../shell/follow-write";
+  import type { EchoListen } from "../queued.svelte";
 
   /** What the page reads and does, injectable so a test needs no bridge. */
   export interface CreatingPorts {
@@ -26,6 +27,8 @@
     getEntity: (entityId: string) => Promise<Pick<EntityDetail, "row">>;
     applyHeldWrite: (id: number) => Promise<void>;
     discardWrite: (id: number) => Promise<void>;
+    /** How a read-back is heard when this page notes a create itself (after a reload); the window's events if absent. */
+    listen?: EchoListen;
   }
 </script>
 
@@ -44,7 +47,7 @@
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfStateChip from "../TfStateChip.svelte";
-  import { creatingOf, type CreatePr } from "./creating.svelte";
+  import { creatingOf, noteCreate, type CreatePr } from "./creating.svelte";
   import { PR_TABS, prHash } from "./pr";
 
   let {
@@ -87,6 +90,13 @@
     return queued ?? null;
   });
   const repo = $derived(pr?.entity ?? null);
+
+  // After a reload this window noted nothing: the open row is noted, so the read-back of a create still queued is heard.
+  $effect(() => {
+    if (noted !== undefined || row == null) return;
+    const queued = (row.payload as { CreatePullRequest?: CreatePr } | undefined)?.CreatePullRequest;
+    if (queued !== undefined) noteCreate(write, queued, ports.listen);
+  });
 
   $effect(() => {
     if (repo === null) return;
