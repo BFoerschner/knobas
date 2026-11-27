@@ -222,3 +222,22 @@ test("a decoded Markdown output offers Rendered and draws both outputs with no b
   expect([...card.querySelectorAll(".tf-rside-old .tf-md p, .tf-rside-new .tf-md p")].map((p) => p.textContent)).toEqual(["One a day.", "Two a day."]);
   expect(asked, "the sides are the runs' outputs").toEqual([]);
 });
+
+test("a file whose pipeline outputs bytes a renderer draws opens rendered, and the band's Rendered says so once it lands (#2556)", async () => {
+  const GZ: DiffFile = { ...B64, path: "img/flow.png.gz" };
+  const png = (tag: number): PipeRun => ({ outcome: "done", name: "flow.png", output: { kind: "bytes", base64: btoa(String.fromCharCode(0x89, 0x50, tag)), size: 3 } });
+  const context = { text: async () => null, bytes: async () => new Uint8Array(), piped: async (_file: DiffFile, side: "old" | "new") => png(side === "old" ? 1 : 2) };
+  const gz: DiffPipelines = { of: (path) => (path.endsWith(".png.gz") ? { name: null, pattern: "*.png.gz", steps: [{ step: "gunzip" } as PipeStep] } : null) };
+  const { createDiffRendered } = await import("./diff-rendered.svelte");
+  const rendering = createDiffRendered(() => null);
+  draw({ files: [GZ, { ...B64, path: "notes/a.txt" }], context, pipelines: gz, piping: storedSetting(), rendering });
+  await settle();
+  const pill = target.querySelector<HTMLButtonElement>(".tf-drendered")!;
+  expect(target.querySelector('.tf-diff[data-file="img/flow.png.gz"] .tf-rstage'), "drawn rendered as before").not.toBeNull();
+  expect(pill.getAttribute("aria-pressed")).toBe("true");
+  pill.click();
+  flushSync();
+  expect(target.querySelector('.tf-diff[data-file="img/flow.png.gz"] .tf-rstage')).toBeNull();
+  expect(pill.getAttribute("aria-pressed")).toBe("false");
+  expect(rendering.on).toBe(false);
+});

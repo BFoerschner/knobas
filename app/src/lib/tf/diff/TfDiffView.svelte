@@ -627,15 +627,21 @@
       done: states.filter((state) => state === "made" || state === "same").length,
       going: states.includes("running"),
       runnable: all.filter((c) => c.runnable),
+      // Where none wants a run, every folder rendered is run anew (#2557): kept output counts as current by knobas's
+      // stamp of the tool, which misses a tool changed by a relative path, a wrapper's imports or a plugin.
+      again: all.filter((c) => c.state === "made" || c.state === "same"),
     };
   });
+  /** What a press of the band's button runs: the folders that want a run, else every rendered one anew. */
+  const folderPress = $derived(folderRuns.runnable.length > 0 ? { take: folderRuns.runnable, again: false } : { take: folderRuns.again, again: true });
   function runFolders() {
     if (folderRuns.going) {
       for (const compare of folderRuns.all) compare.stop();
       return;
     }
-    // A failed folder is left to its own bar: a batch does not run a failing tool again.
-    for (const compare of folderRuns.runnable.slice(0, RUN_AT_ONCE)) compare.press();
+    // A failed folder is left to its own bar: a batch does not run a failing tool again. A rendered folder's press is
+    // its own *Run again* (`Ask::Again` on both sides).
+    for (const compare of folderPress.take.slice(0, RUN_AT_ONCE)) compare.press();
   }
   /**
    * The band's button keeps the widest room its words have taken (section 10): *Stop all* and *Run 1 folder render*
@@ -648,10 +654,11 @@
   };
   const runLabel = $derived.by(() => {
     if (folderRuns.going) return "Stop all";
-    const n = folderRuns.runnable.length;
+    const n = folderPress.take.length;
     if (n === 0) return "Run folder renders";
-    if (n > RUN_AT_ONCE) return `Run ${RUN_AT_ONCE} of ${thousands(n)} folder renders`;
-    return `Run ${n} folder ${n === 1 ? "render" : "renders"}`;
+    const again = folderPress.again ? " again" : "";
+    if (n > RUN_AT_ONCE) return `Run ${RUN_AT_ONCE} of ${thousands(n)} folder renders${again}`;
+    return `Run ${n} folder ${n === 1 ? "render" : "renders"}${again}`;
   });
 
   let filter = $state("");
@@ -1071,14 +1078,28 @@
   /** The mode the reader picked per file; a binary file with a rendered mode opens in it (it has no lines). */
   let modes = $state.raw<Record<string, DiffMode>>({});
   /**
-   * A card's own press, else *Rendered* where the band's toggle is on or the file is binary (it has no lines) and a
+   * The reader pressed the band's *Rendered* (or `d`) in this diff (#2556): from then a file with no lines follows the
+   * toggle as every other file does.
+   */
+  let pressedHere = $state(false);
+  /** A file with no lines (binary, or its pipeline's output binary): until a press here it opens rendered, toggle or not. */
+  const noLines = (file: DrawnFile) => !pressedHere && (file.change === "binary" || pipedOf(file)?.file.change === "binary");
+  /**
+   * A card's own press, else *Rendered* where the band's toggle is on or the file has no lines ({@link noLines}) and a
    * renderer can draw both of its sides, else its lines.
    */
   // A sniffed card's plan gives it the switch and nothing else: the band never turns it, so nothing moves once drawn.
-  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || file.change === "binary" || pipedOf(file)?.file.change === "binary") && hintPlanOf(file) ? "rendered" : "lines");
+  const modeOf = (file: DrawnFile): DiffMode => modes[keyOf(file)] ?? ((rendering.on || noLines(file)) && hintPlanOf(file) ? "rendered" : "lines");
+  /**
+   * What the toggle shows (#2556, Björn's option B): on where it is kept on, and on where a file of the list opens
+   * rendered with it off, so one press shows every file as lines. A card's own press does not move it. Such an open
+   * keeps nothing and groups no folder: folders group, and the folder-run band shows, where the kept choice is on.
+   */
+  const renderedShown = $derived(rendering.on || realFiles.some((file) => noLines(file) && hintPlanOf(file) !== null));
   /** The band's *Rendered*, and `d`: every card's own press goes, so the toggle says how every file shows. */
   function toggleRendered() {
-    rendering.set(!rendering.on);
+    rendering.set(!renderedShown);
+    pressedHere = true;
     modes = {};
     // A folder's *Real files* is an override as a card's press is; and a press groups again what came late (section 20).
     realFolders = new Set();
@@ -1528,7 +1549,7 @@
   const fileRoom = $derived.by(() => {
     // What each file's room reads, read once for all of them: a list of 10,000 files asked each of every file (the
     // stored-compare pass, 2026-11-14).
-    const [filling, read, shutBy, loaded, all, chosen, high, pill] = [fill !== null, lined, folds, loads, counted, modes, viewHeight, rendering.on];
+    const [filling, read, shutBy, loaded, all, chosen, high, pill, here] = [fill !== null, lined, folds, loads, counted, modes, viewHeight, rendering.on, pressedHere];
     const viewedNow = viewedSet;
     return new Map(
       cardRows.map((row) => {
@@ -1538,7 +1559,7 @@
         const key = keyOf(file);
         // A card open rendered is its header, the caption, the stage and the foot: constants known before a side is read.
         // Planned only where it may be rendered (picked so, or binary): a list of thousands plans none as it opens.
-        const planned = (chosen[key] ?? (pill || file.change === "binary" ? "rendered" : "lines")) === "rendered" ? planOf(file) : null;
+        const planned = (chosen[key] ?? (pill || (!here && file.change === "binary") ? "rendered" : "lines")) === "rendered" ? planOf(file) : null;
         const got = read[key];
         const waiting =
           file.made !== undefined
@@ -2119,7 +2140,7 @@
   <div class="tf-fchips">
     {#if list}
       <!-- Always drawn where the diff has its list: worked out per file, it would land late and move *Run pipelines*. -->
-      <button type="button" class="tf-drendered" aria-pressed={rendering.on} aria-keyshortcuts="d" title="Show files and folders as their renderers draw them: d" onclick={toggleRendered}
+      <button type="button" class="tf-drendered" aria-pressed={renderedShown} aria-keyshortcuts="d" title="Show files and folders as their renderers draw them: d" onclick={toggleRendered}
         >Rendered</button
       >
     {/if}
@@ -2145,7 +2166,7 @@
     <!-- The grouped folders' runs (ux26, section 10): only a press runs, at most 20 folders a press. -->
     <span class="tf-drun">
       <span class="tf-drun-n">{thousands(folderRuns.done)} of {thousands(groups.length)} {groups.length === 1 ? "folder" : "folders"} rendered</span>
-      <button type="button" class="tf-btn tf-sm" disabled={!folderRuns.going && folderRuns.runnable.length === 0} onclick={runFolders} {@attach keepWidth(runLabel)}>{runLabel}</button>
+      <button type="button" class="tf-btn tf-sm" disabled={!folderRuns.going && folderPress.take.length === 0} onclick={runFolders} {@attach keepWidth(runLabel)}>{runLabel}</button>
     </span>
   {/if}
   {#if list}

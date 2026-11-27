@@ -212,6 +212,47 @@ test("Run N folder renders presses at most 20 folders, and Stop all stops every 
   expect(fake.stopped.length).toBe(40);
 });
 
+test("with every folder's output current, Run folder renders stays enabled and reruns each rendered folder anew; a failed one stays with its bar (#2557)", async () => {
+  const fake = fakeCompareBackend();
+  const many: FolderRenderer = { ...SITE, folders: ["docs/*"] };
+  for (const folder of ["docs/a", "docs/b"]) {
+    fake.keep(laneOf(SHA), `${folder}-old`, true, folder);
+    fake.keep(laneOf(WT), `${folder}-new`, true, folder);
+  }
+  fake.keep(laneOf(SHA), "c-old", true, "docs/c");
+  fake.slot(laneOf(WT), "docs/c").failure = { why: "failed", status: 2, stderr: "lowcode: no project file\n" };
+  rendering.set(true);
+  draw([file("docs/a/x.md"), file("docs/b/x.md"), file("docs/c/x.md")], fake, { saved: [many] });
+  await settle();
+  expect(target.querySelector(".tf-drun-n")!.textContent).toBe("2 of 3 folders rendered");
+  expect(runAll().disabled, "the output may be current only by knobas's stamp").toBe(false);
+  expect(runAll().textContent).toBe("Run 2 folder renders again");
+  runAll().click();
+  await settle();
+  const again = fake.asked.filter((a) => a.ask === "again").map((a) => `${a.folder} ${a.lane}`);
+  expect(again.sort()).toEqual([`docs/a ${laneOf(SHA)}`, `docs/a ${laneOf(WT)}`, `docs/b ${laneOf(SHA)}`, `docs/b ${laneOf(WT)}`]);
+  expect(runAll().textContent).toBe("Stop all");
+});
+
+test("a binary file turns the toggle on at the open but groups no folder and draws no band; the kept choice does (#2556)", async () => {
+  const fake = fakeCompareBackend();
+  const png: DiffFile = { path: "assets/logo.png", old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] };
+  draw([png, file("docs/index.md")], fake);
+  await settle();
+  const pill = target.querySelector<HTMLButtonElement>(".tf-drendered")!;
+  expect(pill.getAttribute("aria-pressed")).toBe("true");
+  expect(target.querySelector(".tf-dfolder"), "nothing renders differently from before").toBeNull();
+  expect(target.querySelector(".tf-drun")).toBeNull();
+  pill.click();
+  await settle();
+  expect(pill.getAttribute("aria-pressed")).toBe("false");
+  pill.click();
+  await settle();
+  expect(pill.getAttribute("aria-pressed")).toBe("true");
+  expect(target.querySelector(".tf-dfolder")).not.toBeNull();
+  expect(target.querySelector(".tf-drun")).not.toBeNull();
+});
+
 test("Real files puts the folder's files back, and the pill clears it", async () => {
   const fake = fakeCompareBackend();
   rendering.set(true);

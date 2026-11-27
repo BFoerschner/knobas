@@ -4,7 +4,7 @@
  * `?fake-long-paths`, `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
 import type { CheckoutSettings, CheckoutView, CloneAllPlan, CloneAllState, CloneAnswer, DiffFile, DiffRead, LocalDir, OpenObject, PullRequestWorktree, RangeDiff, RangeFilePage, RangeFiles, RangeNames, TextFile, TextFound, TextPart, TextQuery, ViewBlock, WorkingAt } from "../../../ipc/entity";
-import { repoView } from "./views/repos";
+import { logoSides, repoView } from "./views/repos";
 import { lineDiff } from "../../../tf/diff/line-diff";
 import { fillObject, isDiffEnd, joinInside, objectCommand, worktreeOf } from "../../../tf/openin/openin";
 import type { FakeBridge, Handlers } from "../fake-tauri";
@@ -142,6 +142,9 @@ function workingFiles(): Record<string, [before: string | null, after: string]> 
   return asciiArt() ? { ...WORKING_FILES, "docs/states.txt": [ASCII_BEFORE, ASCII_AFTER] } : WORKING_FILES;
 }
 const WORKING_BASE = "4f2a91c0d2b9e8a7f6c5d4b3a2918f7e6d5c4b3a";
+/** `?fake-working-png` (#2556): the working tree also changes a PNG, a binary file a renderer draws, outside every folder renderer's folders. */
+const WORKING_PNG = "assets/logo.png";
+const workingPng = () => new URLSearchParams(globalThis.location?.search).has("fake-working-png");
 /** The fixture checkout's one commit its upstream lacks (`tree.ahead` is 1): Commits on the working tree lists it. */
 const WORKING_AHEAD = { sha: "4f1c2a9e0b7d3c5a8e6f1b2d4c7a9e0f3b5d8c1a", title: "Park a batch after its third retry", meta: "mara · 20 minutes ago" };
 /** `?fake-touched`: every ask finds the tree touched since the last (a new stamp each time). */
@@ -158,7 +161,8 @@ function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } 
     const file = lineDiff(path, before ?? "", after);
     return { ...file, change: before === null ? "added" : file.change } as DiffFile;
   });
-  const files = [...tracked, ...made].sort((a, b) => (a.path < b.path ? -1 : 1));
+  const png: DiffFile[] = workingPng() ? [{ path: WORKING_PNG, old_path: null, change: "binary", additions: 0, deletions: 0, hunks: [], truncated: false, threads: [] }] : [];
+  const files = [...tracked, ...made, ...png].sort((a, b) => (a.path < b.path ? -1 : 1));
   const tree = checkout.tree?.status === "read" ? checkout.tree : null;
   workingAsks += 1;
   return {
@@ -176,6 +180,7 @@ function fakeWorking(entityId: string): { diff: RangeDiff; working: WorkingAt } 
 
 /** A working-tree file's bytes at `~working-tree` (after) or any other end (before); `undefined` for a file it does not hold. */
 export function fakeWorkingBytes(path: string, commit: string | null): Uint8Array | undefined {
+  if (path === WORKING_PNG && workingPng() && (commit === WORKING || commit === WORKING_BASE)) return logoSides()[commit === WORKING ? 1 : 0];
   const sides = workingFiles()[path];
   // Only the working tree's own ends: every other commit reads the fixture's files as before.
   if (sides === undefined || (commit !== WORKING && commit !== "~index" && commit !== WORKING_BASE)) return undefined;
