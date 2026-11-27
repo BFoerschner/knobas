@@ -283,7 +283,7 @@ Links are what knobas adds that no source system has. They are **local**: create
 
 ---
 
-## 12a. Passwords — **added 2026-11-22 (ADR-0056)**
+## 12a. Secrets — **added 2026-11-22 (ADR-0056); renamed from Passwords 2026-11-26 (#2515)**
 
 Björn, on PR #2479: the team's password manager as a page, Pleasant Password Server first (`mockups/passwords-2/`). **The
 hard rule: knobas does not fill the manager's audit log with the person's name.** Decisions: ADR-0056 and
@@ -292,8 +292,8 @@ hard rule: knobas does not fill the manager's audit log with the person's name.*
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Passwords is a role**: a source emits `password_entry` and `password_folder` with the role's fixed records and answers one live read; it declares which of eight abilities it offers (codes, expiry, usage comments, audit log, history, attachments, access requests, writes), and the page draws only what the entry's source declares | Built (ux30) | Between Docs and Monitors in the bar. External (WASM) adapters may not fill it yet. |
-| **The page**: a folder tree, the list of a folder's own entries then a panel per folder below (five, then *Show all*), the entry; a filter over the folder on show and the folders under it (#2531); keys `/ J K ← → C S U O A E N Esc` | Built (ux30) | Windowed at 2,000 and 20,000 entries. `R` is unbound: a sync is a button. |
+| **Secrets is a role**: a source emits `password_entry` and `password_folder` with the role's fixed records and answers one live read; it declares which of eight abilities it offers (codes, expiry, usage comments, audit log, history, attachments, access requests, writes), and the page draws only what the entry's source declares | Built (ux30) | Between Docs and Monitors in the bar. External (WASM) adapters may not fill it yet. |
+| **The page**: a folder tree, the list of a folder's own entries then a panel per folder below (five, then *Show all*), the entry; a filter over the folder on show and the folders under it (#2531); keys `J K ← → C S U O A E N W Esc`, and in the filter `⌘⇧C/S/U/O/A` and `Enter` to the open entry's row (#2531); `/` is the launcher's section search (#2515) | Built (ux30) | Windowed at 2,000 and 20,000 entries. `R` is unbound: a sync is a button. |
 | **A secret never rests**: a password, a protected field, an earlier password, an attachment's bytes are read live once per press, held 30 s in the app process, and written nowhere; *Show* draws it with a comb of thirty ticks; *Copy* puts it on the clipboard for 30 s and clears it only if it is still knobas's | Built (ux30) | Concealed from clipboard managers on each OS. |
 | **One-time codes** made on the machine from a key kept in the system's password store, never in the mirror: no read, no usage comment, offline too | Built (ux30) | Pleasant's own `TOTPSecret` and four KeePass plugin formats. |
 | **Usage comments** asked where the source says, pre-filled with the timed ticket, then the comment last sent | Built (ux30) | The source keeps the comment in its log. |

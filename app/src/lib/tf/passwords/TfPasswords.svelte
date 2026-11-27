@@ -1,5 +1,5 @@
 <!--
-  Passwords (ADR-0056): a password manager's entries, from the clickdummy at `mockups/passwords-2/`.
+  Secrets (ADR-0056; named Passwords until #2515): a password manager's entries, from the clickdummy at `mockups/passwords-2/`.
 
   **One read holds the page** (`passwords_held`): every source, folder and a compact row per entry. A folder press and
   a filter keystroke ask nothing; the tree, the panels, a path and the filter's hits are computed here (`model.ts`).

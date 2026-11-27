@@ -30,7 +30,7 @@
 // A screen with `under` (the small-fixes sweep, 2026-11-21: *Add a default*'s two dropdowns grew to 1,370 px with long names)
 // holds a row of controls to a table's columns: [a control in the row, the table], and each control of that row must stand
 // inside the table's column of the same place, its long names cut in their box.
-// A screen with `whole` (the ux30 end gate, 2026-11-23: Passwords' *Open web interface W* cut at the entry panel's edge in a
+// A screen with `whole` (the ux30 end gate, 2026-11-23: Secrets' *Open web interface W* cut at the entry panel's edge in a
 // 1100 px window) holds every button under the selectors it names to the window and to every box that clips it, sideways: a
 // control is drawn whole or the screen misses.
 // A screen with `oneline` (#2531: a Secrets attachment's long name wrapped into a block of lines) holds every element it names to
@@ -72,7 +72,7 @@ const BUILD_SIZES = [
   [1440, 868, 1],
   [1100, 600, 1],
 ];
-// Passwords' screens add the window's smallest at a usual height and 1440x868, the sizes the ux30 end gate read.
+// Secrets' screens add the window's smallest at a usual height and 1440x868, the sizes the ux30 end gate read.
 const PW_SIZES = [...SIZES, [1100, 800, 1], [1440, 868, 1]];
 const REPO = "repo/mock%3Atidewater%2Fpayout-service";
 const PIPELINE = "builds/teamcity%3AbuildType%3APayout_Docker";
@@ -168,7 +168,7 @@ const SCREENS = [
   { id: "site-bar", route: "site/confluence", press: "Open Tidewater Confluence", wait: 700, sizes: BUILD_SIZES },
   // A site's saved sign-in (ux29): Settings' row naming a long username, held to its column.
   { id: "settings-site-signin", route: "settings/source/confluence" },
-  // Passwords (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
+  // Secrets (ADR-0056): an entry's header and a folder's, every button whole, at the window's smallest sizes and the gate's.
   // The check in the XML view (2026-11-24): the rail's head and its switch whole at the window's smallest.
   { id: "xml-checked", route: `${REPO}/files/orders/order-4711.xml`, fake: "&fake-xml&fake-xsd", wait: 3000, whole: ".tf-xv-head, .tf-xv-rail > .tf-oas-modes", sizes: SMALLEST },
   // The schema explorer's picker and its example (S3, S4), and the JSON view's jq field (J2), 2026-11-24: their controls whole.

@@ -364,7 +364,7 @@ The card (`TfJobCard.svelte`, `job.css`) is the same markup in both moods (spec 
 - **The width handle** is the page's sidebar edge (*A sidebar's width is the reader's*, under Layout) on the card's right: dragging sets the card between 240 and 720 px (and at most 60 % of the page), ←/→ step 16 px, and a double click or Enter fits the card so nothing on it wraps, where every other sidebar returns to its default. The width is browser state (`knobas.ticket.side`, default 320 px). Below 900 px the edge is gone. Amended 2026-11-16 (the sidebar-resize pass): it was a 6 px handle of the card's own that darkened the card's edge.
 - **The fold.** The reading column's Attachments panel is a native `<details class="tf-tkfold">`, closed by default. Its summary is the heading, a count badge and a chevron (`.tf-tkmark`) that points right while closed and turns down when open, in 120 ms. An attachment row is one button drawn as the row, not a `.tf-btn`, that opens the attachment preview; the row has no *Open* or *Download* (#2415).
 
-### The Passwords page's code and comb
+### The Secrets page's code and comb
 
 Added 2026-11-22 (ADR-0056, `passwords.css`).
 

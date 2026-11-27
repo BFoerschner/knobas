@@ -1,5 +1,5 @@
 <!--
-  A password source's *Passwords* section on its Settings page (ADR-0056): the eight abilities the role allows beyond
+  A password source's *Secrets* section on its Settings page (ADR-0056): the eight abilities the role allows beyond
   its minimum, each *Yes* with a line of detail or *Not offered*, from the adapter's `passwords` declaration and counts
   over the mirror; and, for a source whose entries name a code-key format, where the keys were found: the four KeePass
   plugins' fields, each with how many entries had it, and the keys it could not read.
