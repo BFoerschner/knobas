@@ -174,6 +174,11 @@ pub struct RecentFilter {
     /// Only the runs built on these branches (*This job*); `None` for any.
     #[serde(default)]
     pub branches: Option<Vec<String>>,
+    /// Only the runs of these pipelines, by entity id (#2570: a folder's
+    /// scope); empty for every pipeline. Ids and not a folder's path, because
+    /// *By repository*'s folders are not the source's.
+    #[serde(default)]
+    pub pipelines: Vec<String>,
 }
 
 /// A page of *Recent*: its runs newest first, the pipelines they sit under,
@@ -747,6 +752,30 @@ select t.pkey is not null as found, x.* from target t
 "
 );
 
+/// What [`RECENT_RUNS`] keeps of a run `m` (`sync.run_made`), in both of its
+/// arms: after the cursor, live, and through the bar's filters.
+macro_rules! recent_kept {
+    () => {
+        concat!(
+            "($5::text is null or (m.made, m.entity_id) < ($5::timestamptz, $6::text))
+     and (select e.deleted_at is null from knobas.entity e where e.id = m.entity_id)
+     and ((cardinality($8::text[]) = 0 and $9::text[] is null and cardinality($7::text[]) = 0) or exists (
+       select 1 from sync.run_made rm
+         join sync.item i on i.entity_id = rm.entity_id",
+            crate::run_join!("ru", "i"),
+            "
+        where rm.entity_id = m.entity_id
+          and (cardinality($8::text[]) = 0 or ru.started_by = any($8::text[]))
+          and ($9::text[] is null or ru.branch = any($9::text[]))
+          and (cardinality($7::text[]) = 0 or
+               (case when sync.run_instant(ru.finished) is null
+                     then case when sync.run_instant(ru.started) is null then 'Queued' else 'Running' end
+                     when ru.state->>'tone' = 'err' then 'Failed'
+                     when ru.state->>'tone' = 'ok' then 'Passed' end) = any($7::text[]))))"
+        )
+    };
+}
+
 /// The newest runs across every drawn pipeline (Builds' *Recent*,
 /// 2026-11-25): the head of `run_made_idx` (migration `0103`), newest first
 /// by when each run started or, not started, was queued, as `runMade` orders
@@ -754,7 +783,8 @@ select t.pkey is not null as found, x.* from target t
 /// fillers, `$4` the sources asked (empty: all), `$5`/`$6` the cursor (the
 /// last answered run's instant as text and its id; null: from the top), `$7`
 /// the results asked (`Failed`, `Running`, `Queued`, `Passed`; empty: all),
-/// `$8` who started it (empty: anyone), `$9` the branches (null: any).
+/// `$8` who started it (empty: anyone), `$9` the branches (null: any), `$10`
+/// the pipelines (empty: all; below).
 ///
 /// A pipeline is drawn as [`PIPELINES`] draws it; a run sits under it by its
 /// stored `sync.item_pipeline` row, as a pipeline's own runs do, and only a
@@ -772,6 +802,14 @@ select t.pkey is not null as found, x.* from target t
 /// estimated at a few dozen, and a join of them made every run look filtered
 /// out and the sort free. With a filter, the runs it keeps are one hashed set
 /// of the runs (`run_made`, not every item), then the walk.
+///
+/// **A scope** (#2570): `$10` the pipelines to keep, by entity id (empty:
+/// every one). Planned with its values, one of `k`'s two arms folds away. With
+/// none, the walk above. With some, each pipeline's runs are its range of
+/// `item_pipeline_runs_idx` (as [`runs_of!`](crate::runs_of) reads them), each
+/// run's instant a probe of `run_made`'s key, then sorted: the set's history,
+/// not the mirror's. The walk filtered by the set read every run of the mirror
+/// before a folder of quiet pipelines filled its page.
 const RECENT_RUNS: &str = concat!(
     "with ",
     frame_kinds_cte!(),
@@ -789,33 +827,32 @@ p as materialized (
     left join knobas.source_config c on c.id = i.source_id
    where f.frame = 'pipeline' and i.source_id = any($3::text[])
      and (cardinality($4::text[]) = 0 or i.source_id = any($4::text[]))
+     and (cardinality($10::text[]) = 0 or i.entity_id = any($10::text[]))
 ),
 dp as materialized (select * from p where p.pkey is not null and p.name is not null),
 k as materialized (
-  select m.entity_id, m.made, w.pipeline
+  (select m.entity_id, m.made, w.pipeline
     from sync.run_made m
     cross join lateral (
       select dp.entity_id as pipeline from sync.item_pipeline ip
         join dp on dp.source_id = ip.source_id and dp.pkey = ip.pkey and dp.adapter_kind = ip.adapter_kind
        where ip.entity_id = m.entity_id
        limit 1) w
-   where ($5::text is null or (m.made, m.entity_id) < ($5::timestamptz, $6::text))
-     and (select e.deleted_at is null from knobas.entity e where e.id = m.entity_id)
-     and ((cardinality($8::text[]) = 0 and $9::text[] is null and cardinality($7::text[]) = 0) or exists (
-       select 1 from sync.run_made rm
-         join sync.item i on i.entity_id = rm.entity_id",
-    crate::run_join!("ru", "i"),
+   where cardinality($10::text[]) = 0 and ",
+    recent_kept!(),
     "
-        where rm.entity_id = m.entity_id
-          and (cardinality($8::text[]) = 0 or ru.started_by = any($8::text[]))
-          and ($9::text[] is null or ru.branch = any($9::text[]))
-          and (cardinality($7::text[]) = 0 or
-               (case when sync.run_instant(ru.finished) is null
-                     then case when sync.run_instant(ru.started) is null then 'Queued' else 'Running' end
-                     when ru.state->>'tone' = 'err' then 'Failed'
-                     when ru.state->>'tone' = 'ok' then 'Passed' end) = any($7::text[]))))
    order by m.made desc, m.entity_id desc
-   limit $2
+   limit $2)
+  union all
+  (select m.entity_id, m.made, dp.entity_id as pipeline
+    from dp
+    join sync.item_pipeline ip on ip.source_id = dp.source_id and ip.pkey = dp.pkey and ip.adapter_kind = dp.adapter_kind
+    join sync.run_made m on m.entity_id = ip.entity_id
+   where cardinality($10::text[]) > 0 and ",
+    recent_kept!(),
+    "
+   order by m.made desc, m.entity_id desc
+   limit $2)
 )
 select k.pipeline, k.made::text as made_text, ",
     stored_run_columns!(),
@@ -1279,6 +1316,7 @@ pub async fn recent_runs_page(
         .bind(&filter.results)
         .bind(who)
         .bind(filter.branches.as_deref())
+        .bind(&filter.pipelines)
         // The unnamed statement, planned with the values in hand. Its filters are `$n is null or …` and `cardinality($n)
         // = 0 or …`, which a generic plan cannot read: once PostgreSQL kept one for the named statement (from a
         // connection's sixth run), a page took 3.2 s on the scale database where it takes 23 ms (the probes,
