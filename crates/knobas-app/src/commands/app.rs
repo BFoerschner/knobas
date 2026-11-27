@@ -810,6 +810,7 @@ pub async fn folder_render<R: tauri::Runtime>(
     let pool = app.state::<Lifecycle>().pool()?;
     let forge = forge_of(&app);
     crate::folder_render::ask(
+        &crate::folder_render::runs::Runs::global(),
         &pool,
         forge.as_ref(),
         &entity_id,

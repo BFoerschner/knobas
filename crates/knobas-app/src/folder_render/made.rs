@@ -284,8 +284,17 @@ async fn read(made: Arc<Made>, path: String, cap: u64) -> Result<Vec<u8>, IpcErr
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for a token not held or a
 /// path the manifest does not hold.
 pub async fn file(token: &str, path: &str) -> Result<knobas_source::view::Block, IpcError> {
+    file_of(made(token)?, path).await
+}
+
+/// [`file`] of a generated folder in hand.
+///
+/// # Errors
+///
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a path the manifest does
+/// not hold.
+pub async fn file_of(made: Arc<Made>, path: &str) -> Result<knobas_source::view::Block, IpcError> {
     use knobas_source::file_text::{BYTE_CAP, capped, is_binary, language_of};
-    let made = made(token)?;
     let size = made.file(path).ok_or_else(|| not_held(path))?.size;
     let bytes = read(made, path.to_owned(), BYTE_CAP as u64).await?;
     let binary = is_binary(&bytes);
@@ -315,8 +324,16 @@ pub async fn file(token: &str, path: &str) -> Result<knobas_source::view::Block,
 /// As [`file`]; [`Invalid`](crate::IpcErrorCode::Invalid) past the cap, in
 /// `entity_file_bytes`' words.
 pub async fn file_bytes(token: &str, path: &str) -> Result<Vec<u8>, IpcError> {
+    file_bytes_of(made(token)?, path).await
+}
+
+/// [`file_bytes`] of a generated folder in hand.
+///
+/// # Errors
+///
+/// As [`file_of`]; [`Invalid`](crate::IpcErrorCode::Invalid) past the cap.
+pub async fn file_bytes_of(made: Arc<Made>, path: &str) -> Result<Vec<u8>, IpcError> {
     use knobas_source::view::BYTES_CAP;
-    let made = made(token)?;
     let size = made.file(path).ok_or_else(|| not_held(path))?.size;
     if size > BYTES_CAP {
         return Err(IpcError::invalid(format!(
