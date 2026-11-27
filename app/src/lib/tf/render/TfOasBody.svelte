@@ -150,15 +150,18 @@
       <button type="button" aria-pressed={kind === k.id} disabled={html && k.id !== "text"} title={html && k.id !== "text" ? "An HTML answer is only ever drawn as its text." : undefined} onclick={() => (view.as = k.id)}>{k.label}</button>
     {/each}
   </span>
-  {#if view.steps === null}<button type="button" class="tf-btn tf-sm" onclick={() => (view.steps = [])}>Pipeline</button>{/if}
-  <span class="tf-trail">
-    {#if full}
-      <!-- Expanded, the view takes the pane's height: what is done with the answer stands up here. -->
-      {@render actions()}
-      {#if oncollapse !== null}<button type="button" class="tf-btn tf-sm" data-oas-collapse onclick={() => oncollapse?.()}>Back to the explorer</button>{/if}
-    {:else if onexpand !== null}
-      <button type="button" class="tf-btn tf-sm tf-ghost" title="The answer over the explorer, with the view's rail" onclick={() => onexpand?.()}>Expand</button>
-    {/if}
+  <!-- *Pipeline* and the trail are one group: where the bar wraps, they wrap together, so *Expand* never wraps alone. -->
+  <span class="tf-oas-bodyrest">
+    {#if view.steps === null}<button type="button" class="tf-btn tf-sm" onclick={() => (view.steps = [])}>Pipeline</button>{/if}
+    <span class="tf-trail">
+      {#if full}
+        <!-- Expanded, the view takes the pane's height: what is done with the answer stands up here. -->
+        {@render actions()}
+        {#if oncollapse !== null}<button type="button" class="tf-btn tf-sm" data-oas-collapse onclick={() => oncollapse?.()}>Back to the explorer</button>{/if}
+      {:else if onexpand !== null}
+        <button type="button" class="tf-btn tf-sm tf-ghost" title="The answer over the explorer, with the view's rail" onclick={() => onexpand?.()}>Expand</button>
+      {/if}
+    </span>
   </span>
 </div>
 

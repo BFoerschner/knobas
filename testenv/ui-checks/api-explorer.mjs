@@ -16,8 +16,8 @@
 //   - the auth choice is not offered by hand (*Nothing*, *Basic*, *Bearer*, *API key*) for a spec that declares no scheme;
 //   - the answer's headers are not one row each, 6 px above and below, a rule between rows;
 //   - the answer's body bar (*Render as*, *Pipeline*, *Expand*, #2533) runs past its column, or wraps onto a second line in
-//     three or four columns (at 1100x600 it wraps, *Expand* under the rest), or the compact view's box is not drawn under it
-//     at a held height;
+//     three or four columns (at 1100x600 it wraps, *Pipeline* and *Expand* under the rest), or *Expand* stands alone on a
+//     line, or the compact view's box is not drawn under it at a held height;
 //   - *Expand* does not cover the explorer's pane exactly, with the view filling it to its foot and *Back to the explorer*
 //     focused, or `Esc` does not give the pane back with the focus on *Expand*;
 //   - a schema's *Part of* is not chips, 12 then all 23 behind *Show all*;
@@ -107,6 +107,17 @@ const BODYBAR = `(() => {
     tallest: Math.round(Math.max(...kids.map((k) => k.height))),
     inCol: col ? b.left >= col.left - 0.5 && b.right <= col.right + 0.5 && Math.max(...kids.map((k) => k.right)) <= col.right + 0.5 : false,
     sideways: bar.scrollWidth > bar.clientWidth + 1,
+    // *Expand* with no other control on its line: the bar wrapped between *Pipeline* and it.
+    expandAlone: (() => {
+      const buttons = [...bar.querySelectorAll("button")].filter((k) => k.getClientRects().length > 0);
+      const e = buttons.find((k) => k.textContent.trim() === "Expand")?.getBoundingClientRect();
+      if (!e) return null;
+      const mid = e.top + e.height / 2;
+      return !buttons.some((k) => {
+        const r = k.getBoundingClientRect();
+        return k.textContent.trim() !== "Expand" && Math.abs(r.top + r.height / 2 - mid) <= 2;
+      });
+    })(),
     box: bb ? { h: Math.round(bb.height), below: Math.round(bb.top - b.bottom), full: box.classList.contains("tf-oas-full") } : null,
   };
 })()`;
@@ -145,8 +156,8 @@ async function answerPane(label, { request = false, wraps = false } = {}) {
   const m = await json(BODYBAR);
   const line = m !== null && m.mids <= 2 && m.barH <= m.tallest + 2;
   check(
-    `${label}: the body bar is ${wraps ? "inside" : "one line inside"} its column, the compact view's box under it`,
-    m !== null && m.kids >= 3 && (wraps || line) && m.inCol && !m.sideways && m.box !== null && !m.box.full && m.box.h >= 200 && m.box.below >= 0,
+    `${label}: the body bar is ${wraps ? "inside" : "one line inside"} its column, Expand not alone on a line, the compact view's box under it`,
+    m !== null && m.kids >= 3 && (wraps || line) && m.expandAlone === false && m.inCol && !m.sideways && m.box !== null && !m.box.full && m.box.h >= 200 && m.box.below >= 0,
     m,
   );
 
@@ -222,7 +233,8 @@ try {
   await go(PETS);
   check("1100x600: two columns", await waitFor(`document.querySelector(".tf-oas")?.dataset.cols === "2"`), await json(COLUMNS));
   // At the window's smallest the page's column is 456 px, and *Render as*, its three views, *Pipeline* and *Expand* need
-  // about 440 px of a 408 px line: the bar wraps, *Expand* under the rest. Held to its column here, not to one line.
+  // about 440 px of a 408 px line: the bar wraps, *Pipeline* and *Expand* together under the rest (spec #2514's final
+  // landing ruled this over *Expand* wrapping alone). Held to its column and to Expand's company, not to one line.
   await answerPane("1100x600", { request: true, wraps: true });
 
   // A schema's Part of, and its Markdown table.

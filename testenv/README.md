@@ -3092,7 +3092,7 @@ testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5341 node testenv/ui-chec
 window's smallest (1100 x 600, two columns), 1920 x 960 (three) and 5120 x 1440 (four). It fails when a column scrolls
 inside a column (two gutters), the answer's padding is not the request's or it keeps a top rule standing alone, the auth
 choice by hand is missing, the answer's headers lose their rows, the answer's body bar runs past its column (or wraps in
-three or four columns), *Expand* does not cover the pane exactly or `Esc` does not give it back with the focus on
+three or four columns, or leaves *Expand* alone on a line), *Expand* does not cover the pane exactly or `Esc` does not give it back with the focus on
 *Expand*, a schema's *Part of* is not 12 chips then 23 behind *Show all*, or a schema's Markdown table is held to a width.
 Each check and its numbers are in the file's header.
 

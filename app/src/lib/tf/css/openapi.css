@@ -364,6 +364,9 @@
 
 /* ---- An answer's body (#2533): Render as, Pipeline and Expand, the compact views, the body expanded over the pane ---- */
 .tf-oas-bodybar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: calc(var(--t-sm) * var(--fs)); }
+/* *Pipeline* and the trail, one group that takes the line's rest: the bar wraps before it, never inside it, so *Expand*
+   never wraps alone (the filter bar's rule for its count, at 1100 x 600 where the page's column is 456 px). */
+.tf-oas-bodyrest { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
 /* The compact view holds its room from the first frame: the box is the same height reading, drawn or failed. */
 .tf-oas-docbox { height: clamp(260px, 52vh, 560px); min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--rule-2); border-radius: 4px; overflow: hidden; background: var(--sheet); }
 .tf-oas-ans .tf-pipe { border: 1px solid var(--rule-2); border-radius: 4px; }
