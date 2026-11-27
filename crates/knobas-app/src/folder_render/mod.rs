@@ -299,7 +299,8 @@ pub fn slot(entity_id: &str, renderer: &str, folder: &str, lane: &str) -> runs::
 }
 
 /// Saved renderer `renderer` on `folder` of `entity_id` at `commit`: the
-/// folder resolved where it is read from, then [`runs::Runs::view`].
+/// folder resolved where it is read from, then [`runs::Runs::view`] of `runs`
+/// (the app's is [`runs::Runs::global`]; a test's is its own).
 ///
 /// # Errors
 ///
@@ -310,6 +311,7 @@ pub fn slot(entity_id: &str, renderer: &str, folder: &str, lane: &str) -> runs::
     reason = "the command's arguments, one each"
 )]
 pub async fn ask(
+    runs: &std::sync::Arc<runs::Runs>,
     pool: &PgPool,
     forge: Option<&resolve::Forge>,
     entity_id: &str,
@@ -330,7 +332,7 @@ pub async fn ask(
             ))
         })?;
     let resolved = resolve::resolve(pool, forge, &saved, entity_id, folder, commit, paths).await?;
-    Ok(runs::Runs::global().view(
+    Ok(runs.view(
         &slot(entity_id, renderer, folder, lane),
         &saved,
         resolved,

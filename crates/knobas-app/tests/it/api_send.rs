@@ -9,6 +9,10 @@ use knobas_app::api::send::{self, ApiAnswer, ApiAuth, ApiSend, AuthPlace};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// The kept store is the process's (`api::kept::KEPT`), 64 MiB of bodies for every test here: the cap test's one answer
+/// fills it and drops every other body. It takes this for writing; a test that reads a kept body back, for reading.
+static WHOLE_STORE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 fn request(id: u64, verb: &str, url: String) -> ApiSend {
     ApiSend {
         id,
@@ -120,6 +124,7 @@ async fn stop_ends_a_send_at_once() {
 
 #[tokio::test]
 async fn an_answer_longer_than_the_cap_is_cut_there_and_says_so() {
+    let _store = WHOLE_STORE.write().await;
     let server = MockServer::builder().start().await;
     let big = vec![b'a'; send::MAX_BODY + 1024 * 1024];
     Mock::given(method("GET"))
@@ -310,6 +315,7 @@ async fn a_held_secret_is_attached_for_its_origin_and_refused_for_another() {
 
 #[tokio::test]
 async fn a_send_is_kept_with_its_answer_and_no_secret() {
+    let _store = WHOLE_STORE.read().await;
     let server = MockServer::builder().start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(200).set_body_string("{\"b\":[1,2],\"a\":1.50}"))
@@ -532,6 +538,7 @@ fn jq_helper() {
 /// as it came; once the body is no longer kept there is nothing to run.
 #[tokio::test]
 async fn a_kept_answer_runs_through_a_file_pipeline_from_memory() {
+    let _store = WHOLE_STORE.read().await;
     use knobas_app::file_pipeline::{PipeOutput, PipeRun, PipeStep};
     use std::io::Write as _;
     jq_helper();
