@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # A landed write reads back what it moves, and looks again for what the source does after it
 
-Widens [ADR-0031](0031-refresh-is-an-optional-read-of-one-item-serialized-behind-the-run.md), with [ADR-0047](0047-a-refresh-under-a-parent-walks-it-as-a-run-and-moves-its-position.md)'s walks as the scoped read. Spec #2586, audit #2587. Björn, 2026-11-27: "whenever I do any action anywhere, I want to see the changes appear rather immediately, not just when they're synced at the next full sync." The rule below is the orchestrator's ruling from his words; he may redirect it, and this ADR stays *proposed* until the first ticket that builds it (#2592) lands it.
+Widens [ADR-0031](0031-refresh-is-an-optional-read-of-one-item-serialized-behind-the-run.md), with [ADR-0047](0047-a-refresh-under-a-parent-walks-it-as-a-run-and-moves-its-position.md)'s walks as the scoped read. Spec #2586, audit #2587. Björn, 2026-11-27: "whenever I do any action anywhere, I want to see the changes appear rather immediately, not just when they're synced at the next full sync." The rule below is the orchestrator's ruling from his words; he may redirect it. Accepted with #2592, which builds rule 1 (2026-11-27).
 
 ## Today
 
@@ -106,4 +106,11 @@ Outside the queue:
 
 - `WriteOp::delivery` grows an effects answer: a §10.8 change to `crates/knobas-source/src/**`, announced in the effects ticket's PR. The WIT does not change: an op crosses as JSON.
 - A landed write costs more reads: one refresh or walk per effect at once, and up to five quiet reads per scope on the schedule. An unchanged read writes nothing and tells the window nothing.
-- The glossary gains *effect* when this ADR is accepted.
+- The glossary gains *effect* (`CONTEXT.md`, *Acting on sources*).
+
+## As built (#2592, 2026-11-27)
+
+- **The declaration** is `WriteOp::effects` (`crates/knobas-source/src/lib.rs`), a match with no wildcard arm that `WriteOp::delivery` copies into `Delivery::effects` (`crates/knobas-spi-types/src/delivery.rs`). An effect is a `knobas_spi_types::delivery::Effect`: `Parent` (the target's declared parent) or `LinkedTickets` (the live tickets a confirmed link joins to the target, either end). `MergePullRequest` declares both, `UpdatePullRequestBranch` declares `Parent`, and every other op declares none yet; each later gap group adds its rows there, and a new kind of effect is a variant of `Effect` with its resolution in `effects.rs`.
+- **The read** is `crates/knobas-app/src/sources/effects.rs`, called by `after_landing` after the item's refresh and the follow of a run, and before `sync_after_write`. Each declared effect is resolved against the write's target from the mirror; duplicates, and the item already read back, are read once. The reads go at once and side by side, each through `sources::refresh::refresh` on its own source with the same stand-aside as the item's read-back, and each that read tells `item:refreshed` with the write's id. Each waits behind a run of its source at most 10 s (`Lock::WaitAtMost`, Postgres's `lock_timeout` on the lock's ask): a run that may not stand aside (a person's press, a first sync, a backfill) lasts minutes, and the write's own run, and every caller that waits out the write's follow-up, would wait with it. It answers an `EffectRead` per item (`Read`, `Unchanged`, `NotOffered`, `RunInFlight`, `TurnedOff`, `Failed`), which rule 3 (#2596) shows; until then `after_landing` logs what was not read.
+- **A parent is matched by the most names.** `sync.item_parent` matches a child to a parent by any one name it declares, and a Gitea pull request names its repository by `full_name` and by `name`, so a repository of the same short name under another owner matches too. Only the parents matching the most of the child's names are read.
+- **The run that follows stays**, for every write as before. It still reads what no effect names: the rows of the audit marked *run* for the write's own source, and every op that declares nothing yet. Taking it away for an op whose effects cover all it moves is a later ruling, once the gap groups have landed.

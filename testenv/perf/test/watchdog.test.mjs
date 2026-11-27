@@ -89,9 +89,11 @@ describe("the DevTools client's deadlines", () => {
     const b = await start();
     const { launch: launchLimit, connect: connectLimit } = LIMITS;
     // A socket that never opens and a Chrome that never writes its port fail at their limits however fast it started.
-    LIMITS.connect = 150;
+    // The connect limit also covers finding the page on `/json/list`, which a loaded machine took past 150 ms
+    // (`no matching page … in 150 ms`, the #2603 gate): 1 s finds the page and still fails at the socket.
+    LIMITS.connect = 1000;
     const r = await timed(attach(b.port)).finally(() => { LIMITS.connect = connectLimit; });
-    assert.match(String(r.error?.message), /DevTools socket .* did not open in 150 ms/);
+    assert.match(String(r.error?.message), /DevTools socket .* did not open in 1000 ms/);
     b.stop();
     const g = fake({ FAKE_CDP_NO_PORT: "1" });
     LIMITS.launch = 300;

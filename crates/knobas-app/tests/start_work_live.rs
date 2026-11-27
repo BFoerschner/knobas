@@ -2057,7 +2057,12 @@ impl Drop for FiledIssue {
 
 /// **Each write sent through the queue is in the mirror as Gitea holds it
 /// before the follow-up run starts** (#2098, ADR-0031): a created ticket, a
-/// comment on it, a created pull request and its merge. The app is started
+/// comment on it, a created pull request and its merge, which deletes its
+/// head branch. The merge's effects are read back before that run too
+/// (ADR-0064, #2592): the repository's walk brings the base branch's new
+/// head, the head branch gone and the issue the pull request closes shown
+/// closed, as Gitea and Forgejo both close it on this merge into a scratch
+/// base. The app is started
 /// the way the app starts it (`start_scheduler`, so `after_landing` follows
 /// each landing), its tick held off; the refresh's end is held until the
 /// mirror is read, and no run of the source has begun since the write was
@@ -2170,6 +2175,7 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
         .and_then(|(_, n)| n.parse().ok())
         .unwrap_or_else(|| panic!("{ticket} names no issue"));
     *filed.0.lock().unwrap() = Some(number);
+    let issue_number = number;
     let at_gitea = env
         .api(
             reqwest::Method::GET,
@@ -2206,7 +2212,7 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
         json!({ "CreatePullRequest": {
         "entity": format!("{GITEA}:{repo}"),
         "title": pr_title,
-        "body": "Opened through the queue to be refreshed.",
+        "body": format!("Opened through the queue to be refreshed. Closes #{issue_number}."),
         "head": head,
         "base": base,
     } }),
@@ -2233,19 +2239,76 @@ async fn each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_
     assert_eq!(payload["updated_at"], at_gitea["updated_at"]);
     assert_eq!(payload["head"]["sha"], at_gitea["head"]["sha"]);
 
-    // -- Its merge -----------------------------------------------------------
-    let (refreshed, (_, _, payload)) = sent_and_refreshed(
+    // -- Its merge, its head branch deleted ---------------------------------
+    // Its effects (ADR-0064, #2592): the repository is walked once the pull
+    // request is read, before any run, so the base branch's new head, the
+    // head branch gone and the issue the pull request closes are in the
+    // mirror as Gitea holds them while that read's end is held.
+    let base_branch = format!("{GITEA}:{repo}@refs/heads/{base}");
+    let head_branch = format!("{GITEA}:{repo}@refs/heads/{head}");
+    let (queued, refreshed, (_, _, payload)) = sent_and_held(
         &state,
         &mut heard,
-        &ack,
         json!({ "MergePullRequest": {
         "entity": pull,
         "style": "merge",
-        "delete_branch": false,
+        "delete_branch": true,
     } }),
     )
     .await;
     assert_eq!(refreshed, pull);
+    ack.send(()).expect("the pull request's refresh is waiting");
+    let repository = format!("{GITEA}:{repo}");
+    let effects = effects_held(
+        &state,
+        &mut heard,
+        &ack,
+        queued,
+        &[&base_branch, &head_branch, &ticket],
+    )
+    .await;
+    let (_, at_walk) = effects
+        .iter()
+        .find(|(entity, _)| *entity == repository)
+        .unwrap_or_else(|| panic!("the repository was not read back: {effects:?}"));
+    let base_at_gitea = env
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{repo}/branches/{base}"),
+            None,
+        )
+        .await;
+    let issue_at_gitea = env
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{repo}/issues/{issue_number}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        at_walk[&base_branch]
+            .as_ref()
+            .map(|p| p["commit"]["id"].clone()),
+        Some(base_at_gitea["commit"]["id"].clone()),
+        "the base branch's new head"
+    );
+    assert_eq!(
+        at_walk[&head_branch], None,
+        "the head branch is gone from the mirror"
+    );
+    assert_eq!(issue_at_gitea["state"], "closed", "{issue_at_gitea}");
+    assert_eq!(
+        at_walk[&ticket].as_ref().map(|p| p["state"].clone()),
+        Some(json!("closed")),
+        "the issue the pull request closes"
+    );
+    println!(
+        "the merge's effects: {} read back; the issue Gitea holds as {}",
+        effects.len(),
+        issue_at_gitea["state"]
+    );
+    settled(&state, queued).await;
+    until_run_after(&state.pool, queued).await;
     let at_gitea = env
         .api(
             reqwest::Method::GET,
@@ -2274,6 +2337,79 @@ async fn sent_and_refreshed(
     ack: &std::sync::mpsc::Sender<()>,
     payload: serde_json::Value,
 ) -> (String, (String, String, serde_json::Value)) {
+    let (queued, entity, mirrored) = sent_and_held(state, heard, payload).await;
+    ack.send(()).expect("the refresh is waiting");
+    settled(state, queued).await;
+    until_run_after(&state.pool, queued).await;
+    (entity, mirrored)
+}
+
+/// No run of the write's source has begun since write `id` was sent.
+async fn no_run_since(state: &SourcesState, id: i64, what: &str) {
+    let runs: Vec<(String, Option<String>)> = sqlx::query_as(
+        "select r.started_at::text, r.finished_at::text
+           from knobas.sync_run r, knobas.write_queue w
+          where w.id = $1 and r.source_id = w.source_id and r.started_at > w.settled_at",
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+    assert!(
+        runs.is_empty(),
+        "a run began after write {id} was sent and before {what}: {runs:?}"
+    );
+}
+
+/// The landed write's effects (ADR-0064), each refresh held as it ends:
+/// answers each entity read with the mirror's live payload of each of
+/// `watched` at that moment (`None` for one not live), and lets it go. No
+/// run of the source has begun while any is held. Waits up to 30 s for the
+/// first (a repository's walk on a loaded machine), then ends once no effect
+/// has ended for five seconds.
+async fn effects_held(
+    state: &SourcesState,
+    heard: &mut tokio::sync::mpsc::UnboundedReceiver<knobas_sync::scheduler::RefreshEnded>,
+    ack: &std::sync::mpsc::Sender<()>,
+    id: i64,
+    watched: &[&str],
+) -> Vec<(
+    String,
+    std::collections::HashMap<String, Option<serde_json::Value>>,
+)> {
+    let mut read = Vec::new();
+    while let Ok(Some(ended)) = tokio::time::timeout(
+        std::time::Duration::from_secs(if read.is_empty() { 30 } else { 5 }),
+        heard.recv(),
+    )
+    .await
+    {
+        assert_eq!(ended.write_id, Some(id), "{ended:?}");
+        no_run_since(state, id, &format!("its effect {} ended", ended.entity_id)).await;
+        let mut at = std::collections::HashMap::new();
+        for entity in watched {
+            let payload: Option<serde_json::Value> =
+                sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
+                    .bind(entity)
+                    .fetch_optional(&state.pool)
+                    .await
+                    .unwrap();
+            at.insert((*entity).to_owned(), payload);
+        }
+        ack.send(()).expect("the effect's refresh is waiting");
+        read.push((ended.entity_id, at));
+    }
+    read
+}
+
+/// Send `payload` through the queue and wait for its refresh, held: answers
+/// the write's id, the entity refreshed, and the mirror's title, text and
+/// payload for it. The caller lets the refresh go.
+async fn sent_and_held(
+    state: &SourcesState,
+    heard: &mut tokio::sync::mpsc::UnboundedReceiver<knobas_sync::scheduler::RefreshEnded>,
+    payload: serde_json::Value,
+) -> (i64, String, (String, String, serde_json::Value)) {
     use knobas_core::write_queue::WriteState;
     use knobas_sync::scheduler::RefreshEnd;
 
@@ -2294,19 +2430,7 @@ async fn sent_and_refreshed(
     // While this refresh's end is held, `after_landing` has not started the
     // follow-up run, so no run of the source has begun since the write was
     // sent and what the mirror holds for the item is the refresh's.
-    let runs: Vec<(String, Option<String>)> = sqlx::query_as(
-        "select r.started_at::text, r.finished_at::text
-           from knobas.sync_run r, knobas.write_queue w
-          where w.id = $1 and r.source_id = w.source_id and r.started_at > w.settled_at",
-    )
-    .bind(queued.id)
-    .fetch_all(&state.pool)
-    .await
-    .unwrap();
-    assert!(
-        runs.is_empty(),
-        "a run began after write {row:?} was sent and before its refresh ended: {runs:?}"
-    );
+    no_run_since(state, queued.id, "its refresh ended").await;
     let mirrored: (String, String, serde_json::Value) =
         sqlx::query_as("select title, body_text, payload from sync.live_item where entity_id = $1")
             .bind(&ended.entity_id)
@@ -2314,10 +2438,7 @@ async fn sent_and_refreshed(
             .await
             .unwrap()
             .unwrap_or_else(|| panic!("{} is not in the mirror", ended.entity_id));
-    ack.send(()).expect("the refresh is waiting");
-    settled(state, queued.id).await;
-    until_run_after(&state.pool, queued.id).await;
-    (ended.entity_id, mirrored)
+    (queued.id, ended.entity_id, mirrored)
 }
 
 /// Wait for a finished run of the Gitea source that began after write `id`

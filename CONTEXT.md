@@ -314,6 +314,10 @@ A queued write knobas will not send until the user acts, for one of three stated
 What a page draws of a write it has queued, muted beside what the source holds: *queued* while the write is open, *sent* once it has landed, gone when a read of the page shows the write itself. A write that is held, refused or withdrawn takes its echo with it. The read it waits for comes when the write's [refresh](#refresh) ends or a run of its source does. A ticket's move and its field edits are echoes too: the card stands in its new column, or shows its new value, with *Queued* then *Sent*, and an open one is drawn again from the queue after a restart.
 _Avoid_: optimistic copy, placeholder, ghost, queued mark
 
+**Effect**:
+What a landed [write-back](#write-back) moves beyond the item it is read back by, as its kind declares it beside its delivery: the target's [parent](#parent) (a merged pull request's repository, whose walk brings the base branch's new head, a deleted head branch and the issues the merge closed) or the tickets the target is [linked](#link) to, in whatever source holds them. Each is found in the [mirror](#mirror) and read at once after the write's own [refresh](#refresh), at its own source and in its own place, never by a run; the run of the write's source still follows. An effect whose read was not offered, its source turned off, or that failed shows after the next run of its source (ADR-0064).
+_Avoid_: side effect, ripple, consequence, dependent item
+
 **Note** (on a card or a field):
 What a card or a field says of a write the source refused or knobas holds: the source's own sentence, drawn from the queue's open row, gone when that row is discarded or sent.
 _Avoid_: error, warning, banner
