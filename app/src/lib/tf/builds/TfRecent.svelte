@@ -43,7 +43,7 @@
   interface Kept {
     basis: string;
     runs: RecentRun[];
-    pipelines: Map<string, RecentPipeline>;
+    pipelines: ReadonlyMap<string, RecentPipeline>;
     next: RecentCursor | null;
     scroll: number;
     opened: string | null;
@@ -155,7 +155,7 @@
   // -- the reads ---------------------------------------------------------------
   const back = kept;
   let held = $state.raw<RecentRun[] | null>(back?.runs ?? null);
-  let pipelines = $state.raw<Map<string, RecentPipeline>>(back?.pipelines ?? new Map());
+  let pipelines = $state.raw<ReadonlyMap<string, RecentPipeline>>(back?.pipelines ?? new Map());
   let next = $state.raw<RecentCursor | null>(back?.next ?? null);
   let heldFor = back?.basis ?? "";
   let failed = $state<string | null>(null);

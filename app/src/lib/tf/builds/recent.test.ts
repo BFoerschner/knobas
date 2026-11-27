@@ -137,6 +137,12 @@ test("a run's text is its own words, then its pipeline's name and place as the r
   expect(recentText({ pipeline_id: "gone", run: deploy.run }, pipes, false)).toBe(`${own}  `);
 });
 
+test("a page that names only pipelines held as they are keeps the held map, so the drawn rows are not drawn again (#2569b)", () => {
+  const held = withPipelines(new Map(), [lint]);
+  expect(withPipelines(held, [{ ...lint }])).toBe(held);
+  expect(withPipelines(held, [])).toBe(held);
+});
+
 test("a page's pipelines are laid over those held", () => {
   const held = withPipelines(new Map(), [lint]);
   const after = withPipelines(held, [{ ...lint, name: "Lint again" }]);
