@@ -889,7 +889,11 @@ async fn assert_reads_plan_without_estimates(
     let none: Vec<String> = Vec::new();
     // With a result asked, the runs it keeps are one set read once, then the
     // walk: a scan of the runs, never of every item per run.
-    for (limit, results) in [(60_i64, &none), (200, &none), (200, &vec!["Failed".to_owned()])] {
+    for (limit, results) in [
+        (60_i64, &none),
+        (200, &none),
+        (200, &vec!["Failed".to_owned()]),
+    ] {
         let plan = explain(&pool, knobas_core::builds::planned_recent_runs(), |q| {
             q.bind(declared.clone())
                 .bind(limit)
