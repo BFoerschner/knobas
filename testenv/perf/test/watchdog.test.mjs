@@ -1,7 +1,9 @@
 // The probes' watchdog (cdp.mjs, the probe-watchdog pass, 2026-11-18): against `fake-chrome.mjs`, a DevTools endpoint
 // that leaves a chosen call unanswered, dies on one, or never opens its socket, every wait ends, a case is tried once
 // more on a fresh page, then reported failed-to-run, and each gate probe goes on and reports instead of hanging.
-// Every limit runs at a hundredth (`KNOBAS_PERF_WATCHDOG_SCALE`): a 30 s call limit is 300 ms here.
+// Every limit runs at a hundredth (`KNOBAS_PERF_WATCHDOG_SCALE`): a 30 s call limit is 300 ms here. The launch limit
+// stays 60 s (`KNOBAS_PERF_LAUNCH_MS`, the probes this file starts inherit it): starting the fake Chrome is a process
+// start, which a loaded machine stretches past 300 ms (#2546); the one case of a launch that stalls sets its own.
 //
 //   node --test testenv/perf/test/        (`testenv/perf/watchdog-test.sh`, in `just check-scripts`)
 import assert from "node:assert/strict";
@@ -17,6 +19,7 @@ const perf = dirname(here);
 const FAKE = join(here, "fake-chrome.mjs");
 process.env.KNOBAS_CHROME = FAKE;
 process.env.KNOBAS_PERF_WATCHDOG_SCALE = "0.01";
+process.env.KNOBAS_PERF_LAUNCH_MS = "60000";
 const cdp = await import("../cdp.mjs");
 const { attach, launch, runCase, watch, sleep, isStalled, LIMITS } = cdp;
 
@@ -87,7 +90,9 @@ describe("the DevTools client's deadlines", () => {
     assert.match(String(r.error?.message), /DevTools socket .* did not open in 150 ms/);
     b.stop();
     const g = fake({ FAKE_CDP_NO_PORT: "1" });
-    const l = await timed(launch());
+    const launchLimit = LIMITS.launch;
+    LIMITS.launch = 300; // a Chrome that never writes its port fails at the limit however fast it started
+    const l = await timed(launch()).finally(() => { LIMITS.launch = launchLimit; });
     assert.match(String(l.error?.message), /wrote no DevToolsActivePort in 300 ms/);
   });
 });
