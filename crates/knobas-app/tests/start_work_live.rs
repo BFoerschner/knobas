@@ -1189,7 +1189,7 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 /// off Gitea's real records.
 ///
 /// The source is configured with every repository `work.json` names, so the
-/// three repositories' `under:` sets have to be told apart. What sits in a repository is asked of
+/// repositories' `under:` sets have to be told apart. What sits in a repository is asked of
 /// **Gitea**, by the repository's own listings ([`Env::everything_in`]) --
 /// not read off the mirror, and not off `repository` or `base.repo`, where the
 /// descriptor declares the parent -- so a declaration that missed, or an
@@ -1212,7 +1212,14 @@ async fn under_each_seeded_repository_finds_its_branches_and_pulls_and_its_commi
         .iter()
         .map(|r| r["name"].as_str().expect("a repo name").to_owned())
         .collect();
-    assert_eq!(repos.len(), 3, "the fixture's three repositories");
+    // Every repository `work.json` names is seeded (`seed-gitea.sh` section
+    // 4 walks `.repos[]`), and Gitea is asked for each below, so the count is
+    // the fixture's, not a copy of it here; two at least, or nothing has to
+    // be told apart.
+    assert!(
+        repos.len() >= 2,
+        "the fixture names repositories to tell apart: {repos:?}"
+    );
     let full = |name: &str| format!("{}/{name}", env.owner);
     let state = gitea_app(&env, &repos.iter().map(|r| full(r)).collect::<Vec<_>>()).await;
     sync(&state, GITEA).await;
