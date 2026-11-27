@@ -860,11 +860,13 @@ async fn an_upgrade_starts_from_the_failures_the_old_top_bar_counted() {
     // Lint: a cancel, then a failure marked read under the old model.
     let lint_grey = build(&pool, &tc, 3001, "Payout_Lint", "UNKNOWN", &at(1)).await;
     let lint_red = build(&pool, &tc, 3002, "Payout_Lint", "FAILURE", &at(2)).await;
-    sqlx::query("insert into knobas.run_read (entity_id, how, finished) values ($1, 'marked', true)")
-        .bind(&lint_red)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "insert into knobas.run_read (entity_id, how, finished) values ($1, 'marked', true)",
+    )
+    .bind(&lint_red)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     knobas_db::migrate::run(&pool)
         .await
@@ -880,7 +882,11 @@ async fn an_upgrade_starts_from_the_failures_the_old_top_bar_counted() {
     assert_eq!(counts_of(&pool, &lint).await, BubbleCounts::default());
     let mut marked = vec![old_red, older_red, deploy_red, lint_grey, lint_red];
     marked.sort();
-    assert_eq!(read(&pool).await, marked, "no pass, no newest failure, no running run");
+    assert_eq!(
+        read(&pool).await,
+        marked,
+        "no pass, no newest failure, no running run"
+    );
     assert!(!read(&pool).await.contains(&newest_red));
 
     // From here the history counts as ADR-0063 says.
