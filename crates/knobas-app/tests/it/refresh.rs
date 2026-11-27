@@ -1936,3 +1936,38 @@ async fn a_run_of_a_chain_is_read_at_once_and_keeps_the_started_runs_clock() {
     until("the follows end", || async { followed(&f).is_empty() }).await;
     f.state.scheduler.shutdown().await;
 }
+
+/// **A run of a chain read as gone is not brought again** (#2594): BUILD-2
+/// waits on BUILD-6, which the source answers gone, as a TeamCity source
+/// scoped to a project answers for a dependency in another. BUILD-6 is never
+/// mirrored, so never held as finished; it is read once, not again on every
+/// read of BUILD-2.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_of_a_chain_read_as_gone_is_not_brought_again() {
+    let f = fixture("refresh_follow_chain_gone").await;
+    mirrored(&f).await;
+    f.open_the_door();
+    *f.remote.waits.lock().unwrap() = vec!["BUILD-6".to_owned()];
+    f.remote
+        .chain
+        .lock()
+        .unwrap()
+        .insert("BUILD-6".to_owned(), (None, Vec::new()));
+    trigger_the_run(&f).await;
+    let gone = format!("{SOURCE}:BUILD-6");
+    until("BUILD-6 is read", || async {
+        !reads_of(&f, &gone).is_empty()
+    })
+    .await;
+    let reads = reads_of(&f, RUN).len();
+    until("three more reads of the started run", || async {
+        reads_of(&f, RUN).len() >= reads + 3
+    })
+    .await;
+    assert_eq!(reads_of(&f, &gone).len(), 1, "read once");
+    assert_eq!(followed(&f), [RUN]);
+
+    *f.remote.run_state.lock().unwrap() = Some("finished");
+    until("the follow ends", || async { followed(&f).is_empty() }).await;
+    f.state.scheduler.shutdown().await;
+}

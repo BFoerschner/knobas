@@ -49,11 +49,13 @@
 //! it, once a slot frees. So the started run is never stopped by its own
 //! chain, and a source has at most [`PER_SOURCE`] reads in flight however
 //! long the chain.
+//! A run of a chain read as gone (deleted, or outside a scoped source, so
+//! never mirrored) is not brought again.
 //!
 //! Not polling for somebody else's change: the press started a process, and
 //! reading it to its end is that write's read-back.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -115,7 +117,21 @@ pub fn next_wait(elapsed: Duration) -> Option<Duration> {
 
 /// The runs being followed, by source, oldest first, each with its stop.
 #[derive(Clone, Default)]
-pub(crate) struct RunFollows(Arc<Mutex<HashMap<String, VecDeque<Followed>>>>);
+pub(crate) struct RunFollows(Arc<Mutex<Follows>>);
+
+#[derive(Default)]
+struct Follows {
+    runs: HashMap<String, VecDeque<Followed>>,
+    /// The runs of a chain whose read came back [`RefreshOutcome::Gone`]:
+    /// deleted, or outside the source's scope (a TeamCity source scoped to
+    /// a project, a dependency in another), never mirrored, so never held
+    /// as finished. Not brought again, or every read of the run waiting on
+    /// one would read it again. At most [`GONE_KEPT`].
+    gone: HashSet<String>,
+}
+
+/// How many gone runs of chains are kept, past which they are forgotten.
+const GONE_KEPT: usize = 256;
 
 #[derive(Clone)]
 struct Followed {
@@ -143,7 +159,7 @@ impl RunFollows {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let runs = all.entry(source.to_owned()).or_default();
+        let runs = all.runs.entry(source.to_owned()).or_default();
         if runs.iter().any(|run| run.entity == entity) {
             return None;
         }
@@ -168,7 +184,10 @@ impl RunFollows {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let runs = all.entry(source.to_owned()).or_default();
+        if all.gone.contains(entity) {
+            return None;
+        }
+        let runs = all.runs.entry(source.to_owned()).or_default();
         if runs.len() >= PER_SOURCE || runs.iter().any(|run| run.entity == entity) {
             return None;
         }
@@ -186,12 +205,24 @@ impl RunFollows {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(runs) = all.get_mut(source) {
+        if let Some(runs) = all.runs.get_mut(source) {
             runs.retain(|run| !Arc::ptr_eq(&run.stop, stop));
             if runs.is_empty() {
-                all.remove(source);
+                all.runs.remove(source);
             }
         }
+    }
+
+    /// The run `entity` of a chain read as gone: not brought again.
+    fn gone(&self, entity: &str) {
+        let mut all = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if all.gone.len() >= GONE_KEPT {
+            all.gone.clear();
+        }
+        all.gone.insert(entity.to_owned());
     }
 
     /// The runs of `source` being followed now, oldest first.
@@ -201,7 +232,8 @@ impl RunFollows {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        all.get(source)
+        all.runs
+            .get(source)
             .map(|runs| runs.iter().map(|run| run.entity.clone()).collect())
             .unwrap_or_default()
     }
@@ -351,14 +383,18 @@ fn to_its_end(
     at_once: bool,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
-        follow(&scheduler, &source, &run.entity, &run.stop, began, at_once).await;
+        let gone = follow(&scheduler, &source, &run.entity, &run.stop, began, at_once).await;
         follows.end(&source, &run.stop);
+        if gone && at_once {
+            follows.gone(&run.entity);
+        }
     })
 }
 
 /// Read `entity` again on [`next_wait`]'s cadence, timed from `began`, until
 /// it is no run in flight, or the follow ends otherwise (the module's list);
 /// the first read at once when `at_once`. Each read brings its chain.
+/// `true` when it ended on a read that found `entity` gone.
 async fn follow(
     scheduler: &Scheduler,
     source: &str,
@@ -366,13 +402,13 @@ async fn follow(
     stop: &AtomicBool,
     began: Instant,
     at_once: bool,
-) {
+) -> bool {
     let (mut failed, mut busy) = (0, 0);
     let mut first = at_once;
     while let Some(cadence) = next_wait(began.elapsed()) {
         let wait = wait_before(cadence, std::mem::take(&mut first), busy);
         if !nap(scheduler, wait, stop).await {
-            return;
+            return false;
         }
         let read = super::refresh::refresh(scheduler, entity, None, Lock::Try);
         let outcome = if began.elapsed() < AS_A_PERSON {
@@ -388,27 +424,29 @@ async fn follow(
                 busy += 1;
                 continue;
             }
-            Ok(RefreshOutcome::Gone | RefreshOutcome::NotOffered)
+            Ok(RefreshOutcome::Gone) => return true,
+            Ok(RefreshOutcome::NotOffered)
             | Err(
                 RefreshError::TurnedOff(_)
                 | RefreshError::NotConfigured(_)
                 | RefreshError::NotAnEntity(_),
-            ) => return,
+            ) => return false,
             Err(error @ (RefreshError::Build(_) | RefreshError::Sync(_))) => {
                 failed += 1;
                 tracing::info!(%entity, failed, %error, "a followed run could not be read");
                 if failed >= FAILURES {
-                    return;
+                    return false;
                 }
                 continue;
             }
         }
         if !in_flight(scheduler, entity).await {
-            return;
+            return false;
         }
         bring_chain(scheduler, source, entity, began).await;
     }
     tracing::info!(%entity, "a followed run is still in flight after 2 h; the source's runs read it from here");
+    false
 }
 
 /// Wait `wait`, looking up every [`NAP`]: `false` once the quit has begun or
@@ -467,6 +505,17 @@ mod tests {
             wait_before(Duration::from_millis(100), false, 1),
             Duration::from_millis(100)
         );
+    }
+
+    /// **A run of a chain read as gone is not brought again** (#2594).
+    #[test]
+    fn a_run_of_a_chain_read_as_gone_is_not_brought_again() {
+        let follows = RunFollows::default();
+        let stop = follows.join("tc", "tc:build:6").expect("a free slot");
+        follows.end("tc", &stop);
+        follows.gone("tc:build:6");
+        assert!(follows.join("tc", "tc:build:6").is_none());
+        assert!(follows.join("tc", "tc:build:7").is_some(), "another is");
     }
 
     #[test]
