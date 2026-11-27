@@ -25,3 +25,9 @@ Stands beside [ADR-0048](0048-a-repositorys-files-are-indexed-outside-postgresql
 
 - The frozen IPC surface grows additively by one command, `entity_text_search`, and the types `TextQuery`, `TextFound`, `TextFile`, `TextHit`, `TextPart` and `TextFrom`, generated into `generated/entity.ts` and wrapped in `app/src/lib/ipc/entity.ts` (`docs/contract.md`). No migration. `knobas-files` gains `FileIndex::each_text`; `knobas-search` is untouched.
 - `CONTEXT.md` gains **Text search**.
+
+## Amended 2026-11-27 (#2561): words typed apart match across separators
+
+Outside *.\**, what is typed is read as words: split on spaces, each word matched literally, **in the order typed, on one line, with anything between them**, so `xy room` finds `xy_room`, `xyRoom`, `xy-room` and `xy = room`, and `room xy` finds none of them. A `"` at a word's start holds everything up to the next `"` (or the end) as one phrase, spaces included: `"xy room"` finds only `xy room`. Text with no space at all is the one literal it was, quotes and all (`"name":` still finds `"name":`). The words become one pattern, each word a group joined by the shortest run of anything but a line break, so the scan, its bounds, the path-order cut and the turns are unchanged; each word is marked in the line, not the run between. Smart case reads the whole query (one upper-case letter anywhere matches every word's case); *Aa* holds every word; *.\** reads the text as a pattern, space and all, as before. File names asked beside the lines hold the words in order too.
+
+**Rejected: letter-by-letter fuzzy matching over file contents** (the launcher's and filters' picker, ADR-0045). Over a whole repository nearly every line holds `x…y…r…o…o…m` somewhere, so the answer is noise, and the scan cannot stop early on a rare query: every line of every file would be scored, which the 500-line cap does not bound.

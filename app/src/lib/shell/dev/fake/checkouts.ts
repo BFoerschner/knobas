@@ -247,16 +247,23 @@ function fakeHeadFile(entityId: string, commit: string | null, path: string): Vi
 
 /**
  * `entity_text_search` (ADR-0062): every file of the repository's fake tree read from its source view and matched as
- * the backend matches (smart case, *Aa*, *.\**), answered as read from the clone at its `HEAD`. A walk of the listings,
- * so a shot of *Text* draws the lines a real search would.
+ * the backend matches (words in order on one line, a quoted phrase, smart case, *Aa*, *.\**), answered as read from
+ * the clone at its `HEAD`. A walk of the listings, so a shot of *Text* draws the lines a real search would.
  */
 function fakeTextSearch(entityId: string, query: TextQuery): TextFound {
   const repo = fakeRepoOf(entityId) ?? entityId;
   const answer: TextFound = { from: "clone", commit: fakeHead(repo) ?? "4c1d0aa9e2b7c4d9018e6a2b3c4d5e6f70819200", branch: null, files: [], names: [], searched: 0, skipped: 0, cut: false, invalid: null, why: null, stale: false };
   const upper = /\p{Lu}/u.test(query.regex ? query.text.replace(/\\./g, "") : query.text);
   let pattern: RegExp;
+  let words = false;
   try {
-    pattern = new RegExp(query.regex ? query.text : query.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), query.case_sensitive || upper ? "gu" : "giu");
+    const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const typed = query.text.trim();
+    // `text_search.rs`'s `terms`: no space is one literal; else words, a leading `"` holding a phrase to the next one.
+    const terms = /\s/.test(typed) ? [...typed.matchAll(/"([^"]*)"?|\S+/g)].map((m) => m[1] ?? m[0]).filter((t) => t !== "") : [typed];
+    words = !query.regex && terms.length > 1;
+    const source = query.regex ? query.text : terms.length > 1 ? terms.map((t) => `(${escape(t)})`).join("[^\\n]*?") : escape(terms[0] ?? "");
+    pattern = new RegExp(source, query.case_sensitive || upper ? "gdu" : "gdiu");
   } catch (error) {
     return { ...answer, from: "none", invalid: `The pattern does not parse: ${(error as Error).message}.` };
   }
@@ -286,9 +293,13 @@ function fakeTextSearch(entityId: string, query: TextQuery): TextFound {
       let from = 0;
       for (const match of line.matchAll(pattern)) {
         if (match[0] === "") continue;
-        if (match.index > from) parts.push({ text: line.slice(from, match.index), hit: false });
-        parts.push({ text: match[0], hit: true });
-        from = match.index + match[0].length;
+        // Words typed apart: each word's group is marked, not the run between them.
+        const spans = words ? match.indices!.slice(1).filter((span) => span !== undefined) : [[match.index, match.index + match[0].length] as [number, number]];
+        for (const [start, end] of spans) {
+          if (start > from) parts.push({ text: line.slice(from, start), hit: false });
+          parts.push({ text: line.slice(start, end), hit: true });
+          from = end;
+        }
       }
       if (parts.length === 0) return;
       if (from < line.length) parts.push({ text: line.slice(from), hit: false });
