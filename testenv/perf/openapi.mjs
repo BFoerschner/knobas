@@ -6,7 +6,12 @@
 // frame rate, its worst frame gap and its longest task; an arrow key held 30 rows its worst frame and longest task; an
 // open reports whether a row it drew moved after it drew.
 //
+//   KNOBAS_PERF=1 testenv/ui-checks/build-app.sh <checkout> <built>
 //   testenv/ui-checks/with-built.sh <built> <port> node testenv/perf/openapi.mjs --port <port> [--size WxH@s] [--throttle 1,4,6] [--only a,b] [--machine pc]
+//
+// The build is the probes' (`testenv/perf/README.md`, *The build*): a development build, so `?fake-ipc` is there. A plain
+// `npm run build` has no fake, stays on *Starting the local database* and drew nothing, which read as the explorer broken
+// (#2549); the probe now stops at once and says so.
 //
 // `--only readme,source` runs the other files' opens alone, for a build without the view (the before of a before and
 // after). Prints one line a case and throttle, and exits 1 when a median is over its line for the machine.
@@ -41,6 +46,11 @@ await c.send("Runtime.enable");
 /** The app on the fixture's OpenAPI files: at the start, and on a fresh page after a stall. */
 const home = async () => { await c.send("Page.navigate", { url: `${app}/?fake-ipc&fake-openapi#/inbox` }); await sleep(2500); };
 await home();
+if (!(await c.js("window.__TAURI_INTERNALS__ !== undefined"))) {
+  console.error(`openapi: the app at ${app} has no ?fake-ipc (a release build?); build it with KNOBAS_PERF=1 testenv/ui-checks/build-app.sh`);
+  stop();
+  process.exit(2);
+}
 
 // In the page: run `act`, then wait for `selector` (and its text, where given) in a painted frame; the ms between, and
 // whether the rows of `watch` it drew then stood elsewhere 600 ms later.

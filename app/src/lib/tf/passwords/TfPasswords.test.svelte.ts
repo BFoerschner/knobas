@@ -436,12 +436,18 @@ test("the first open sorts the folders whose rows it draws, not every folder; â†
     if (Array.isArray(this[0]) || (this[0] as { title?: unknown } | undefined)?.title !== undefined) sorted.push(this.length);
     return sort.call(this, compare);
   });
+  // No frame runs until the count is read: two frames after the draw, the overscan grows and the filter's index sorts
+  // every entry in runs, which a loaded machine let in before the read and counted against the first open (#2542).
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
   try {
     await open(ports({}, many));
     const drawn = target.querySelectorAll(".tf-pw-lhead").length;
     expect(drawn).toBeGreaterThan(2);
     expect(sorted.length).toBeLessThanOrEqual(drawn + 1);
     expect(sorted.length).toBeLessThan(50);
+    vi.advanceTimersByTime(100);
+    vi.useRealTimers();
+    await settle();
     // The first entry opens; â†“ goes through the first folder's rows and on into the next.
     const first = target.querySelector(".tf-pw-row[aria-current=true] .tf-pw-t")?.textContent;
     expect(first).toBe(text(".tf-pw-row .tf-pw-t")[0]);
@@ -449,6 +455,7 @@ test("the first open sorts the folders whose rows it draws, not every folder; â†
     await settle();
     expect(target.querySelector(".tf-pw-row[aria-current=true] .tf-pw-t")?.textContent).toBe(text(".tf-pw-row .tf-pw-t")[6]);
   } finally {
+    vi.useRealTimers();
     spy.mockRestore();
   }
 });

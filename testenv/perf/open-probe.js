@@ -62,8 +62,11 @@
       const obs = new MutationObserver(() => { r.lastChange = now(); });
       obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
       r.obs = obs;
-      const tickFrame = (t) => {
+      const tickFrame = () => {
         if (r.done) return;
+        // When this frame's script runs, not the frame's start that rAF hands in: under CPU throttle a long task holds the
+        // callback well past that start, which stamped rows useful before the reads that drew them (#2590).
+        const t = now();
         if (r.press !== null) {
           if (r.firstFrame === null) r.firstFrame = t;
           // The frame after the one that found the useful content: that one's rendering has ended by now.

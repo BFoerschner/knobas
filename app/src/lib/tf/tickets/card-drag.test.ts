@@ -48,7 +48,9 @@ function build() {
   wrap.className = "tf-board-wrap";
   const cols = document.createElement("div");
   cols.className = "tf-cols";
-  cols.getBoundingClientRect = () => rect(0, 0, 900, 700);
+  // The scroller reaches 80 px past the columns on each side, so a card carried over them is clear of its 56 px edges:
+  // at 0 every drag from the first column sat in the left edge and scrolled each frame a test awaited (#2541).
+  cols.getBoundingClientRect = () => rect(-80, 0, 990, 700);
   COLUMNS.forEach((column, at) => {
     const col = document.createElement("div");
     col.className = "tf-col";
