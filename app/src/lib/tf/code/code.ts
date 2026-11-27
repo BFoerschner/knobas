@@ -9,7 +9,6 @@
  */
 import type { AttentionGroup, CheckoutView, CodeFacts, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
-import { matchesAll } from "../filter/filter";
 
 /** `code_facts`' answer by entity id. */
 export type FactsById = ReadonlyMap<string, CodeFacts>;
@@ -236,7 +235,6 @@ export interface RepoFilter {
   team: string;
   /** The *Language* dropdown's value, or `""` for *Any*. */
   language: string;
-  text: string;
 }
 
 /** The *Team* and *Language* dropdowns' choices: every value the repositories declare, sorted. */
@@ -252,7 +250,7 @@ export function repoChoices(repos: readonly EntityRow[], facts: FactsById): { te
 /**
  * The repositories the filter keeps: yours first (an open pull request of
  * yours, or one asking your review, is in it), then by last push, newest
- * first. The words reach the name, the teams and the language.
+ * first. The rail's words narrow the list after this, by the ranking (#2532).
  *
  * Yours is the attention read's alone, so the order is decided once the
  * repositories and the open pull requests are read; a merged one of yours,
@@ -281,8 +279,7 @@ export function visibleRepos(
       if (filter.flags.includes("Has open PRs") && openCount(open, row) === 0) return false;
       const known = facts.get(row.entity_id);
       if (filter.team !== "" && !known?.teams.includes(filter.team)) return false;
-      if (filter.language !== "" && known?.language !== filter.language) return false;
-      return matchesAll(`${row.title} ${known?.teams.join(" ") ?? ""} ${known?.language ?? ""}`, filter.text);
+      return filter.language === "" || known?.language === filter.language;
     })
     .sort(
       (a, b) => Number(isMine(b)) - Number(isMine(a)) || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),

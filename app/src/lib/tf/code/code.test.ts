@@ -213,20 +213,17 @@ test("the repository filter keeps by scope, flags and words; mine first, then la
     facts("gitea:tidewater/fx-rates", { teams: ["Payments"], language: "Rust" }),
   ]);
   const names = (filter: Partial<RepoFilter>) =>
-    visibleRepos(rows, lines, checkouts, known, { scope: "all", held: () => false, flags: [], team: "", language: "", text: "", ...filter }).map(
+    visibleRepos(rows, lines, checkouts, known, { scope: "all", held: () => false, flags: [], team: "", language: "", ...filter }).map(
       (row) => row.title,
     );
 
   expect(names({})).toEqual(["tidewater/payout-service", "tidewater/fx-rates", "tidewater/ledger-api"]);
   expect(names({ team: "Payments" })).toEqual(["tidewater/fx-rates", "tidewater/ledger-api"]);
   expect(names({ language: "Kotlin" })).toEqual(["tidewater/ledger-api"]);
-  // The words reach the team and the language too (prototype-6's `r.n r.team r.lang`).
-  expect(names({ text: "kotlin" })).toEqual(["tidewater/ledger-api"]);
   expect(names({ scope: "mine" })).toEqual(["tidewater/payout-service"]);
   expect(names({ scope: "job", held: (id) => id.endsWith("fx-rates") })).toEqual(["tidewater/fx-rates"]);
   expect(names({ flags: ["Cloned here"] })).toEqual(["tidewater/ledger-api"]);
   expect(names({ flags: ["Has open PRs"] })).toEqual(["tidewater/payout-service"]);
-  expect(names({ text: "fx" })).toEqual(["tidewater/fx-rates"]);
 });
 
 test("New pull request opens the compare page for the job's branch in its repository", () => {

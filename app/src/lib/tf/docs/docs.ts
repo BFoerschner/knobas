@@ -26,7 +26,6 @@ import type {
 } from "../../ipc/entity";
 import { getContext, setContext } from "svelte";
 
-import { matchesAll } from "../filter/filter";
 import { originLabel } from "../job/job";
 import { isDone } from "../tickets/tickets";
 
@@ -916,19 +915,12 @@ export function keepDrawn(drawn: DocPage | null, next: DocPage): DocPage {
 
 /**
  * The rail's spaces as Docs' browsing draws them (PR #2479, 2026-11-17): those `hidden` names (`spaceId`s) apart, for the
- * fold at the list's end, and both kept to the spaces whose name or key holds every word of `filter` (the rail's
- * filter, Code's own bar). A space's name is as {@link spaceTitle} says it, its source too where another's shares it.
+ * fold at the list's end, in the order given. The rail's words narrow `spaces` before this, by the ranking (#2532).
  */
-export function railSpaces<Space extends DocSpace>(
-  spaces: readonly Space[],
-  hidden: ReadonlySet<string>,
-  filter: string,
-): { shown: Space[]; hidden: Space[] } {
+export function railSpaces<Space extends DocSpace>(spaces: readonly Space[], hidden: ReadonlySet<string>): { shown: Space[]; hidden: Space[] } {
   const shown: Space[] = [];
   const held: Space[] = [];
-  const typed = filter.trim() !== "";
   for (const space of spaces) {
-    if (typed && !matchesAll(`${spaceTitle(space, spaces)} ${space.key}`, filter)) continue;
     (hidden.has(spaceId(space)) ? held : shown).push(space);
   }
   return { shown, hidden: held };

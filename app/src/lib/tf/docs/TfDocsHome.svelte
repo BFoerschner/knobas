@@ -68,7 +68,7 @@
 
   const total = $derived(tree?.spaces.reduce((n, space) => n + pageCount(space), 0) ?? 0);
   /** The tiles' spaces and the fold's. */
-  const split = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, hidden, ""));
+  const split = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, hidden));
   const last = $derived(tree === null ? null : continueReading(tree));
   const forYou = $derived(tree?.for_you ?? []);
   /**

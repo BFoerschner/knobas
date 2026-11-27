@@ -545,7 +545,6 @@
           flags: repoFilter.chips["flag"] ?? [],
           team: repoFilter.dropdowns["team"] ?? "",
           language: repoFilter.dropdowns["lang"] ?? "",
-          text: "",
         }),
   );
   /**

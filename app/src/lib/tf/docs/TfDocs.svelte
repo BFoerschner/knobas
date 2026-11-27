@@ -794,10 +794,10 @@
   $effect(() => spaceOrder.ask(spaceFilter.text, tree?.spaces ?? [], spaceHaystack));
   /** The rail's spaces: the shown ones, then the hidden ones for the fold at their end, both kept to the filter's ranking. */
   const rail = $derived(
-    tree === null ? { shown: [], hidden: [] } : railSpaces(spaceOrder.rows(spaceFilter.text, tree.spaces, spaceHaystack), docsChoices.hidden, ""),
+    tree === null ? { shown: [], hidden: [] } : railSpaces(spaceOrder.rows(spaceFilter.text, tree.spaces, spaceHaystack), docsChoices.hidden),
   );
   /** Every space Docs shows, for the Space picker; the hidden ones follow under their own heading. */
-  const pickable = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden, ""));
+  const pickable = $derived(tree === null ? { shown: [], hidden: [] } : railSpaces(tree.spaces, docsChoices.hidden));
   /** The rail draws one space that is hidden: a page of it is open, or it was picked. */
   const shownHidden = $derived(shownSpace !== undefined && docsChoices.hidden.has(spaceId(shownSpace)));
 
