@@ -144,7 +144,7 @@ const numbers = () => rows().map((row) => row.querySelector(".tf-run-pno")?.text
 test("the newest runs of every pipeline, newest first, each naming its pipeline, number and folders", async () => {
   const drawn = draw();
   await settle();
-  expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null }, before: null, limit: 60 }]);
+  expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null, pipelines: [] }, before: null, limit: 60 }]);
   expect(numbers()).toEqual(["#12", "#11", "#10"]);
   const first = rows()[0]!;
   expect(first.querySelector(".tf-run-pname")?.textContent).toBe("Deploy");
@@ -427,4 +427,14 @@ test("Mark all as read with nothing narrowing asks for every run, so a press bef
   await settle();
   expect(scopes).toEqual([{ everything: true, pipelines: [], runs: ["tc:build:11"] }]);
   expect(runsRead.read?.has("tc:build:3"), "and what the backend wrote past the page").toBe(true);
+});
+
+test("a result chip draws the runs its read answers, never the rows the last filter held (the rows held under a new filter)", async () => {
+  const drawn = draw();
+  await settle();
+  drawn.next = { ...PAGE, runs: [at(LINT, run(11, "err", today(0, 30)))], pipelines: [LINT] };
+  const failed = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Failed")!;
+  failed.click();
+  await settle();
+  expect(numbers()).toEqual(["#11"]);
 });

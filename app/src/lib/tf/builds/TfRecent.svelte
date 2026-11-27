@@ -361,7 +361,9 @@
   const byId = $derived(new Map((held ?? []).map((one) => [one.run.entity_id, one])));
   const runHold = new HeldOrder<RecentRun>((one) => one.run.entity_id);
   const holdBasis = $derived(JSON.stringify([basis, filter.text, runOrder.settled(filter.text, runs)]));
-  const placed = $derived(held === null ? { rows: [] as RecentRun[], waiting: 0, stale: false } : runHold.place(typed, holdBasis));
+  // Only rows read for the filter now: a new filter's basis is here a turn before the effect that drops the last rows, and
+  // placed then they were held under it, kept as "left" once its page landed, and drawn with no run behind them.
+  const placed = $derived(held === null || heldFor !== basis ? { rows: [] as RecentRun[], waiting: 0, stale: false } : runHold.place(typed, holdBasis));
   const heldBar = $derived({ waiting: placed.waiting, stale: placed.stale, show: () => runHold.release() });
 
   let pointerOn = $state(false);
