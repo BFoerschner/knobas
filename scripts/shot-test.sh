@@ -159,7 +159,8 @@ addEventListener("keydown", (e) => {
 </script>
 HTML
 # The fixture's server takes its own port and names it, as Chrome does below: one found free and closed first can be
-# taken before the server binds it (#2589).
+# taken before the server binds it (#2589). The `${...}` is JavaScript's, not the shell's.
+# shellcheck disable=SC2016
 node -e 'const [file, out] = process.argv.slice(1); const html = require("fs").readFileSync(file);
   const s = require("http").createServer((q, r) => r.end(html)).listen(0, () => require("fs").writeFileSync(out, `${s.address().port}\n`));' \
   "$fixture/index.html" "$fixture/web.port" &
