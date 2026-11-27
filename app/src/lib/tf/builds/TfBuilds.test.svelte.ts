@@ -9,11 +9,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import * as entityIpc from "../../ipc/entity";
-import { sessionFilter } from "../filter/filter-state.svelte";
+import { sessionFilter, sessionValue } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 import { runsRead } from "./runs-read.svelte";
 import { thingAt } from "../context/thing";
-import { buildsView } from "./builds-view.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { echoEvents } from "../echo-events.fixture";
 import { echoWrite, forgetEchoes } from "../queued.svelte";
@@ -38,6 +37,12 @@ vi.mock("../../ipc/entity", async (original) => ({
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
 
+const QUIET_RECENT = {
+  recent: () => Promise.resolve({ runs: [], pipelines: [], next: null }),
+  listen: () => Promise.resolve(() => {}),
+  focused: () => false,
+};
+
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
@@ -48,7 +53,10 @@ afterEach(() => {
   page = null;
   target.remove();
   runsRead.forget();
-  buildsView.choose("pipelines");
+  // A new session: a bare #/builds opens *All pipelines* again (#2570).
+  sessionValue("builds-place").value = null;
+  sessionFilter("builds-group").scope = null;
+  sessionValue("builds-group").value = null;
 });
 
 async function settle() {
@@ -111,6 +119,8 @@ const syncNow = createRawSnippet(() => ({ render: () => '<button type="button" c
 
 function draw(rest: string[], head = "builds", asked: string[] = [], extra: Partial<BuildsPorts> = {}, sync = false) {
   const ports: BuildsPorts = {
+    // *All pipelines*' table answers nothing unless a test says (#2570): a bare #/builds draws it.
+    recent: QUIET_RECENT,
     ...extra,
     pipelines: extra.pipelines ?? (() => Promise.resolve(LIST)),
     runs: (id) => {
@@ -169,9 +179,9 @@ test("a row shows a time only where it says something, and dims the prefix its f
   expect(lint!.querySelector(".tf-pi-nm")?.textContent).toBe("Payout_Lint");
 });
 
-test("a bare #/builds selects the first failing pipeline and lists its runs newest first", async () => {
+test("a pipeline's address selects it and lists its runs newest first", async () => {
   const asked: string[] = [];
-  draw([], "builds", asked);
+  draw(["teamcity:buildType:Payout_IntegrationTests"], "builds", asked);
   await settle();
   const current = target.querySelector('.tf-pi[aria-current="true"]');
   expect(current?.querySelector(".tf-pi-nm")?.textContent).toBe("Payout_IntegrationTests");
@@ -280,7 +290,7 @@ test.each([
   expect(headerActs().at(-1)?.textContent).toBe("Sync now");
 });
 
-test("Sync now is in the Builds header while no pipeline has synced yet", async () => {
+test("Sync now is in the header of All pipelines while no pipeline has synced yet", async () => {
   page = mount(TfBuilds, {
     target,
     props: {
@@ -288,13 +298,14 @@ test("Sync now is in the Builds header while no pipeline has synced yet", async 
       head: "builds",
       rest: [],
       job: null,
-      ports: { pipelines: () => Promise.resolve([]), runs: () => Promise.resolve([]) },
+      ports: { pipelines: () => Promise.resolve([]), runs: () => Promise.resolve([]), recent: QUIET_RECENT },
       sync: syncNow,
     },
   });
   await settle();
   expect(target.querySelector(".tf-pl .tf-syncnow")).toBeNull();
-  expect(target.querySelector(".tf-bmain .tf-fhead h1")?.textContent).toBe("Builds");
+  expect(target.querySelector(".tf-bmain .tf-fhead h1")?.textContent).toBe("All pipelines");
+  expect(target.querySelector(".tf-bmain")?.textContent, "No runs yet stands in the table's box").toContain("No runs yet.");
   expect(headerActs().at(-1)?.textContent).toBe("Sync now");
 });
 
@@ -531,8 +542,8 @@ test("All is the default, as on every page; This job prunes the tree to its pipe
   expect(rows()[0]!.querySelector(".tf-pi-why")?.textContent).toBe("your branch, PR check");
   // Every fold is open while the job narrows the list.
   expect([...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].every((d) => d.open)).toBe(true);
-  // A bare #/builds opens on the job's failing pipeline.
-  expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Payout_Deploy_Prod");
+  // A bare #/builds opens on All pipelines, a job or not (#2570, Björn's answer 4).
+  expect(target.querySelector('.tf-pl-home a[aria-current="true"]')).not.toBeNull();
 
   target.querySelector<HTMLButtonElement>(".tf-scope-note button")!.click();
   flushSync();
@@ -688,11 +699,12 @@ test("a filter that opens every fold of a big CI draws only the rows near the vi
 test("a rail of a hundred pipelines draws the rows near the viewport, as the Inbox does from 40", async () => {
   const many = Array.from({ length: 120 }, (_, i) => {
     const name = `Flat_${String(i).padStart(3, "0")}`;
-    return pipeline(name, name, [run(`teamcity:build:${i}`, "ok")]);
+    // At the tree's top, so the rows are drawn with no fold to open.
+    return { ...pipeline(name, name, [run(`teamcity:build:${i}`, "ok")]), group: null };
   });
   page = mount(TfBuilds, {
     target,
-    props: { ready: true, head: "builds", rest: [], job: null, ports: { pipelines: () => Promise.resolve(many), runs: () => Promise.resolve([]) } },
+    props: { ready: true, head: "builds", rest: [], job: null, ports: { pipelines: () => Promise.resolve(many), runs: () => Promise.resolve([]), recent: QUIET_RECENT } },
   });
   await settle();
   expect(names().length).toBeGreaterThan(5);
@@ -862,59 +874,146 @@ test("a run queued here says queued on the rail at once; its row is read again w
 // *Recent* (2026-11-25): the newest runs of every pipeline, no folds
 // ---------------------------------------------------------------------------
 
-const RECENT_PORTS = (drawn: { asked: number }) => ({
-  recent: () => {
-    drawn.asked += 1;
+
+/** A folder's estate: two pipelines under *Payments › Payout*, one under *Ops*. */
+const FOLDERED: PipelineRow[] = [
+  { ...LIST[0]!, path: ["Payments", "Payout"], group: "Payout" },
+  { ...LIST[1]!, path: ["Payments", "Payout"], group: "Payout" },
+  { ...LIST[2]!, path: ["Ops"], group: "Ops" },
+];
+
+/** The table's reads, by the filter each asked. */
+const ASKING = (asked: { pipelines: string[] }[]) => ({
+  ...QUIET_RECENT,
+  recent: (filter: { pipelines: string[] }) => {
+    asked.push(filter);
     return Promise.resolve({ runs: [{ pipeline_id: LIST[0]!.entity_id, run: LIST[0]!.recent[0]! }], pipelines: [{ ...LIST[0]!, recent: undefined }], next: null } as never);
   },
-  listen: () => Promise.resolve(() => {}),
-  focused: () => false,
 });
 
-test("Pipelines / Recent is the rail top's first control; Recent goes to its address and is kept", async () => {
-  buildsView.choose("pipelines");
-  draw([]);
+/** What stands at the top of the page's right side, in order: the same at every scope (#2570). */
+const topOfMain = () =>
+  [...target.querySelector(".tf-bmain")!.querySelectorAll(":scope .tf-crumbs, :scope .tf-fhead, :scope .tf-runbar")].map((el) =>
+    el.classList.contains("tf-crumbs") ? "crumbs" : el.classList.contains("tf-fhead") ? "header" : "bar",
+  );
+
+test("All pipelines is the rail's first row, above its tools, at every scope, and the pill when selected (#2570)", async () => {
+  const asked: { pipelines: string[] }[] = [];
+  draw(["recent"], "builds", [], { recent: ASKING(asked) } as Partial<BuildsPorts>);
   await settle();
-  const top = target.querySelector(".tf-pl-top")!;
-  const view = top.firstElementChild!;
-  expect(view.getAttribute("aria-label")).toBe("Builds view");
-  expect([...view.querySelectorAll("button")].map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
-    ["Pipelines", "true"],
-    ["Recent", "false"],
-  ]);
-  [...view.querySelectorAll("button")][1]!.click();
-  expect(location.hash).toBe("#/builds/recent");
-  expect(buildsView.value).toBe("recent");
+  const rail = target.querySelector("nav.tf-pl")!;
+  expect(rail, "the rail is drawn beside the runs").not.toBeNull();
+  expect(rail.firstElementChild?.classList.contains("tf-pl-home")).toBe(true);
+  const home = rail.querySelector<HTMLAnchorElement>(".tf-pl-home a")!;
+  expect(home.querySelector(".tf-pi-nm")?.textContent).toBe("All pipelines");
+  expect(home.getAttribute("href")).toBe("#/builds/recent");
+  expect(home.getAttribute("aria-current")).toBe("true");
+  expect(target.querySelector("[aria-label='Builds view']"), "no Pipelines / Recent switch").toBeNull();
+  expect(asked).toEqual([{ sources: [], results: [], mine: false, branches: null, pipelines: [] }]);
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("All pipelines");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toContain("All pipelines");
+  expect(topOfMain()).toEqual(["crumbs", "header", "bar"]);
+  unmount(page!);
+  draw(["teamcity:buildType:Payout_Lint"]);
+  await settle();
+  expect(target.querySelector(".tf-pl-home a")?.getAttribute("aria-current"), "a pipeline's page: not the pill").toBe("false");
+  expect(topOfMain().slice(0, 2), "a pipeline's crumbs and header stand where they do").toEqual(["crumbs", "header"]);
 });
 
-test("Recent draws no rail, the switch heads its bar, and the list is read only once its first page drew", async () => {
-  const drawn = { asked: 0 };
+test("All pipelines draws before the pipeline list is read, which follows its first page", async () => {
+  const drawn: { pipelines: string[] }[] = [];
   let listed = 0;
-  draw(["recent"], "builds", [], { recent: RECENT_PORTS(drawn), pipelines: () => ((listed += 1), Promise.resolve(LIST)) } as Partial<BuildsPorts>);
+  draw(["recent"], "builds", [], { recent: ASKING(drawn), pipelines: () => ((listed += 1), Promise.resolve(LIST)) } as Partial<BuildsPorts>);
   flushSync();
-  expect(target.querySelector("nav.tf-pl")).toBeNull();
-  expect(target.querySelector(".tf-bv")?.classList.contains("tf-bv-recent")).toBe(true);
   expect(listed).toBe(0);
   await settle();
-  expect(drawn.asked).toBe(1);
+  expect(drawn).toHaveLength(1);
   expect(listed).toBe(1);
-  expect(target.querySelector("h1")?.textContent).toContain("Recent runs");
-  const bar = target.querySelector(".tf-recentbar")!;
-  expect(bar.firstElementChild?.querySelector('[aria-pressed="true"]')?.textContent).toBe("Recent");
-  expect(target.querySelector(".tf-crumbs")?.textContent).toContain("Recent");
 });
 
-test("a bare #/builds with Recent kept takes Recent's address; Pipelines takes it back to the last pipeline", async () => {
-  buildsView.choose("recent");
+test("a bare #/builds opens All pipelines the first time in a session, and where you were after that (#2570)", async () => {
   location.hash = "#/builds";
-  draw([], "builds", [], { recent: RECENT_PORTS({ asked: 0 }) } as Partial<BuildsPorts>);
+  draw([]);
   await settle();
   expect(location.hash).toBe("#/builds/recent");
-  expect(target.querySelector("nav.tf-pl")).toBeNull();
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-recentbar .tf-seg button")].find((b) => b.textContent === "Pipelines")!.click();
-  expect(buildsView.value).toBe("pipelines");
-  expect(location.hash.startsWith("#/builds")).toBe(true);
-  expect(location.hash).not.toBe("#/builds/recent");
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("All pipelines");
+  unmount(page!);
+  draw(["teamcity:buildType:Payout_Lint"]);
+  await settle();
+  unmount(page!);
+  location.hash = "#/builds";
+  draw([]);
+  await settle();
+  expect(location.hash).toBe("#/builds/teamcity%3AbuildType%3APayout_Lint");
+  expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Payout_Lint");
+  unmount(page!);
+  draw(["folder", "teamcity", "Payments", "Payout"], "builds", [], { pipelines: () => Promise.resolve(FOLDERED) });
+  await settle();
+  unmount(page!);
+  location.hash = "#/builds";
+  draw([], "builds", [], { pipelines: () => Promise.resolve(FOLDERED) });
+  await settle();
+  expect(location.hash).toBe("#/builds/folder/teamcity/Payments/Payout");
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout");
+});
+
+test("a folder's address lists the runs of its pipelines alone; its fold is the pill, and the header and crumbs name it (#2570)", async () => {
+  const asked: { pipelines: string[] }[] = [];
+  draw(["folder", "teamcity", "Payments", "Payout"], "builds", [], { pipelines: () => Promise.resolve(FOLDERED), recent: ASKING(asked) } as Partial<BuildsPorts>);
+  await settle();
+  expect(asked.map((filter) => filter.pipelines)).toEqual([[LIST[0]!.entity_id, LIST[1]!.entity_id].sort()]);
+  const fold = target.querySelector<HTMLElement>('.tf-tfold[aria-current="true"]')!;
+  expect(fold.querySelector(".tf-fold-nm")?.textContent).toBe("Payments › Payout");
+  expect(target.querySelectorAll('[aria-current="true"]'), "one selection").toHaveLength(1);
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toMatch(/Builds.*Payments.*Payout/);
+  expect(topOfMain()).toEqual(["crumbs", "header", "bar"]);
+  // The chips narrow the rail, never the table (the mockup's rule 2).
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!.click();
+  await settle();
+  expect(asked.at(-1)?.pipelines).toEqual([LIST[0]!.entity_id, LIST[1]!.entity_id].sort());
+});
+
+test("a press on a fold's name selects that folder and opens it; Enter on a fold selects it (#2570)", async () => {
+  location.hash = "#/builds/recent";
+  draw(["recent"], "builds", [], { pipelines: () => Promise.resolve(FOLDERED) });
+  await settle();
+  const ops = [...target.querySelectorAll<HTMLElement>(".tf-tfold")].find((f) => f.querySelector(".tf-fold-nm")?.textContent === "Ops")!;
+  expect((ops.parentElement as HTMLDetailsElement).open).toBe(false);
+  ops.querySelector<HTMLElement>(".tf-fold-nm")!.click();
+  flushSync();
+  expect(location.hash).toBe("#/builds/folder/teamcity/Ops");
+  expect((ops.parentElement as HTMLDetailsElement).open, "selected, it opens").toBe(true);
+  const payout = [...target.querySelectorAll<HTMLElement>(".tf-tfold")].find((f) => f.querySelector(".tf-fold-nm")?.textContent === "Payments › Payout")!;
+  payout.focus();
+  payout.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(location.hash).toBe("#/builds/folder/teamcity/Payments/Payout");
+});
+
+test("a repository's folder turns the rail to By repository and lists the pipelines its runs built (#2570)", async () => {
+  const asked: { pipelines: string[] }[] = [];
+  const built = LIST.map((p, i) => ({ ...p, recent: p.recent.map((r) => ({ ...r, commit_id: i === 2 ? null : `git:c${i}` })) }));
+  draw(["folder", "~repo", "git:payout"], "builds", [], {
+    pipelines: () => Promise.resolve(built),
+    commitRepositories: () =>
+      Promise.resolve([
+        { commit_id: "git:c0", repo_id: "git:payout", repo_title: "tidewater/payout-service" },
+        { commit_id: "git:c1", repo_id: "git:ledger", repo_title: "tidewater/ledger-api" },
+      ]),
+    recent: ASKING(asked),
+  } as Partial<BuildsPorts>);
+  await settle();
+  expect(target.querySelector('.tf-seg[aria-label="Group by"] [aria-pressed="true"]')?.textContent).toBe("By repository");
+  expect(asked.map((filter) => filter.pipelines)).toEqual([[LIST[0]!.entity_id]]);
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("tidewater/payout-service");
+  expect(target.querySelector('.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("tidewater/payout-service");
+});
+
+test("a folder knobas does not hold says so, under the header and crumbs", async () => {
+  draw(["folder", "teamcity", "Gone"]);
+  await settle();
+  expect(target.querySelector(".tf-bmain")?.textContent).toContain("knobas does not hold this folder");
 });
 
 test("Alt+click on a Builds folder recursively expands and collapses every nested folder under it", async () => {
@@ -923,7 +1022,8 @@ test("Alt+click on a Builds folder recursively expands and collapses every neste
     { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
     { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
   ];
-  draw([], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  // Api selected, so its folds open as the tree draws.
+  draw(["teamcity:buildType:a"], "builds", [], { pipelines: () => Promise.resolve(nested) });
   await settle();
   const foldSummary = (name: string) =>
     [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)!;
@@ -1003,7 +1103,7 @@ test("a failure the list did not name, marked unread, reads the list again so th
   marks(["teamcity:build:77"]);
   let reads = 0;
   const listed = (unread: string[]): PipelineRow[] => [{ ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), unread }];
-  draw([], "builds", [], {
+  draw(["teamcity:buildType:a"], "builds", [], {
     pipelines: () => {
       reads += 1;
       return Promise.resolve(listed(reads === 1 ? [] : ["teamcity:build:77"]));

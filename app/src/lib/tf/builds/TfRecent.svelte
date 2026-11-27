@@ -106,7 +106,8 @@
     ports = BRIDGE,
     crumbs,
     sync,
-    switcher,
+    title,
+    pipelines: scoped = [],
     syncRevision = 0,
     ondrawn,
   }: {
@@ -117,8 +118,13 @@
     crumbs: Snippet;
     /** The view's *Sync now* (#2106). */
     sync?: Snippet | undefined;
-    /** *Pipelines / Recent*, heading the bar where the rail would be. */
-    switcher: Snippet;
+    /** What the header names: *All pipelines*, or the folder's name (#2570). */
+    title: string;
+    /**
+     * Whose runs it lists (#2570): `[]` every pipeline's, else a folder's pipelines by id; `null` while the folder's
+     * pipelines are still being read, when it reads nothing.
+     */
+    pipelines?: readonly string[] | null;
     /** Moves when a sync ended: the head is read again. */
     syncRevision?: number;
     /** Its first page has drawn: the Builds list is read behind it, so a run opens at once. */
@@ -146,10 +152,10 @@
   });
   const scope = $derived(job !== null || filter.scope !== "job" ? filter.scope : "all");
   const asked = $derived<RecentFilter>(
-    recentFilterOf({ scope, results: filter.chips["result"] ?? [], source: filter.dropdowns["source"] ?? null }, scope === "job" ? jobBranches : null),
+    recentFilterOf({ scope, results: filter.chips["result"] ?? [], source: filter.dropdowns["source"] ?? null }, scope === "job" ? jobBranches : null, scoped ?? []),
   );
-  /** Waiting for the job's branches: *This job* reads nothing until they are known. */
-  const waiting = $derived(scope === "job" && jobBranches === null);
+  /** Waiting for the job's branches, or a folder's pipelines: nothing is read until they are known. */
+  const waiting = $derived((scope === "job" && jobBranches === null) || scoped === null);
   const basis = $derived(JSON.stringify(asked));
 
   // -- the reads ---------------------------------------------------------------
@@ -436,11 +442,19 @@
   $effect(() => runsRead.hold("recent", (held ?? []).filter((one) => failedRun(one.run)).map((one) => one.run.entity_id)));
   const narrowed = $derived(filter.text.trim() !== "" || asked.mine || asked.branches !== null || asked.results.length > 0 || asked.sources.length > 0);
   const unreadListed = $derived(placed.rows.filter((one) => unreadRun(one.run, runsRead.read)).length);
+  /** A folder's scope (#2570): its pipelines, or none at *All pipelines*. */
+  const folder = $derived(scoped !== null && scoped.length > 0 ? scoped : null);
   const markSaid = $derived(
-    narrowed ? `Mark all as read: the ${counted(unreadListed, "unread failed run", "unread failed runs")} listed` : "Mark all as read: every failed run of every pipeline",
+    narrowed
+      ? `Mark all as read: the ${counted(unreadListed, "unread failed run", "unread failed runs")} listed`
+      : folder !== null
+        ? `Mark all as read: every failed run of the pipelines in ${title}`
+        : "Mark all as read: every failed run of every pipeline",
   );
   function markAllRead() {
-    if (narrowed) void runsRead.markAll({ runs: placed.rows.filter((one) => failedRun(one.run)).map((one) => one.run.entity_id), pipelines: [] });
+    const listed = placed.rows.filter((one) => failedRun(one.run)).map((one) => one.run.entity_id);
+    if (narrowed) void runsRead.markAll({ runs: listed, pipelines: [] });
+    else if (folder !== null) void runsRead.markAll({ runs: listed, pipelines: [...folder] });
     else void runsRead.markAll({ runs: [], pipelines: [], everything: true });
   }
 
@@ -532,14 +546,13 @@
 {/snippet}
 
 {@render crumbs()}
+<!-- The scope's name (#2570), no count: the header stands as a pipeline's does, so nothing above the bar moves between scopes. -->
 <header class="tf-fhead tf-bhead">
-  <!-- The count holds its room from the first frame, unseen until read: it arriving grows nothing (nothing-moves). -->
-  <div><h1>Recent runs <span class="tf-count tf-recent-count" class:tf-unseen={held === null}>{held?.length ?? 0}</span></h1></div>
+  <div><h1>{title}</h1></div>
   {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
 
 <div class="tf-runbar tf-recentbar">
-  {@render switcher()}
   <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} held={heldBar} {after} />
 </div>
 

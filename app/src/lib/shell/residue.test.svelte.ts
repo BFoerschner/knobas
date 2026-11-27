@@ -1498,7 +1498,7 @@ const CASES: Case[] = [
           ready: true,
           job: "PAY-231",
           crumbs: createRawSnippet(() => ({ render: () => "<nav></nav>" })),
-          switcher: createRawSnippet(() => ({ render: () => "<div></div>" })),
+          title: "All pipelines",
           ports: {
             recent: () => deferred({ runs: [], pipelines: [], next: null }),
             jobBranches: () => deferred([]),
