@@ -77,6 +77,7 @@ const SMALL: Record<string, string> = {
   "tf/settings/TfFontRole.svelte  line": "the runs of one of the specimen's lines, at most eleven",
   "tf/settings/TfFontRole.svelte  knobs": "a set the code fixes: a role's knobs, at most three",
   "tf/settings/TfNotches.svelte  notches": "a set the code fixes: a slider's notches, at most fifteen",
+  "tf/settings/TfTryOn.svelte  sources": "a set the code fixes: Try it on's sources, at most four",
   "tf/settings/TfSettingsNav.svelte  node.children": "a set the code fixes: a section's children in the Settings tree",
   "tf/settings/TfThemePreview.svelte  marked(lines[key][n] ?? \"\", tokens[key][n], from, to)": "the runs of one line's tokens and its changed word",
   "tf/settings/TfThemePreview.svelte  lines.java": "a set the code fixes: the preview's eleven Java lines",

@@ -528,3 +528,31 @@ test("opened from a repository's Open in…, Save goes back to the repository an
   expect(steps).toEqual([["#/repo/gitea%3Atidewater%2Fpayout-service", true]]);
   expect(takeLanding("checkouts")).toBeNull();
 });
+
+test("Try it on pasted text saves the draft, then opens the application on it outside any repository (#2562)", async () => {
+  const tried: [string, unknown][] = [];
+  const at = appPagePlace(["checkouts", "add"])!;
+  app = mount(TfAppPage, {
+    target,
+    props: { at, apps, reads, leave: () => (left += 1), openTry: (application: string, on: unknown) => (tried.push([application, on]), Promise.resolve(["code", "/tmp/knobas-try/open-1/notes.md"])) },
+    context: pageContext(() => shown),
+  });
+  await settle();
+  type("name", "Code");
+  type("command", "code {path}");
+  // The repository's rows come first: a command's line below is filled from them.
+  expect([...target.querySelectorAll(".tf-try .tf-seg button")].map((b) => text(b))).toEqual(["A repository", "Pasted text", "A file", "A folder"]);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-try .tf-seg button")].find((b) => text(b) === "Pasted text")!.click();
+  flushSync();
+  type("try-name", "notes.md");
+  const area = target.querySelector<HTMLTextAreaElement>("#tf-app-try-text")!;
+  area.value = "# Notes\n";
+  area.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-try button")].find((b) => text(b) === "Try it")!.click();
+  await settle();
+  expect(saved.length, "saved first: only a saved command runs").toBe(1);
+  expect(tried).toEqual([["code", { kind: "text", name: "notes.md", text: "# Notes\n" }]]);
+  expect(opened, "no repository's object was opened").toEqual([]);
+  expect(toasts.items.map((t) => t.text)).toContain("Opened notes.md in Code");
+});

@@ -31,9 +31,11 @@ import type {
   RenderContent,
   RendererDefault,
   RenderRun,
+  TryOn,
   UserRenderer,
   UserRendererDraft,
 } from "./generated/app";
+import type { PipeRun, PipeStep } from "./generated/entity";
 
 export type {
   AppStatus,
@@ -75,6 +77,7 @@ export type {
   RendererDefault,
   RendererInput,
   RenderRun,
+  TryOn,
   UserRenderer,
   UserRendererDraft,
 } from "./generated/app";
@@ -231,6 +234,45 @@ export function folderRender(at: FolderAsk): Promise<FolderRenderView> {
     ask: at.ask,
     lane: at.lane ?? null,
   });
+}
+
+/**
+ * *Try it on* (#2562): a file the person chose on this disk, its bytes whole, read on the press; refused past what Code
+ * hands a renderer (`try_on::BYTES_CAP`, 50 MiB), a folder, a relative path or one gone.
+ */
+export async function tryBytes(path: string): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("try_bytes", { path }));
+}
+
+/** *Try it on*: a file pipeline's steps over pasted text or a chosen file, as `entity_file_piped` runs them in Code. */
+export function tryPiped(on: TryOn, steps: PipeStep[]): Promise<PipeRun> {
+  return invoke<PipeRun>("try_piped", { on, steps });
+}
+
+/**
+ * *Try it on*'s native picker (#2562): `tauri-plugin-dialog`'s `open`, the one command `dialog:allow-open` grants. One
+ * file or one folder, chosen by the person; `null` when the picker closed with nothing chosen. Nothing is read here: the
+ * path goes to a `try_*` command on the press that tries it.
+ *
+ * Invoked here by the plugin's own command name and argument (`{ options }`, as `@tauri-apps/plugin-dialog`'s `open`
+ * sends it) rather than through that package: one call is all knobas makes, and so the barrel's census and the dev
+ * fake see it as they see every other command.
+ */
+export async function pickPath(kind: "file" | "folder"): Promise<string | null> {
+  const picked = await invoke<string | string[] | null>("plugin:dialog|open", { options: { directory: kind === "folder", multiple: false } });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** The entity a try's folder renders and command runs are filed under, and the lane a folder renderer's try runs in. */
+export const TRY_ENTITY = "~try";
+export const TRY_LANE = "try";
+
+/**
+ * *Try it on*: saved folder renderer `renderer` on pasted text, a chosen file or a chosen folder, in the tries' own
+ * registry: read back by its token as `folder_render`'s are, stopped with {@link TRY_ENTITY} and {@link TRY_LANE}.
+ */
+export function tryFolderRender(renderer: string, on: TryOn, ask: Ask): Promise<FolderRenderView> {
+  return invoke<FolderRenderView>("try_folder_render", { renderer, on, ask });
 }
 
 /** Stop a folder render's run, waiting or going. */

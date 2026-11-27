@@ -183,3 +183,39 @@ test("a repository's Run… menu says what its file offers to add and what chang
     ]),
   ).toEqual(["2 commands from this repository, 1 changed in this repository…"]);
 });
+
+test("Try it on pasted text saves the command, then opens the run dialog on it, outside any repository (#2562)", async () => {
+  const p = ports([]);
+  const tried: [string, unknown][] = [];
+  p.tryRun = (command, on) => (
+    tried.push([command, on]),
+    Promise.resolve({ started: { run: "r1", argv: ["eslint", "/tmp/knobas-try/command-1/a.ts"], cwd: "/tmp/knobas-try/command-1", branch: null, head: null, started_at: 0, already: false }, stop: () => {} })
+  );
+  const store = new OneOffs(p);
+  await store.load();
+  view = mount(TfCommandPage, { target: document.body, props: { at: { command: null, repo: null, on: null }, store, reads } });
+  await settle();
+  const set = (id: string, value: string) => {
+    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)!;
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  };
+  set("tf-ocp-name", "Lint");
+  set("tf-ocp-cmd", "eslint {file}");
+  // A file's command is tried on pasted text, a chosen file, or a repository's file; never a folder.
+  const sources = [...document.querySelectorAll(".tf-try .tf-seg button")].map((b) => b.textContent);
+  expect(sources).toEqual(["Pasted text", "A file", "A repository"]);
+  set("tf-ocp-try-name", "a.ts");
+  set("tf-ocp-try-text", "let x = 1\n");
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-try button")].find((b) => b.textContent?.trim() === "Try it")!.click();
+  await settle();
+  expect(p.setCommands, "saved first: only a saved command runs").toHaveBeenCalledTimes(1);
+  expect(tried).toEqual([["new-0", { kind: "text", name: "a.ts", text: "let x = 1\n" }]]);
+  expect(store.open?.entityId).toBe("~try");
+  expect(store.open?.target).toEqual({ kind: "file", path: "a.ts", lines: null, at: null });
+  expect(store.open?.cwd).toBe("/tmp/knobas-try/command-1");
+  // A folder's command takes a folder or text instead.
+  set("tf-ocp-cmd", "ruff check {dir}");
+  expect([...document.querySelectorAll(".tf-try .tf-seg button")].map((b) => b.textContent)).toEqual(["A folder", "Pasted text", "A repository"]);
+});

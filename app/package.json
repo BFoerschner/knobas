@@ -15,7 +15,6 @@
     "@pierre/highlights": "0.5.2",
     "@tanstack/highlight": "1.2.12",
     "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-dialog": "2.7.3",
     "@tauri-apps/plugin-notification": "2.4.0",
     "@tauri-apps/plugin-opener": "2.5.4",
     "@terrastruct/d2": "0.1.33",

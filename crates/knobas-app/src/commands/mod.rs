@@ -167,7 +167,9 @@ pub(crate) mod mirror {
                 "{command} is in the handler list but {barrel} has no invoke<..>(\"{command}\" call"
             );
         }
-        for name in &invoked {
+        // A plugin's own command (`plugin:dialog|open`, #2562) is the plugin's handler, granted by a capability: it is in
+        // no `commands::` module's list.
+        for name in invoked.iter().filter(|name| !name.starts_with("plugin:")) {
             assert!(
                 registered.contains(name),
                 "{barrel} invokes {name}, which is not in the handler list under commands::{module}"

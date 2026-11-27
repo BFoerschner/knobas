@@ -733,8 +733,11 @@ function ipcModules(): { name: string; text: string }[] {
     .map((name) => ({ name, text: readFileSync(join(IPC_DIR, name), "utf8") }));
 }
 
-/** An `invoke` call up to its command name, which is the match's one group. */
-const INVOKE_CALL = /\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g;
+/**
+ * An `invoke` call up to its command name, which is the match's one group: knobas's own, or a plugin's that a barrel
+ * calls by the plugin's command name (`plugin:dialog|open`, *Try it on*'s picker, #2562).
+ */
+const INVOKE_CALL = /\binvoke(?:<[^>]*>)?\(\s*"([a-z0-9_]+|plugin:[a-z-]+\|[a-z_]+)"/g;
 
 /**
  * Every command name the barrel invokes, against the module that invokes it.
@@ -1319,7 +1322,7 @@ test("the fixture's resolve_url opens the SEPA page from the forms Confluence de
  */
 test("fake-answers.ts types every barrel command, and only those", () => {
   const source = readFileSync(join(REPO_ROOT, "app/src/lib/shell/dev/fake-answers.ts"), "utf8");
-  const typed = [...source.matchAll(/^ {2}([a-z0-9_]+): Answer</gm)].map((match) => match[1]!).sort();
+  const typed = [...source.matchAll(/^ {2}"?([a-z0-9_]+|plugin:[a-z-]+\|[a-z_]+)"?: Answer</gm)].map((match) => match[1]!).sort();
   expect(typed).toEqual([...barrelCommands().keys()].sort());
 });
 

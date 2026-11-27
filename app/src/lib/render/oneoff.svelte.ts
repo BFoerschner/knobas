@@ -18,6 +18,7 @@ import {
   oneoffLines,
   oneoffResult,
   oneoffRun,
+  oneoffTry,
   oneoffRuns,
   oneoffSave,
   oneoffStop,
@@ -39,6 +40,7 @@ import {
   type OneOffStarted,
   type OneOffTarget,
 } from "../ipc/oneoff";
+import { TRY_ENTITY, type TryOn } from "../ipc/app";
 import { EVENTS } from "../ipc";
 import { listen } from "@tauri-apps/api/event";
 import { push } from "../shell/toasts.svelte";
@@ -62,6 +64,8 @@ export interface OneOffPorts {
   copyRepoCommands(entityId: string, names: string[]): Promise<OneOff[]>;
   /** Hears `oneoff:moved` until the answer is called. */
   moved(handler: (row: OneOffRunRow) => void): () => void;
+  /** *Try it on* (#2562): a saved command on pasted text, a chosen file or a chosen folder. */
+  tryRun?(command: string, on: TryOn, onbatch: (batch: OneOffBatch) => void): Promise<{ started: OneOffStarted; stop: () => void }>;
 }
 
 const channelled = <T>(start: (channel: Channel<OneOffBatch>) => Promise<T>, onbatch: (batch: OneOffBatch) => void) => {
@@ -75,6 +79,7 @@ const channelled = <T>(start: (channel: Channel<OneOffBatch>) => Promise<T>, onb
 export const realOneOffPorts: OneOffPorts = {
   commands: () => oneoffCommands(),
   run: (entityId, command, target, madeToken, onbatch) => channelled((ch) => oneoffRun(entityId, command, target, madeToken, ch), onbatch).then(({ answer, stop }) => ({ started: answer, stop })),
+  tryRun: (command, on, onbatch) => channelled((ch) => oneoffTry(command, on, ch), onbatch).then(({ answer, stop }) => ({ started: answer, stop })),
   stop: (run) => oneoffStop(run),
   runs: (entityId) => oneoffRuns(entityId),
   lines: (run, from, count) => oneoffLines(run, from, count),
@@ -411,6 +416,36 @@ export class OneOffs {
         run.branch = started.branch ?? null;
         run.startedAt = started.started_at;
         this.mine.add(started.run);
+        if (run.ended !== null || this.open !== run) stop();
+        else run.hold(stop);
+      })
+      .catch((error: unknown) => {
+        run.refused = (error as { message?: string } | null)?.message ?? String(error);
+      });
+    return run;
+  }
+
+  /**
+   * *Try it on* (#2562): opens the dialog on a run of saved `command` on the person's own example, with the chosen folder
+   * (a file's own, or a throwaway one holding pasted text) in the checkout's place. A command for a file runs on the file,
+   * any other on the folder; the backend refuses what cannot be tried outside a repository, and the dialog says so.
+   */
+  openTry(command: OneOff, on: TryOn): Run {
+    this.close();
+    const name = on.kind === "text" ? on.name : on.path.slice(Math.max(on.path.lastIndexOf("/"), on.path.lastIndexOf("\\")) + 1);
+    const kind = kindOf(command.command, command.stdin);
+    const target: OneOffTarget =
+      kind === "file" ? { kind: "file", path: name, lines: null, at: null } : kind === "repository" ? { kind: "repository" } : { kind: "folder", path: "" };
+    const run = new Run(command, TRY_ENTITY, name, target, filledArgv(command, target, name));
+    this.open = run;
+    const start = this.ports.tryRun ?? realOneOffPorts.tryRun!;
+    void start(command.id, on, (batch) => run.take(batch))
+      .then(({ started, stop }) => {
+        run.id = started.run;
+        run.argv = started.argv.length > 0 ? started.argv : run.argv;
+        run.cwd = started.cwd;
+        run.branch = null;
+        run.startedAt = started.started_at;
         if (run.ended !== null || this.open !== run) stop();
         else run.hold(stop);
       })

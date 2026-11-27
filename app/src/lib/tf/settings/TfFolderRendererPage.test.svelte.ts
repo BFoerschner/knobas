@@ -61,6 +61,12 @@ function ports() {
   return { p, asked };
 }
 
+/** *Try it on*'s source (#2562), pressed. */
+async function source(words: string) {
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-try .tf-seg button")].find((b) => b.textContent?.trim() === words)!.click();
+  await settle();
+}
+
 async function settle() {
   for (let round = 0; round < 5; round += 1) {
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
@@ -146,6 +152,7 @@ test("while later batches of checkouts come in, the picked repository stays and 
   };
   app = mount(TfFolderRendererPage, { target, props: { at: { renderer: null, repo: null, folder: null }, folders: store().folders, reads: late, ports: ports().p, leave: () => {} } });
   await settle();
+  await source("A repository");
   batches.shift()!();
   await settle();
   const folders = () => [...target.querySelectorAll("#tf-frp-folders-list option")].map((o) => o.getAttribute("value"));
@@ -170,6 +177,7 @@ test("with no checkout on this disk the rows drawn while reading stay and say so
   };
   app = mount(TfFolderRendererPage, { target, props: { at: { renderer: null, repo: null, folder: null }, folders: store().folders, reads: none, ports: ports().p, leave: () => {} } });
   await settle();
+  await source("A repository");
   const rows = () => [...target.querySelectorAll(".tf-stg-row :is(input, select, button)")].map((el) => el.id || el.textContent?.trim());
   const before = rows();
   expect(before).toContain("tf-frp-repo");
@@ -256,4 +264,30 @@ test("typing {outdir} makes it a folder of files: the kind is set and the others
   select.dispatchEvent(new Event("change", { bubbles: true }));
   flushSync();
   expect(target.textContent).toContain("Put {outdir} where the tool takes its output folder.");
+});
+
+test("Try it on pasted text saves the draft, then runs it in the tries' own registry, outside any repository (#2562)", async () => {
+  const s = store();
+  const fp = ports();
+  const tried: [string, unknown, string][] = [];
+  const tryRender = (renderer: string, on: unknown, ask: string) => (
+    tried.push([renderer, on, ask]),
+    Promise.resolve({ renderer, folder: "", drawn: null, current: false, running: { state: "queued" as const }, failure: null, from: "working_tree" as const, commit: null })
+  );
+  app = mount(TfFolderRendererPage, { target, props: { at: { renderer: null, repo: null, folder: null }, folders: s.folders, reads, ports: fp.p, tryRender, leave: () => {} } });
+  await settle();
+  type("Name", "Low code");
+  type("Command", "lc {path} {out}.png");
+  await source("Pasted text");
+  type("tf-frp-try-name", "orders.lcproj");
+  const text = target.querySelector<HTMLTextAreaElement>("#tf-frp-try-text")!;
+  text.value = "<project/>";
+  text.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-try button")].find((b) => b.textContent?.trim() === "Try it")!.click();
+  await settle();
+  expect(s.saves.length, "saved first: only a saved command runs").toBe(1);
+  expect(tried).toEqual([["new-0", { kind: "text", name: "orders.lcproj", text: "<project/>" }, "open"]]);
+  expect(fp.asked, "no repository's render was asked").toEqual([]);
+  expect(target.querySelector(".tf-try .tf-stg-gap"), "drawn under the panel").not.toBeNull();
 });

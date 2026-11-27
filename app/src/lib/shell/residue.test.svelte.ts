@@ -176,6 +176,8 @@ const NOTE = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // *Try it on* (#2562): nothing is pressed while the pages mount.
+  openTry: () => deferred([]),
   // Where Docs opens and the spaces it hides (PR #2479, 2026-11-17), which the shell reads once ready: none chosen.
   docsChoices: () => Promise.resolve({ home: null, hidden: [] }),
   setDocsHome: () => Promise.resolve({ home: null, hidden: [] }),
@@ -346,6 +348,13 @@ vi.mock("../ipc/app", () => ({
   folderRenderers: () => deferred([]),
   setFolderRenderers: (list: unknown[]) => deferred(list),
   folderRender: () => new Promise(() => {}),
+  // *Try it on* (#2562): nothing is pressed while these mount, so nothing is read.
+  tryBytes: () => deferred(new Uint8Array()),
+  tryPiped: () => deferred({ outcome: "done", name: "a", output: { kind: "text", text: "" } }),
+  tryFolderRender: () => new Promise(() => {}),
+  pickPath: () => deferred(null),
+  TRY_ENTITY: "~try",
+  TRY_LANE: "try",
   folderRenderStop: () => deferred(undefined),
   folderRenderLeave: () => deferred(undefined),
   folderRenderOutput: () => deferred(new Uint8Array()),
@@ -606,6 +615,7 @@ const { fakeCompareBackend } = await import("../render/folder-compare.test-suppo
 const TfRendererSwitch = (await import("../tf/render/TfRendererSwitch.svelte")).default;
 const TfPrPicker = (await import("../tf/pr/TfPrPicker.svelte")).default;
 const TfFilePipeline = (await import("../tf/render/TfFilePipeline.svelte")).default;
+const TfTryDraw = (await import("../tf/render/TfTryDraw.svelte")).default;
 const TfPipelinesSettings = (await import("../tf/settings/TfPipelinesSettings.svelte")).default;
 const { createNamedPipelines, createCommandSteps } = await import("../render/pipelines.svelte");
 const { createRendererDefaults } = await import("../render/defaults.svelte");
@@ -1897,6 +1907,28 @@ const CASES: Case[] = [
           renderer: { id: "command:cat", name: "Cat", patterns: [], fences: [], input: "text", output: "html", diff: false },
           text: "<p>x</p>",
           commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
+        },
+      }),
+    }),
+  },
+  {
+    /** *Try it on*'s drawing (#2562): a chosen file's read and a pipeline's run, both answering late. */
+    name: "TfTryDraw",
+    source: "lib/tf/render/TfTryDraw.svelte",
+    open: (target) => ({
+      app: mount(TfTryDraw, {
+        target,
+        props: {
+          on: { kind: "path", path: "/Users/mara/examples/a.md" },
+          pipeline: "p",
+          defaults: [],
+          pipelines: [{ id: "p", name: "Upper", steps: [{ step: "base64_decode" }], fields: [] }],
+          ports: {
+            bytes: () => deferred(new TextEncoder().encode("# A")),
+            piped: () => deferred({ outcome: "done", name: "a.md", output: { kind: "text", text: "# A" } }),
+            commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
+            frame: () => deferred("t"),
+          },
         },
       }),
     }),
