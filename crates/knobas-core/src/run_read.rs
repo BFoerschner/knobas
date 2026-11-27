@@ -34,7 +34,7 @@ use crate::CoreError;
 /// one predicate every reader of "read" asks: the Builds list's unread
 /// failures (`crate::builds::PIPELINES`), the Inbox's failed builds
 /// (`crate::inbox`'s `failed_build!`), the window's set ([`read_runs`]) and
-/// the top bar's count ([`count_read`]). A mark that does not read its run
+/// the counts ([`RUN_COUNTS`]). A mark that does not read its run
 /// was taken while it ran, and takes only its blue.
 #[macro_export]
 macro_rules! reads {
@@ -371,22 +371,6 @@ pub async fn mark_opened(
         .is_some())
 }
 
-/// How many of `runs` a mark reads: what the top bar's count takes away from
-/// the failing pipelines' newest runs.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if the read fails.
-pub async fn count_read(pool: &PgPool, runs: &[String]) -> Result<i64, CoreError> {
-    Ok(sqlx::query_scalar(concat!(
-        "select count(*) from knobas.run_read rr where rr.entity_id = any($1::text[]) and ",
-        crate::reads!("rr")
-    ))
-    .bind(runs)
-    .fetch_one(pool)
-    .await?)
-}
-
 /// The run `run` marked, against an executor the caller chooses: the Inbox's
 /// *Done* on a failed build writes it in the transaction of its own answer
 /// (`crate::inbox::complete_with`'s shape). The mark records whether the run
@@ -433,9 +417,386 @@ pub fn failed_build_run(item_key: &str) -> Option<&str> {
         .filter(|run| !run.is_empty())
 }
 
+// -- the counts and the instants (#2568, ADR-0063) ---------------------------
+
+/// The `knobas.setting` key holding the instants green, yellow and grey
+/// count from (ADR-0063, *The instant*): a JSON object with `at`, when Builds
+/// was last left, `pipelines`, each pipeline's own a scope's mark moved, and
+/// `visit`, when Builds came in front, while it is. Each an instant as
+/// Postgres reads a `timestamptz`. [`RUN_COUNTS`] spells it as a literal, and
+/// `the_instants_are_read_by_their_constant` holds the two together.
+pub const SEEN_SETTING: &str = "builds.seen";
+
+/// How many runs stand in each of the five bubbles (ADR-0063), unread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct BubbleCounts {
+    /// Running, no mark of any kind.
+    pub blue: u32,
+    /// Passed, ended after the instant, no mark reads it.
+    pub green: u32,
+    /// Passed with warnings, as green.
+    pub yellow: u32,
+    /// Failed, no mark reads it, however long ago.
+    pub red: u32,
+    /// Cancelled, or an end no tone names, as green.
+    pub grey: u32,
+}
+
+impl BubbleCounts {
+    fn add(&mut self, other: &Self) {
+        self.blue += other.blue;
+        self.green += other.green;
+        self.yellow += other.yellow;
+        self.red += other.red;
+        self.grey += other.grey;
+    }
+}
+
+/// One pipeline's unread runs by bubble. A pipeline with none is not
+/// answered.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct PipelineCounts {
+    /// The pipeline's entity id.
+    pub pipeline: String,
+    /// Its runs in each bubble.
+    pub counts: BubbleCounts,
+}
+
+/// The unread runs of every pipeline the Builds list draws, by bubble
+/// ([`run_counts`]): what the top bar, the rail and the rows draw. A folder
+/// is the sum of its pipelines; everything is [`RunCounts::total`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct RunCounts {
+    /// Each pipeline with an unread run, by entity id.
+    pub pipelines: Vec<PipelineCounts>,
+    /// Every pipeline's summed.
+    pub total: BubbleCounts,
+    /// Whether Builds is in front ([`builds_in_front`]): then green, yellow
+    /// and grey count only the runs that ended before it came in front, the
+    /// visit's (question 2 on #2554), and [`RunCounts::fresh`] names them.
+    pub visiting: bool,
+    /// While [`RunCounts::visiting`], the runs green, yellow and grey count,
+    /// so a row can draw its dot; empty otherwise.
+    pub fresh: Vec<String>,
+}
+
+/// The unread runs of each pipeline by bubble (ADR-0063), `$1` the
+/// declarations and `$2` the sources filling the CI role: the pipelines the
+/// Builds list draws (`crate::builds::PIPELINES`), each over its runs as
+/// [`runs_of!`] reads them, once.
+///
+/// * **Blue**: running, and no mark at all.
+/// * **Red**: failed, and no mark reads it ([`reads!`]), the list's `unread`.
+/// * **Green, yellow, grey**: ended, no mark reads it, and stamped
+///   (`sync.run_finished`, migration `0106`) after the pipeline's instant:
+///   the later of [`SEEN_SETTING`]'s `at` and the pipeline's own. While
+///   Builds is in front, stamped no later than `visit` too: a run that ends
+///   while you look counts in none.
+///
+/// **Its plan** (`read_plans.rs`): the runs are [`runs_of!`]'s range of
+/// `item_pipeline_runs_idx` per pipeline; the marks and the stamps are probed
+/// by key per run that stands in a bubble. About 3 µs a run, the cost of the
+/// list's unread failures, which read the same range.
+///
+/// Public so the app's `tests/it/read_plans.rs` can read its plan.
+pub const RUN_COUNTS: &str = concat!(
+    "with ",
+    crate::frame_kinds_cte!(),
+    ", ",
+    crate::run_keys!("$1"),
+    ",
+p as materialized (
+  select i.entity_id, i.source_id, c.kind as adapter_kind, ",
+    crate::declared_string!("$1", "pipeline"),
+    " as pkey, ",
+    crate::declared_string!("$1", "name"),
+    " as name
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config c on c.id = i.source_id
+   where f.frame = 'pipeline' and i.source_id = any($2::text[])
+),
+seen as materialized (
+  select coalesce((s.value->>'at')::timestamptz, '-infinity'::timestamptz) as at,
+         case when jsonb_typeof(s.value->'pipelines') = 'object'
+              then s.value->'pipelines' else '{}'::jsonb end as own,
+         (s.value->>'visit')::timestamptz as visit
+    from (values (1)) as one (x)
+    left join knobas.setting s on s.key = 'builds.seen' and jsonb_typeof(s.value) = 'object'
+),
+runs as (
+  select t.entity_id as pipeline, i.entity_id as run, ",
+    crate::run_bubble!(),
+    " as bubble",
+    crate::runs_of!("p"),
+    "
+     and t.pkey is not null and t.name is not null
+),
+counted as (
+  select r.pipeline, r.run, r.bubble, seen.visit is not null as visiting
+    from runs r cross join seen
+   where r.bubble is not null
+     and case r.bubble
+           when 'blue' then not exists (select 1 from knobas.run_read rr where rr.entity_id = r.run)
+           when 'red' then not exists (select 1 from knobas.run_read rr
+                                        where rr.entity_id = r.run and ",
+    crate::reads!("rr"),
+    ")
+           else exists (select 1 from sync.run_finished rf
+                         where rf.entity_id = r.run
+                           and rf.seen > greatest(seen.at, coalesce((seen.own->>r.pipeline)::timestamptz,
+                                                                     '-infinity'::timestamptz))
+                           and (seen.visit is null or rf.seen <= seen.visit))
+                and not exists (select 1 from knobas.run_read rr
+                                 where rr.entity_id = r.run and ",
+    crate::reads!("rr"),
+    ")
+         end
+)
+select c.pipeline,
+       (count(*) filter (where c.bubble = 'blue'))::bigint as blue,
+       (count(*) filter (where c.bubble = 'green'))::bigint as green,
+       (count(*) filter (where c.bubble = 'yellow'))::bigint as yellow,
+       (count(*) filter (where c.bubble = 'red'))::bigint as red,
+       (count(*) filter (where c.bubble = 'grey'))::bigint as grey,
+       coalesce(array_agg(c.run order by c.run)
+                  filter (where c.visiting and c.bubble in ('green', 'yellow', 'grey')),
+                '{}'::text[]) as fresh
+  from counted c
+ group by c.pipeline
+ order by c.pipeline
+"
+);
+
+/// Whether Builds is in front, as [`SEEN_SETTING`] holds it.
+const VISITING: &str = "select coalesce((select s.value ? 'visit' from knobas.setting s
+                          where s.key = 'builds.seen' and jsonb_typeof(s.value) = 'object'), false)";
+
+/// The unread runs of every pipeline of the sources in `fillers`, by bubble
+/// ([`RUN_COUNTS`]).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the read fails.
+pub async fn run_counts(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+    fillers: &[String],
+) -> Result<RunCounts, CoreError> {
+    let rows: Vec<(String, i64, i64, i64, i64, i64, Vec<String>)> = sqlx::query_as(RUN_COUNTS)
+        .bind(declarations.as_param())
+        .bind(fillers)
+        .fetch_all(pool)
+        .await?;
+    let visiting: bool = sqlx::query_scalar(VISITING).fetch_one(pool).await?;
+    let n = |v: i64| u32::try_from(v).unwrap_or(u32::MAX);
+    let mut answer = RunCounts {
+        visiting,
+        ..RunCounts::default()
+    };
+    for (pipeline, blue, green, yellow, red, grey, fresh) in rows {
+        let counts = BubbleCounts {
+            blue: n(blue),
+            green: n(green),
+            yellow: n(yellow),
+            red: n(red),
+            grey: n(grey),
+        };
+        answer.total.add(&counts);
+        answer.fresh.extend(fresh);
+        answer.pipelines.push(PipelineCounts { pipeline, counts });
+    }
+    Ok(answer)
+}
+
+/// [`SEEN_SETTING`]'s value. A value that is not this shape (an older or a
+/// broken knobas) reads as no instant at all, and the next write replaces it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Seen {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pipelines: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    visit: Option<String>,
+}
+
+/// A pipeline's own instant before a mark moved it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct PipelineSeen {
+    /// The pipeline's entity id.
+    pub pipeline: String,
+    /// Its own instant before, `None` where it had none.
+    pub before: Option<String>,
+}
+
+/// What a scope's mark did to the instants ([`move_seen`]), which its *Undo*
+/// hands back to [`put_back_seen`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct SeenMove {
+    /// The instant it moved them to.
+    pub to: String,
+    /// Whether it moved the one instant, `at` ([`MarkScope::everything`]).
+    pub everything: bool,
+    /// `at` before, where `everything`.
+    pub at: Option<String>,
+    /// Each pipeline's own before, for [`MarkScope::pipelines`].
+    pub pipelines: Vec<PipelineSeen>,
+}
+
+/// [`SEEN_SETTING`] in `tx`, locked until it commits, and the transaction's
+/// instant as an RFC 3339 string to the microsecond, as Postgres holds one.
+async fn seen_for_update(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(Seen, String), CoreError> {
+    let (now, value): (chrono::DateTime<chrono::Utc>, Option<serde_json::Value>) =
+        sqlx::query_as(
+            "select now(), (select s.value from knobas.setting s where s.key = $1 for update)",
+        )
+        .bind(SEEN_SETTING)
+        .fetch_one(&mut **tx)
+        .await?;
+    let seen = value
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    Ok((
+        seen,
+        now.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+    ))
+}
+
+async fn write_seen(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    seen: &Seen,
+) -> Result<(), CoreError> {
+    let value = serde_json::to_value(seen).unwrap_or_else(|_| serde_json::json!({}));
+    sqlx::query(
+        "insert into knobas.setting as s (key, value) values ($1, $2)
+         on conflict (key) do update set value = excluded.value, updated_at = now()",
+    )
+    .bind(SEEN_SETTING)
+    .bind(value)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// A scope's *Mark all as read* on green, yellow and grey (ADR-0063): it
+/// moves the scope's instant to now, the one instant for *everything*, each
+/// pipeline's own for a set of pipelines. Runs by id move nothing. Answers
+/// what it moved, `None` when the scope reaches no pipeline.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn move_seen(pool: &PgPool, scope: &MarkScope) -> Result<Option<SeenMove>, CoreError> {
+    if !scope.reaches_pipelines() {
+        return Ok(None);
+    }
+    let mut tx = pool.begin().await?;
+    let (mut seen, now) = seen_for_update(&mut tx).await?;
+    let at = if scope.everything {
+        seen.at.replace(now.clone())
+    } else {
+        None
+    };
+    let mut pipelines: Vec<PipelineSeen> = Vec::new();
+    if !scope.everything {
+        for pipeline in &scope.pipelines {
+            if pipelines.iter().any(|p| &p.pipeline == pipeline) {
+                continue;
+            }
+            let before = seen.pipelines.insert(pipeline.clone(), now.clone());
+            pipelines.push(PipelineSeen {
+                pipeline: pipeline.clone(),
+                before,
+            });
+        }
+    }
+    write_seen(&mut tx, &seen).await?;
+    tx.commit().await?;
+    Ok(Some(SeenMove {
+        to: now,
+        everything: scope.everything,
+        at,
+        pipelines,
+    }))
+}
+
+/// *Undo* of [`move_seen`]: each instant it moved goes back, unless it has
+/// moved since (leaving Builds moves `at` and drops every pipeline's own).
+/// Answers whether any went back.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn put_back_seen(pool: &PgPool, moved: &SeenMove) -> Result<bool, CoreError> {
+    let mut tx = pool.begin().await?;
+    let (mut seen, _) = seen_for_update(&mut tx).await?;
+    let mut back = false;
+    if moved.everything && seen.at.as_ref() == Some(&moved.to) {
+        seen.at.clone_from(&moved.at);
+        back = true;
+    }
+    for p in &moved.pipelines {
+        if seen.pipelines.get(&p.pipeline) == Some(&moved.to) {
+            match &p.before {
+                Some(before) => seen.pipelines.insert(p.pipeline.clone(), before.clone()),
+                None => seen.pipelines.remove(&p.pipeline),
+            };
+            back = true;
+        }
+    }
+    if back {
+        write_seen(&mut tx, &seen).await?;
+    }
+    tx.commit().await?;
+    Ok(back)
+}
+
+/// Builds came in front (`front`), or stopped being in front: the shell's
+/// section change, and the quit while on it (ADR-0063, *The instant*). Coming
+/// in front holds the visit's start, so green counts what ended before it for
+/// the whole visit; leaving moves the one instant to now and drops every
+/// pipeline's own, which are all older. Leaving when Builds was not in front
+/// writes nothing. Answers whether it wrote.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn builds_in_front(pool: &PgPool, front: bool) -> Result<bool, CoreError> {
+    let mut tx = pool.begin().await?;
+    let (mut seen, now) = seen_for_update(&mut tx).await?;
+    if front {
+        seen.visit.get_or_insert(now);
+    } else if seen.visit.take().is_some() {
+        seen.at = Some(now);
+        seen.pipelines.clear();
+    } else {
+        return Ok(false);
+    }
+    write_seen(&mut tx, &seen).await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::failed_build_run;
+    use super::{RUN_COUNTS, SEEN_SETTING, VISITING, failed_build_run};
+
+    /// [`RUN_COUNTS`] and [`VISITING`] spell the setting's key as a literal
+    /// inside a `concat!`: this holds them to [`SEEN_SETTING`].
+    #[test]
+    fn the_instants_are_read_by_their_constant() {
+        let key = format!("s.key = '{SEEN_SETTING}'");
+        assert!(RUN_COUNTS.contains(&key));
+        assert!(VISITING.contains(&key));
+    }
 
     #[test]
     fn a_failed_builds_key_names_its_run_and_no_other_key_does() {

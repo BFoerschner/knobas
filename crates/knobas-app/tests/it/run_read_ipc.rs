@@ -7,8 +7,9 @@
 
 use knobas_app::commands::entity::{
     MarkScope, RunMarks, complete_inbox_item_inner, inbox_items_inner, mark_run_opened_inner,
-    mark_runs_read_inner, mark_runs_unread_inner, unread_failing_builds_inner,
+    mark_runs_read_inner, mark_runs_unread_inner, run_counts_inner,
 };
+use knobas_core::run_read::BubbleCounts;
 
 const ME: &str = "mara.lindqvist";
 
@@ -284,11 +285,10 @@ async fn a_pipelines_mark_writes_its_finished_failures_and_answers_what_it_wrote
     assert_eq!(marks(&pool).await, RunMarks::default());
 }
 
-/// The top bar's count is pipelines whose newest run failed and is unread:
-/// reading that run takes the pipeline off it, and a new failure is a new run
-/// with no mark, so it asks again.
+/// The red count is the failures no mark reads: reading one takes it off,
+/// and a new failure is a new run with no mark, so it asks again.
 #[tokio::test]
-async fn the_count_drops_when_the_newest_failure_is_read_and_a_new_failure_asks_again() {
+async fn the_red_count_drops_when_a_failure_is_read_and_a_new_failure_asks_again() {
     let (pool, tc) = scratch("run-read-count").await;
     configuration(&pool, &tc, "Payout_Tests").await;
     configuration(&pool, &tc, "Payout_Lint").await;
@@ -311,9 +311,7 @@ async fn the_count_drops_when_the_newest_failure_is_read_and_a_new_failure_asks_
     )
     .await;
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry())
-            .await
-            .unwrap(),
+        total(&pool).await.red,
         1
     );
 
@@ -321,9 +319,7 @@ async fn the_count_drops_when_the_newest_failure_is_read_and_a_new_failure_asks_
         .await
         .unwrap();
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry())
-            .await
-            .unwrap(),
+        total(&pool).await.red,
         0,
         "read, the pipeline asks for nothing"
     );
@@ -338,9 +334,7 @@ async fn the_count_drops_when_the_newest_failure_is_read_and_a_new_failure_asks_
     )
     .await;
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry())
-            .await
-            .unwrap(),
+        total(&pool).await.red,
         1,
         "a new failure is unread"
     );
@@ -673,9 +667,7 @@ async fn a_failed_run_opened_is_read_and_its_inbox_line_goes() {
     let key = format!("failed_build:{red}");
     assert!(inbox_keys(&pool).await.contains(&key));
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry())
-            .await
-            .unwrap(),
+        total(&pool).await.red,
         1
     );
 
@@ -687,9 +679,7 @@ async fn a_failed_run_opened_is_read_and_its_inbox_line_goes() {
     assert_eq!(read(&pool).await, std::slice::from_ref(&red));
     assert!(!inbox_keys(&pool).await.contains(&key), "its line went");
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry())
-            .await
-            .unwrap(),
+        total(&pool).await.red,
         0,
         "and the top bar's count"
     );
@@ -793,9 +783,7 @@ async fn a_mark_of_everything_needs_no_pipeline_and_undo_takes_back_exactly_it()
     assert_eq!(wrote.while_running, std::slice::from_ref(&running));
     assert_eq!(line.expect("one line").detail["runs"], 3);
     assert_eq!(
-        unread_failing_builds_inner(&pool, &registry())
-            .await
-            .unwrap(),
+        total(&pool).await.red,
         0
     );
 
@@ -864,4 +852,251 @@ async fn inbox_keys(pool: &sqlx::PgPool) -> Vec<String> {
     .into_iter()
     .map(|entry| entry.item.key)
     .collect()
+}
+
+// -- the counts by bubble and the instants (#2568) ---------------------------
+
+/// Every pipeline's unread runs summed, as the top bar reads them.
+async fn total(pool: &sqlx::PgPool) -> BubbleCounts {
+    run_counts_inner(pool, &registry()).await.unwrap().total
+}
+
+/// One pipeline's unread runs, zero where it has none.
+async fn counts_of(pool: &sqlx::PgPool, pipeline: &str) -> BubbleCounts {
+    run_counts_inner(pool, &registry())
+        .await
+        .unwrap()
+        .pipelines
+        .into_iter()
+        .find(|p| p.pipeline == pipeline)
+        .map(|p| p.counts)
+        .unwrap_or_default()
+}
+
+/// The source has synced whole once: from now, a run the mirror sees end is
+/// news (migration `0106`). Before, its whole history was being read. The
+/// declarations are stored by then, as the app's first read stores them, so
+/// a run the sync writes gets its stored row in the same statement.
+async fn synced_once(pool: &sqlx::PgPool, source: &str) {
+    run_counts_inner(pool, &registry()).await.unwrap();
+    sqlx::query("update knobas.source_config set cursor = 'synced' where id = $1")
+        .bind(source)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// A run moved at the source, as a sync writes it: the item's `synced_at` is the run's
+/// transaction, as `ITEM_UPSERT` writes it on a row that changed.
+async fn synced(pool: &sqlx::PgPool, run: &str, status: &str) {
+    let id: i64 = run.rsplit(':').next().unwrap().parse().unwrap();
+    let config: String =
+        sqlx::query_scalar("select payload->>'buildTypeId' from sync.item where entity_id = $1")
+            .bind(run)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    sqlx::query("update sync.item set payload = $2, synced_at = now() where entity_id = $1")
+        .bind(run)
+        .bind(payload(id, &config, status))
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+fn counts(blue: u32, green: u32, yellow: u32, red: u32, grey: u32) -> BubbleCounts {
+    BubbleCounts {
+        blue,
+        green,
+        yellow,
+        red,
+        grey,
+    }
+}
+
+/// The spec's table, run by run (ADR-0063): blue is running with no mark,
+/// red a failure no mark reads, green and grey a pass and a cancel that
+/// ended after the instant and no mark reads. A queued run is in none.
+#[tokio::test]
+async fn the_counts_answer_each_bubble_as_the_spec_table_defines_it() {
+    let (pool, tc) = scratch("run-counts-table").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    synced_once(&pool, &tc).await;
+    let at = |h: u32| format!("2026-08-21T{h:02}:00:00Z");
+    // Before the instant: a pass Builds was left after.
+    build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", &at(1)).await;
+    knobas_core::run_read::builds_in_front(&pool, true)
+        .await
+        .unwrap();
+    knobas_core::run_read::builds_in_front(&pool, false)
+        .await
+        .unwrap();
+    assert_eq!(counts_of(&pool, &tests).await, BubbleCounts::default(), "seen");
+
+    build(&pool, &tc, 1002, "Payout_Tests", "running", &at(2)).await;
+    let marked_running = build(&pool, &tc, 1003, "Payout_Tests", "running", &at(3)).await;
+    build(&pool, &tc, 1004, "Payout_Tests", "queued", &at(4)).await;
+    build(&pool, &tc, 1005, "Payout_Tests", "SUCCESS", &at(5)).await;
+    let opened_pass = build(&pool, &tc, 1006, "Payout_Tests", "SUCCESS", &at(6)).await;
+    build(&pool, &tc, 1007, "Payout_Tests", "FAILURE", &at(7)).await;
+    let marked_red = build(&pool, &tc, 1008, "Payout_Tests", "FAILURE", &at(8)).await;
+    let opened_red = build(&pool, &tc, 1009, "Payout_Tests", "FAILURE", &at(9)).await;
+    build(&pool, &tc, 1010, "Payout_Tests", "UNKNOWN", &at(10)).await;
+    assert_eq!(
+        counts_of(&pool, &tests).await,
+        counts(2, 2, 0, 3, 1),
+        "before any mark"
+    );
+
+    mark_runs_read_inner(
+        &pool,
+        &registry(),
+        &by_id(&[marked_running.clone(), marked_red]),
+    )
+    .await
+    .unwrap();
+    for run in [&opened_pass, &opened_red] {
+        mark_run_opened_inner(&pool, &registry(), run).await.unwrap();
+    }
+    let answer = run_counts_inner(&pool, &registry()).await.unwrap();
+    assert_eq!(answer.pipelines.len(), 1);
+    assert_eq!(answer.pipelines[0].counts, counts(1, 1, 0, 1, 1));
+    assert_eq!(answer.total, counts(1, 1, 0, 1, 1), "the top bar's sum");
+    assert!(!answer.visiting && answer.fresh.is_empty());
+
+    // The run marked while it ran fails: red, the mark took only its blue.
+    synced(&pool, &marked_running, "FAILURE").await;
+    assert_eq!(counts_of(&pool, &tests).await, counts(1, 1, 0, 2, 1));
+}
+
+/// Nothing old turns green (ADR-0063): the runs a source's first sync reads,
+/// before it has a cursor, are older than any instant, and so is a pass that
+/// ended before stamping existed.
+#[tokio::test]
+async fn a_sources_first_sync_turns_nothing_green() {
+    let (pool, tc) = scratch("run-counts-first-sync").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", "2026-08-21T01:00:00Z").await;
+    let running = build(&pool, &tc, 1002, "Payout_Tests", "running", "2026-08-21T02:00:00Z").await;
+    assert_eq!(counts_of(&pool, &tests).await, counts(1, 0, 0, 0, 0));
+
+    synced_once(&pool, &tc).await;
+    // A sync writes the old pass again with nothing new: still not news.
+    synced(&pool, "tc:build:1001", "SUCCESS").await;
+    synced(&pool, &running, "SUCCESS").await;
+    assert_eq!(
+        counts_of(&pool, &tests).await,
+        counts(0, 1, 0, 0, 0),
+        "only the run seen ending"
+    );
+}
+
+/// The green instant (ADR-0063, question 2 on #2554): coming in front holds
+/// the visit's green, a pass that lands while Builds is in front adds none
+/// and a failure turns its blue red; leaving clears the green, and the
+/// instant is kept across a restart.
+#[tokio::test]
+async fn a_visit_holds_its_green_and_leaving_clears_it_for_good() {
+    let (pool, tc) = scratch("run-counts-visit").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    synced_once(&pool, &tc).await;
+    let pass = build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", "2026-08-21T01:00:00Z").await;
+    let running = build(&pool, &tc, 1002, "Payout_Tests", "running", "2026-08-21T02:00:00Z").await;
+    let failing = build(&pool, &tc, 1003, "Payout_Tests", "running", "2026-08-21T03:00:00Z").await;
+    assert_eq!(counts_of(&pool, &tests).await, counts(2, 1, 0, 0, 0));
+
+    knobas_core::run_read::builds_in_front(&pool, true)
+        .await
+        .unwrap();
+    let answer = run_counts_inner(&pool, &registry()).await.unwrap();
+    assert!(answer.visiting);
+    assert_eq!(answer.fresh, std::slice::from_ref(&pass), "the dots' runs");
+    assert_eq!(answer.total, counts(2, 1, 0, 0, 0), "the visit's green stays");
+
+    synced(&pool, &running, "SUCCESS").await;
+    synced(&pool, &failing, "FAILURE").await;
+    assert_eq!(
+        counts_of(&pool, &tests).await,
+        counts(0, 1, 0, 1, 0),
+        "the pass left the blue and added no green; the failure turned red"
+    );
+
+    knobas_core::run_read::builds_in_front(&pool, false)
+        .await
+        .unwrap();
+    assert_eq!(counts_of(&pool, &tests).await, counts(0, 0, 0, 1, 0));
+
+    // A restart: a new pool on the same database reads the instant back.
+    let again = sqlx::PgPool::connect_with((*pool.connect_options()).clone())
+        .await
+        .unwrap();
+    let answer = run_counts_inner(&again, &registry()).await.unwrap();
+    assert!(!answer.visiting);
+    assert_eq!(answer.total, counts(0, 0, 0, 1, 0), "kept across the restart");
+    assert!(
+        !knobas_core::run_read::builds_in_front(&again, false)
+            .await
+            .unwrap(),
+        "leaving what was not in front writes nothing"
+    );
+}
+
+/// *Mark all as read* clears green by moving the scope's instant (ADR-0063):
+/// everything's, or a set of pipelines' own. *Undo* brings back the same
+/// number, unless leaving Builds has moved the instant since.
+#[tokio::test]
+async fn mark_all_takes_the_green_to_zero_and_undo_brings_the_same_number_back() {
+    let (pool, tc) = scratch("run-counts-mark-all").await;
+    let tests = configuration(&pool, &tc, "Payout_Tests").await;
+    let lint = configuration(&pool, &tc, "Payout_Lint").await;
+    synced_once(&pool, &tc).await;
+    build(&pool, &tc, 1001, "Payout_Tests", "SUCCESS", "2026-08-21T01:00:00Z").await;
+    build(&pool, &tc, 1002, "Payout_Tests", "SUCCESS", "2026-08-21T02:00:00Z").await;
+    build(&pool, &tc, 2001, "Payout_Lint", "UNKNOWN", "2026-08-21T01:00:00Z").await;
+    assert_eq!(total(&pool).await, counts(0, 2, 0, 0, 1));
+
+    let everything = MarkScope {
+        everything: true,
+        ..MarkScope::default()
+    };
+    let moved = knobas_core::run_read::move_seen(&pool, &everything)
+        .await
+        .unwrap()
+        .expect("everything reaches the pipelines");
+    assert_eq!(total(&pool).await, BubbleCounts::default(), "all clear");
+    assert!(knobas_core::run_read::put_back_seen(&pool, &moved).await.unwrap());
+    assert_eq!(total(&pool).await, counts(0, 2, 0, 0, 1), "the same number back");
+
+    let moved = knobas_core::run_read::move_seen(&pool, &of_pipelines(std::slice::from_ref(&tests)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(counts_of(&pool, &tests).await, BubbleCounts::default());
+    assert_eq!(counts_of(&pool, &lint).await, counts(0, 0, 0, 0, 1), "another pipeline's stays");
+    assert!(knobas_core::run_read::put_back_seen(&pool, &moved).await.unwrap());
+    assert_eq!(total(&pool).await, counts(0, 2, 0, 0, 1));
+
+    assert_eq!(
+        knobas_core::run_read::move_seen(&pool, &by_id(&["tc:build:1001".to_owned()]))
+            .await
+            .unwrap(),
+        None,
+        "runs by id move no instant"
+    );
+
+    let moved = knobas_core::run_read::move_seen(&pool, &everything)
+        .await
+        .unwrap()
+        .unwrap();
+    knobas_core::run_read::builds_in_front(&pool, true)
+        .await
+        .unwrap();
+    knobas_core::run_read::builds_in_front(&pool, false)
+        .await
+        .unwrap();
+    assert!(
+        !knobas_core::run_read::put_back_seen(&pool, &moved).await.unwrap(),
+        "leaving Builds moved it since"
+    );
+    assert_eq!(total(&pool).await, BubbleCounts::default());
 }

@@ -1,11 +1,12 @@
 //! The marks a person's runs carry (ux18, migrations `0098` and `0105`,
 //! ADR-0063, `knobas_core::run_read`): the set the shell holds, the marks by
-//! scope, the mark opening a run writes, and the top bar's count of what
-//! still asks.
+//! scope, the mark opening a run writes, and the counts by bubble the top
+//! bar, the rail and the rows draw, with the instants green counts from
+//! (#2568).
 
 use super::*;
 
-pub use knobas_core::run_read::{MarkScope, RunMarks};
+pub use knobas_core::run_read::{MarkScope, RunCounts, RunMarks, SeenMove};
 
 /// The activity line a mark writes: one per press, so the Inbox and the top
 /// bar re-read on its `activity:new`, and the log says what happened.
@@ -190,62 +191,121 @@ pub async fn mark_runs_unread<R: tauri::Runtime>(
     Ok(gone)
 }
 
-/// The most pipelines the count reads: the newest run of each, failures
-/// first, so a number past it is a lower bound.
-const PIPELINES_COUNTED: u32 = 2_000;
-
-/// [`unread_failing_builds`] without the state.
+/// [`run_counts`] without the state.
 ///
 /// # Errors
 ///
-/// As [`unread_failing_builds`].
-pub async fn unread_failing_builds_inner(
+/// As [`run_counts`].
+pub async fn run_counts_inner(
     pool: &PgPool,
     registry: &dyn knobas_sync::scheduler::AdapterRegistry,
-) -> Result<u32, IpcError> {
+) -> Result<RunCounts, IpcError> {
+    // A pipeline's runs are read from `sync.item_pipeline`, resolved from the
+    // stored declarations, which every reader of it writes first (#2185), as
+    // `pipelines` does.
+    crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
-    let filter = knobas_core::entity_list::EntityFilter {
-        sources: Vec::new(),
-        kinds: vec!["build".to_owned()],
-        updated_within_days: None,
-        context: None,
-        project: None,
-        order: knobas_core::entity_list::EntityOrder::LatestPerParent,
-        include_deleted: false,
-        reach: None,
-        role: None,
-        parent: None,
-    };
-    let page =
-        list_entities_inner(pool, registry, &filter, PIPELINES_COUNTED, 0, &declarations).await?;
-    let failing: Vec<String> = page
-        .rows
-        .into_iter()
-        .filter(|row| {
-            row.state
-                .as_ref()
-                .is_some_and(|state| state.tone == Some(knobas_core::tone::Tone::Err))
-        })
-        .map(|row| row.entity_id)
-        .collect();
-    if failing.is_empty() {
-        return Ok(0);
-    }
-    let read = knobas_core::run_read::count_read(pool, &failing).await?;
-    let failing = i64::try_from(failing.len()).unwrap_or(i64::MAX);
-    Ok(u32::try_from((failing - read).max(0)).unwrap_or(u32::MAX))
+    let fillers = crate::sources::crud::fillers(pool, registry, knobas_source::role::CI).await?;
+    Ok(knobas_core::run_read::run_counts(pool, &declarations, &fillers).await?)
 }
 
-/// The top bar's Builds count: pipelines whose newest run failed and is not
-/// read (ux18). The room's Builds tile still counts every failing one, read
-/// or not: there it is a fact about the work, here what still asks.
+/// The unread runs of every pipeline the Builds list draws, by bubble
+/// (spec #2566, #2568, ADR-0063): blue running, green passed, yellow passed
+/// with warnings, red failed, grey cancelled. What the top bar, the rail and
+/// the rows draw; a folder sums its pipelines. Replaces
+/// `unread_failing_builds`, which counted pipelines whose newest run failed.
 ///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
 /// up, [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 #[tauri::command]
-pub async fn unread_failing_builds(lifecycle: State<'_, Lifecycle>) -> Result<u32, IpcError> {
+pub async fn run_counts(lifecycle: State<'_, Lifecycle>) -> Result<RunCounts, IpcError> {
     let pool = lifecycle.pool()?;
-    unread_failing_builds_inner(&pool, lifecycle.registry()).await
+    run_counts_inner(&pool, lifecycle.registry()).await
+}
+
+/// A scope's *Mark all as read* on green, yellow and grey (ADR-0063): the
+/// scope's instant moves to now, the one instant for *everything*, each
+/// pipeline's own for a set of pipelines. Beside [`mark_runs_read`], which
+/// writes the rows of red and blue. Answers what it moved, for *Undo*
+/// ([`put_back_seen`]); nothing for runs by id alone.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+#[tauri::command]
+pub async fn move_seen(
+    lifecycle: State<'_, Lifecycle>,
+    scope: MarkScope,
+) -> Result<Option<SeenMove>, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::run_read::move_seen(&pool, &scope).await?)
+}
+
+/// *Undo* of [`move_seen`]: each instant it moved goes back, unless leaving
+/// Builds has moved it since. Answers whether any went back.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+#[tauri::command]
+pub async fn put_back_seen(
+    lifecycle: State<'_, Lifecycle>,
+    seen: SeenMove,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::run_read::put_back_seen(&pool, &seen).await?)
+}
+
+/// Builds came in front, or stopped being in front (ADR-0063, *The
+/// instant*): the shell calls it on each section change to or from Builds,
+/// and once at its start when it is not on Builds, which ends a visit a
+/// crash left open. Leaving moves the instant green counts from to now;
+/// coming in front holds the visit's start, so the visit's green stays drawn
+/// (question 2 on #2554). The quit while on Builds leaves it too
+/// ([`leave_builds_at_quit`]). Answers whether it wrote.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+#[tauri::command]
+pub async fn builds_in_front(
+    lifecycle: State<'_, Lifecycle>,
+    front: bool,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::run_read::builds_in_front(&pool, front).await?)
+}
+
+/// The quit while Builds is in front leaves it (ADR-0063): the exit handler
+/// calls this before the database stops. A quit before the database was up
+/// has nothing to write. Once a process: the exit handler runs on both
+/// `ExitRequested` and `Exit`, and the second finds the database stopped.
+/// Held to a second, so a database that stopped answering never holds the
+/// quit.
+pub fn leave_builds_at_quit<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager as _;
+    static LEFT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if LEFT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let Some(lifecycle) = app.try_state::<Lifecycle>() else {
+        return;
+    };
+    let Ok(pool) = lifecycle.pool() else {
+        return;
+    };
+    let left = tauri::async_runtime::block_on(tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        knobas_core::run_read::builds_in_front(&pool, false),
+    ));
+    match left {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!(error = %e, "the quit could not leave Builds"),
+        Err(_) => tracing::warn!("the quit gave up leaving Builds after a second"),
+    }
 }
