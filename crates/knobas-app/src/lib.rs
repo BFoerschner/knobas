@@ -362,6 +362,9 @@ pub fn run() {
         // at run time, with nothing failing in the build. The send itself is
         // knobas' own `notify` since #339 (`notify.rs`).
         .plugin(tauri_plugin_notification::init())
+        // *Try it on*'s native picker (#2562): `dialog:allow-open` only, in
+        // `capabilities/default.json`.
+        .plugin(tauri_plugin_dialog::init())
         // The capture window's global shortcut (#503). Nothing is registered
         // here: the accelerator is a setting, empty by default, and
         // `capture::register_stored` applies it once the database is up. What
