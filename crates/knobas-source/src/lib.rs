@@ -1938,15 +1938,23 @@ impl WriteOp {
             WriteOp::MergePullRequest { .. } => &[Effect::Parent, Effect::LinkedTickets],
             // The head branch's tip and its new commit are the repository's.
             WriteOp::UpdatePullRequestBranch { .. } => &[Effect::Parent],
+            // Each moves a branch of its repository: a new one, a new tip, or
+            // one gone. Its repository is the target or the target's parent,
+            // and the builds CI queues for it are looked for on the bounded
+            // schedule (ADR-0064 rule 2, #2585). A target that is the
+            // repository itself has no declared parent, so nothing more is
+            // read at once than its read-back walked.
+            WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. }
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::CommitFile { .. } => &[Effect::Parent],
             // Each moves only the item it is read back by, as ADR-0064's
             // audit finds, or moves what no effect names yet: a ticket's
-            // boards (#2593), the builds a branch starts (#2585), a build's
-            // chain (#2594), an adapter's own action (rule 3, #2596).
+            // boards (#2593), a build's chain (#2594), an adapter's own action
+            // (rule 3, #2596).
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
-            | WriteOp::CreateBranch { .. }
-            | WriteOp::CreatePullRequest { .. }
             | WriteOp::Approve { .. }
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
@@ -1959,9 +1967,7 @@ impl WriteOp {
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
             | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. }
             | WriteOp::EditPullRequest { .. }
-            | WriteOp::CommitFile { .. }
             | WriteOp::SourceAction { .. }
             | WriteOp::ReplyToThread { .. }
             | WriteOp::ResolveThread { .. }
@@ -4057,12 +4063,16 @@ mod tests {
     /// #2593, #2595) adds its rows here. The answer is the delivery's, so
     /// whoever reads one reads the other.
     #[test]
-    fn a_merge_and_a_branch_update_declare_what_they_move_and_nothing_else_does() {
+    fn the_writes_that_move_a_branch_declare_what_they_move_and_nothing_else_does() {
         use knobas_spi_types::delivery::Effect;
         for op in every_write_op() {
             let expected: &[Effect] = match op.identifier() {
                 "merge_pull_request" => &[Effect::Parent, Effect::LinkedTickets],
-                "update_pull_request_branch" => &[Effect::Parent],
+                "update_pull_request_branch"
+                | "create_branch"
+                | "create_pull_request"
+                | "delete_branch"
+                | "commit_file" => &[Effect::Parent],
                 _ => &[],
             };
             assert_eq!(op.delivery().effects, expected, "{}", op.identifier());

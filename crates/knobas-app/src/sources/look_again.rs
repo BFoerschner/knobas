@@ -326,6 +326,20 @@ pub fn looking(scheduler: &Scheduler) -> Vec<LookingAgain> {
     Lookouts::of(scheduler).map_or_else(Vec::new, |lookouts| lookouts.looking())
 }
 
+/// Whether `source`'s branch tips are noted, so its next run that moves one
+/// starts a schedule ([`after_run`]). For a test.
+#[must_use]
+pub fn noted(scheduler: &Scheduler, source: &str) -> bool {
+    Lookouts::of(scheduler).is_some_and(|lookouts| {
+        lookouts
+            .0
+            .tips
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(source)
+    })
+}
+
 /// Keep the schedules on `clock` from now on: a test's, moved by hand.
 pub fn use_clock(scheduler: &Scheduler, clock: Arc<dyn Clock>) {
     if let Some(lookouts) = Lookouts::of(scheduler) {
