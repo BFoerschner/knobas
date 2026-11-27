@@ -26,7 +26,7 @@ mod act;
 pub(crate) use act::{EMPTY, MIRRORED};
 mod branch;
 mod checks;
-mod compare;
+pub(crate) mod compare;
 mod files;
 mod grants;
 pub(crate) mod pr;

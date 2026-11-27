@@ -139,7 +139,7 @@ async fn first_commit(
 /// A compare's commits as Gitea lists them: each sha with its parents', and
 /// how many there are in all.
 #[derive(Debug, serde::Deserialize)]
-struct Listing {
+pub(crate) struct Listing {
     #[serde(default)]
     total_commits: Option<usize>,
     #[serde(default)]
@@ -191,7 +191,7 @@ struct Parent {
 /// the merge base when it is one of them (it is then an ancestor of `head`);
 /// otherwise a range that meets that history at one commit only meets it at
 /// its merge base. A branch name settles only that second way.
-fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)> {
+pub(crate) fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)> {
     let commits = &listing.commits;
     if commits.is_empty() || listing.total_commits.is_some_and(|t| t != commits.len()) {
         return None;
