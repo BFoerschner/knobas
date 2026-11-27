@@ -242,6 +242,30 @@ test("the first read asks for the rows that fill the window and draws them; the 
   expect(asked).toHaveLength(2);
 });
 
+test("a head read again while the rest of the first page is out leaves older pages readable, not stuck on Reading (#2569)", async () => {
+  const cursor = { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" };
+  let answer: (page: RecentRuns) => void = () => {};
+  const asked: { before: RecentCursor | null; limit: number }[] = [];
+  const drawn = draw({
+    recent: (_filter, before, limit) => {
+      asked.push({ before, limit });
+      return asked.length === 2 ? new Promise((resolve) => (answer = resolve)) : Promise.resolve({ ...PAGE, next: cursor });
+    },
+  });
+  await settle();
+  expect(asked.map((one) => one.limit)).toEqual([60, 140]);
+  // A sync ends while the rest is out: the head is read again, and the rest's answer belongs to the read before it.
+  drawn.revision(1);
+  await settle();
+  expect(asked.at(-1)).toEqual({ before: null, limit: 200 });
+  answer({ runs: [at(LINT, run(9, "ok", today(0, 10)))], pipelines: [LINT], next: null });
+  await settle();
+  expect(target.querySelector(".tf-older")?.textContent).not.toContain("Reading older runs");
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Older runs")!.click();
+  await settle();
+  expect(asked.at(-1)).toEqual({ before: cursor, limit: 200 });
+});
+
 test("an older page follows from the last page's cursor", async () => {
   const rest = { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" };
   const drawn = draw({}, { first: { ...PAGE, next: rest } });

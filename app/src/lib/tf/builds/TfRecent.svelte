@@ -160,6 +160,8 @@
   let heldFor = back?.basis ?? "";
   let failed = $state<string | null>(null);
   let older = $state<"idle" | "loading" | "failed">("idle");
+  /** The head read the older page out belongs to (`reads` when it was asked). */
+  let olderFor = -1;
   /** Every source a read has named: *Source* is offered once there are two. */
   let seenSources = $state.raw<Map<string, string>>(new Map([...(back?.pipelines.values() ?? [])].map((p) => [p.source_id, p.source_name])));
   let reads = 0;
@@ -209,12 +211,17 @@
 
   /** An older page of `limit` runs, after what is held. */
   async function more(limit = RECENT_PAGE) {
-    if (held === null || next === null || older === "loading" || held.length >= RECENT_HOLD) return;
-    const at = reads;
+    // An older page out for a head read since replaced is no reason to wait: its answer is dropped.
+    if (held === null || next === null || (older === "loading" && olderFor === reads) || held.length >= RECENT_HOLD) return;
+    const at = (olderFor = reads);
     older = "loading";
     try {
       const page = await ports.recent(asked, next, limit);
-      if (at !== reads) return;
+      if (at !== reads) {
+        // A head read came between (a sync's news, a new filter): the footer is not left saying *Reading*.
+        if (olderFor === at) older = "idle";
+        return;
+      }
       lay(page);
       held = withOlder(held, page.runs);
       next = held.length >= RECENT_HOLD ? null : page.next;
@@ -222,6 +229,7 @@
       inFlightSoon();
     } catch {
       if (at === reads) older = "failed";
+      else if (olderFor === at) older = "idle";
     }
   }
 
