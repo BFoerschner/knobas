@@ -422,7 +422,7 @@ pub async fn open_try(
     application: &str,
     on: crate::try_on::TryOn,
 ) -> Result<Vec<String>, IpcError> {
-    use crate::try_on::{TryOn, Throwaway, checked_path, leaf};
+    use crate::try_on::{Throwaway, TryOn, checked_path, leaf};
     let stored = load(pool).await?;
     let app = stored.by_id(application).ok_or_else(|| {
         IpcError::invalid(format!(
@@ -439,9 +439,10 @@ pub async fn open_try(
             if folder {
                 (at, None, None)
             } else {
-                let parent = at.parent().map(Path::to_path_buf).ok_or_else(|| {
-                    IpcError::invalid(format!("{} has no folder", at.display()))
-                })?;
+                let parent = at
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| IpcError::invalid(format!("{} has no folder", at.display())))?;
                 (parent, Some(at), None)
             }
         }
@@ -493,7 +494,13 @@ pub fn made_argv(
         })?),
         None => None,
     };
-    argv_in(app, &made.dir, file.zip(on_disk.as_deref()), line, "a generated folder")
+    argv_in(
+        app,
+        &made.dir,
+        file.zip(on_disk.as_deref()),
+        line,
+        "a generated folder",
+    )
 }
 
 /// An application's argument vector with `dir` in the checkout's place and,

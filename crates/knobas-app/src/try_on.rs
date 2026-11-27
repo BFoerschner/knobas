@@ -33,10 +33,10 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
+use crate::IpcError;
+use crate::folder_render::FolderRenderer;
 use crate::folder_render::copy::{self, Item, ItemKind};
 use crate::folder_render::runs::{self, FolderFailure, ReadFrom, Resolved, Runs, Slot, Unresolved};
-use crate::folder_render::FolderRenderer;
-use crate::IpcError;
 
 /// The entity a try's runs are filed under: no repository has it.
 pub const TRY_ENTITY: &str = "~try";
@@ -104,7 +104,9 @@ pub fn runs_of_entity(entity_id: &str) -> Arc<Runs> {
 pub fn checked_name(name: &str) -> Result<String, IpcError> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(IpcError::invalid("Give the text a file name, such as example.md."));
+        return Err(IpcError::invalid(
+            "Give the text a file name, such as example.md.",
+        ));
     }
     if name.contains('/') || name.len() > 255 {
         return Err(IpcError::invalid(format!("{name} is not one file name")));
@@ -123,7 +125,9 @@ pub fn checked_name(name: &str) -> Result<String, IpcError> {
 pub async fn checked_path(path: &str) -> Result<(PathBuf, bool), IpcError> {
     let given = PathBuf::from(path.trim());
     if !given.is_absolute() {
-        return Err(IpcError::invalid(format!("{path} is not a path from the top of the disk")));
+        return Err(IpcError::invalid(format!(
+            "{path} is not a path from the top of the disk"
+        )));
     }
     let canonical = tokio::fs::canonicalize(&given)
         .await
@@ -136,7 +140,10 @@ pub async fn checked_path(path: &str) -> Result<(PathBuf, bool), IpcError> {
     } else if meta.is_file() {
         Ok((canonical, false))
     } else {
-        Err(IpcError::invalid(format!("{} is neither a file nor a folder", canonical.display())))
+        Err(IpcError::invalid(format!(
+            "{} is neither a file nor a folder",
+            canonical.display()
+        )))
     }
 }
 
@@ -157,9 +164,15 @@ fn too_large(what: &str, size: u64) -> IpcError {
 pub async fn file_bytes(path: &str) -> Result<(String, Vec<u8>), IpcError> {
     let (file, folder) = checked_path(path).await?;
     if folder {
-        return Err(IpcError::invalid(format!("{} is a folder: choose a file", file.display())));
+        return Err(IpcError::invalid(format!(
+            "{} is a folder: choose a file",
+            file.display()
+        )));
     }
-    let size = tokio::fs::metadata(&file).await.map(|m| m.len()).unwrap_or(0);
+    let size = tokio::fs::metadata(&file)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
     let name = leaf(&file);
     if size > BYTES_CAP {
         return Err(too_large(&name, size));
@@ -195,8 +208,10 @@ pub async fn bytes_of(on: &TryOn) -> Result<(String, Vec<u8>), IpcError> {
 /// The last name of `path`, as a person reads it.
 #[must_use]
 pub fn leaf(path: &Path) -> String {
-    path.file_name()
-        .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 // -- throwaway files -----------------------------------------------------------
@@ -226,7 +241,8 @@ impl Throwaway {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let dir = root().join(format!("{kind}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).map_err(|error| IpcError::internal(format!("{}: {error}", dir.display())))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| IpcError::internal(format!("{}: {error}", dir.display())))?;
         let file = dir.join(&name);
         std::fs::write(&file, text).map_err(|error| {
             let _ = std::fs::remove_dir_all(&dir);
@@ -249,7 +265,10 @@ static OPENED: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Hold `dir` as the last application's throwaway folder, removing the one
 /// before it.
 pub fn opened(dir: PathBuf) {
-    let before = OPENED.lock().unwrap_or_else(PoisonError::into_inner).replace(dir);
+    let before = OPENED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .replace(dir);
     if let Some(before) = before {
         let _ = std::fs::remove_dir_all(before);
     }
@@ -308,7 +327,10 @@ pub async fn resolve(renderer: &FolderRenderer, on: TryOn) -> Result<Resolved, U
             let (dir, only) = if folder {
                 (at.clone(), None)
             } else {
-                let parent = at.parent().map(Path::to_path_buf).ok_or_else(|| copy("has no folder".to_owned()))?;
+                let parent = at
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| copy("has no folder".to_owned()))?;
                 (parent, Some(leaf(&at)))
             };
             let walked = {
@@ -321,12 +343,19 @@ pub async fn resolve(renderer: &FolderRenderer, on: TryOn) -> Result<Resolved, U
             if !items.iter().any(|i| i.kind != ItemKind::Dir) {
                 return Err(fail(FolderFailure::NoFolder));
             }
-            if let Some(too_big) =
-                crate::folder_render::resolve::past(&items, copy::CLONE_FILES, copy::CLONE_BYTES, ReadFrom::WorkingTree)
-            {
+            if let Some(too_big) = crate::folder_render::resolve::past(
+                &items,
+                copy::CLONE_FILES,
+                copy::CLONE_BYTES,
+                ReadFrom::WorkingTree,
+            ) {
                 return Err(fail(too_big));
             }
-            let copy_name = if folder { copy::copy_name(&leaf(&dir)) } else { "example".to_owned() };
+            let copy_name = if folder {
+                copy::copy_name(&leaf(&dir))
+            } else {
+                "example".to_owned()
+            };
             Ok(Resolved {
                 key: runs::clone_key(renderer, &copy_name, &items),
                 copy_name,
@@ -357,13 +386,20 @@ pub async fn folder_view(
         .into_iter()
         .find(|r| r.id == renderer)
         .ok_or_else(|| {
-            IpcError::invalid(format!("'{renderer}' is not one of your folder renderers: see Settings › Renderers"))
+            IpcError::invalid(format!(
+                "'{renderer}' is not one of your folder renderers: see Settings › Renderers"
+            ))
         })?;
     Ok(folder_view_in(&runs(), &saved, on, ask).await)
 }
 
 /// [`folder_view`] with the renderer given, in `runs`: a test's own.
-pub async fn folder_view_in(runs: &Arc<Runs>, saved: &FolderRenderer, on: TryOn, ask: runs::Ask) -> runs::FolderRenderView {
+pub async fn folder_view_in(
+    runs: &Arc<Runs>,
+    saved: &FolderRenderer,
+    on: TryOn,
+    ask: runs::Ask,
+) -> runs::FolderRenderView {
     let resolved = resolve(saved, on).await;
     runs.view(&slot(&saved.id), saved, resolved, ask)
 }
@@ -381,7 +417,10 @@ fn stamp_of(meta: &std::fs::Metadata) -> String {
 
 fn digest(bytes: &[u8]) -> String {
     use sha2::Digest as _;
-    format!("w:{}", crate::folder_render::hex(&sha2::Sha256::digest(bytes)))
+    format!(
+        "w:{}",
+        crate::folder_render::hex(&sha2::Sha256::digest(bytes))
+    )
 }
 
 /// The items of `dir` (only `only` where given), off the runtime: files and
@@ -390,14 +429,21 @@ fn walk(dir: &Path, only: Option<&str>) -> Result<Vec<Item>, String> {
     let mut items = Vec::new();
     let mut stack = vec![(dir.to_path_buf(), String::new())];
     while let Some((at, rel)) = stack.pop() {
-        let listed = std::fs::read_dir(&at).map_err(|error| format!("{}: {error}", at.display()))?;
+        let listed =
+            std::fs::read_dir(&at).map_err(|error| format!("{}: {error}", at.display()))?;
         for entry in listed.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if rel.is_empty() && only.is_some_and(|only| only != name) {
                 continue;
             }
-            let Ok(meta) = entry.path().symlink_metadata() else { continue };
-            let inner = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let Ok(meta) = entry.path().symlink_metadata() else {
+                continue;
+            };
+            let inner = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
             if meta.is_dir() {
                 if name == ".git" {
                     continue;
@@ -411,7 +457,10 @@ fn walk(dir: &Path, only: Option<&str>) -> Result<Vec<Item>, String> {
                 });
                 stack.push((entry.path(), inner));
                 if items.len() > copy::CLONE_FILES * 2 {
-                    return Err(format!("holds more than {} files, past what knobas copies", copy::CLONE_FILES));
+                    return Err(format!(
+                        "holds more than {} files, past what knobas copies",
+                        copy::CLONE_FILES
+                    ));
                 }
                 continue;
             }
@@ -428,13 +477,20 @@ fn walk(dir: &Path, only: Option<&str>) -> Result<Vec<Item>, String> {
             let executable = false;
             items.push(Item {
                 rel: inner,
-                kind: if link { ItemKind::Symlink } else { ItemKind::File },
+                kind: if link {
+                    ItemKind::Symlink
+                } else {
+                    ItemKind::File
+                },
                 size: if link { 0 } else { meta.len() },
                 executable,
                 blob: Some(stamp_of(&meta)),
             });
             if items.len() > copy::CLONE_FILES * 2 {
-                return Err(format!("holds more than {} files, past what knobas copies", copy::CLONE_FILES));
+                return Err(format!(
+                    "holds more than {} files, past what knobas copies",
+                    copy::CLONE_FILES
+                ));
             }
         }
     }
@@ -475,14 +531,18 @@ impl copy::Bytes for Disk {
                 .map(|target| target.to_string_lossy().into_owned().into_bytes())
                 .map_err(|error| error.to_string());
         }
-        let meta = tokio::fs::symlink_metadata(&at).await.map_err(|error| error.to_string())?;
+        let meta = tokio::fs::symlink_metadata(&at)
+            .await
+            .map_err(|error| error.to_string())?;
         if !meta.is_file() {
             return Err("is no longer a file".to_owned());
         }
         if meta.len() > copy::CLONE_BYTES {
             return Err(format!("is {} bytes, past what knobas copies", meta.len()));
         }
-        tokio::fs::read(&at).await.map_err(|error| error.to_string())
+        tokio::fs::read(&at)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -502,7 +562,10 @@ mod tests {
     async fn a_relative_or_missing_path_is_refused() {
         assert!(checked_path("notes/a.md").await.is_err(), "relative");
         let gone = tempfile::tempdir().unwrap().path().join("gone.md");
-        assert!(checked_path(&gone.to_string_lossy()).await.is_err(), "missing");
+        assert!(
+            checked_path(&gone.to_string_lossy()).await.is_err(),
+            "missing"
+        );
     }
 
     #[tokio::test]
@@ -514,7 +577,10 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!((name.as_str(), bytes.as_slice()), ("a.md", b"# A\n".as_slice()));
+        assert_eq!(
+            (name.as_str(), bytes.as_slice()),
+            ("a.md", b"# A\n".as_slice())
+        );
         assert!(file_bytes(&dir.path().to_string_lossy()).await.is_err());
     }
 

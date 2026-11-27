@@ -48,7 +48,10 @@ async fn rows(pool: &PgPool) -> Vec<String> {
         .fetch_all(pool)
         .await
         .unwrap();
-        all.extend(dump.into_iter().map(|(row,)| format!("{schema}.{table}: {row}")));
+        all.extend(
+            dump.into_iter()
+                .map(|(row,)| format!("{schema}.{table}: {row}")),
+        );
     }
     all
 }
@@ -58,19 +61,32 @@ fn files_under(dir: &Path) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(at) = stack.pop() {
-        let Ok(listed) = std::fs::read_dir(&at) else { continue };
+        let Ok(listed) = std::fs::read_dir(&at) else {
+            continue;
+        };
         for entry in listed.flatten() {
             if entry.path().is_dir() {
                 stack.push(entry.path());
             } else {
-                found.push(entry.path().strip_prefix(dir).unwrap().display().to_string());
+                found.push(
+                    entry
+                        .path()
+                        .strip_prefix(dir)
+                        .unwrap()
+                        .display()
+                        .to_string(),
+                );
             }
         }
     }
     found
 }
 
-async fn settled(runs: &Arc<Runs>, saved: &folder_render::FolderRenderer, on: TryOn) -> FolderRenderView {
+async fn settled(
+    runs: &Arc<Runs>,
+    saved: &folder_render::FolderRenderer,
+    on: TryOn,
+) -> FolderRenderView {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let view = try_on::folder_view_in(runs, saved, on.clone(), Ask::Look).await;
@@ -123,7 +139,9 @@ async fn a_folder_renderer_tried_on_a_chosen_folder_and_on_pasted_text_keeps_not
     };
 
     // Through the command's own path: the saved renderer by its id, in the tries' registry.
-    let first = try_on::folder_view(&pool, &site.id, on_folder.clone(), Ask::Open).await.unwrap();
+    let first = try_on::folder_view(&pool, &site.id, on_folder.clone(), Ask::Open)
+        .await
+        .unwrap();
     assert!(first.running.is_some(), "the press runs it: {first:?}");
     let tried = try_on::runs();
     let drawn = settled(&tried, &site, on_folder).await;
@@ -132,22 +150,43 @@ async fn a_folder_renderer_tried_on_a_chosen_folder_and_on_pasted_text_keeps_not
     let made = knobas_app::folder_render::made::made(&token).expect("read back by its token");
     let index = std::fs::read_to_string(made.dir.join("index.md")).unwrap();
     assert!(index.contains("orders.lcproj"), "{index}");
-    assert!(!index.contains(".git"), "a chosen folder's .git is left out: {index}");
-    assert!(made.dir.starts_with(try_on::root()), "kept under the tries' folder: {}", made.dir.display());
+    assert!(
+        !index.contains(".git"),
+        "a chosen folder's .git is left out: {index}"
+    );
+    assert!(
+        made.dir.starts_with(try_on::root()),
+        "kept under the tries' folder: {}",
+        made.dir.display()
+    );
     // Not the app's registry, whose store and disk cache a repository's renders go to (other tests here set them).
     assert!(Runs::global().made(&token).is_none() && Runs::global().output(&token).is_none());
-    assert!(Runs::global().store().is_none_or(|store| !made.dir.starts_with(store)));
+    assert!(
+        Runs::global()
+            .store()
+            .is_none_or(|store| !made.dir.starts_with(store))
+    );
 
     try_on::folder_view_in(&tried, &site, on_text.clone(), Ask::Open).await;
     let pasted = settled(&tried, &site, on_text).await;
     let token = pasted.drawn.as_ref().expect("a drawing").token.clone();
     let made = knobas_app::folder_render::made::made(&token).unwrap();
-    assert!(std::fs::read_to_string(made.dir.join("index.md")).unwrap().contains("orders.lcproj"));
+    assert!(
+        std::fs::read_to_string(made.dir.join("index.md"))
+            .unwrap()
+            .contains("orders.lcproj")
+    );
 
-    assert!(Runs::global().made(&token).is_none(), "the app's registry holds no try");
+    assert!(
+        Runs::global().made(&token).is_none(),
+        "the app's registry holds no try"
+    );
     // The tries' registry keeps nothing on disk past its own folder: every file it wrote is under the tries' root.
     let kept = files_under(&try_on::root().join("made"));
-    assert!(!kept.is_empty(), "the generated folders of the tries are where the tries keep them");
+    assert!(
+        !kept.is_empty(),
+        "the generated folders of the tries are where the tries keep them"
+    );
     assert_eq!(rows(&pool).await, before, "no row written");
 }
 
@@ -261,8 +300,15 @@ async fn a_command_tried_on_pasted_text_reads_it_and_leaves_no_file_and_no_row()
     .unwrap_or_else(|e| panic!("{}", e.message));
     assert_eq!(sink.wait().await, Ended::Exit { code: 0 });
     assert_eq!(sink.texts(), vec!["# pasted".to_owned()]);
-    assert!(Path::new(&started.cwd).starts_with(try_on::root()), "{}", started.cwd);
-    assert!(!Path::new(&started.cwd).exists(), "the throwaway folder is gone once it ended");
+    assert!(
+        Path::new(&started.cwd).starts_with(try_on::root()),
+        "{}",
+        started.cwd
+    );
+    assert!(
+        !Path::new(&started.cwd).exists(),
+        "the throwaway folder is gone once it ended"
+    );
 
     // A chosen folder: the folder command runs on it, in its place.
     let chosen = tempfile::tempdir().unwrap();
@@ -281,7 +327,10 @@ async fn a_command_tried_on_pasted_text_reads_it_and_leaves_no_file_and_no_row()
     .unwrap_or_else(|e| panic!("{}", e.message));
     assert_eq!(sink.wait().await, Ended::Exit { code: 0 });
     assert_eq!(sink.texts(), vec!["a.txt".to_owned()]);
-    assert!(chosen.path().join("a.txt").exists(), "a chosen folder is never removed");
+    assert!(
+        chosen.path().join("a.txt").exists(),
+        "a chosen folder is never removed"
+    );
 
     // A file command on a folder is refused, and a pasted one leaves nothing when refused.
     assert!(
@@ -298,7 +347,11 @@ async fn a_command_tried_on_pasted_text_reads_it_and_leaves_no_file_and_no_row()
         .is_err()
     );
 
-    let history = std::fs::read_to_string(profile.path().join("command-runs").join("runs.json")).unwrap_or_default();
-    assert!(!history.contains(try_on::TRY_ENTITY), "no try in the list of runs: {history}");
+    let history = std::fs::read_to_string(profile.path().join("command-runs").join("runs.json"))
+        .unwrap_or_default();
+    assert!(
+        !history.contains(try_on::TRY_ENTITY),
+        "no try in the list of runs: {history}"
+    );
     assert_eq!(rows(&pool).await, before, "no row written");
 }

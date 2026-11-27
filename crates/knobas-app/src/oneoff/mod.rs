@@ -330,7 +330,10 @@ pub async fn start_made(
     on_made: Option<OnMade>,
     sink: Arc<dyn Sink>,
 ) -> Result<Started, IpcError> {
-    start_at(runs, pool, entity_id, command_id, target, on_made, None, sink).await
+    start_at(
+        runs, pool, entity_id, command_id, target, on_made, None, sink,
+    )
+    .await
 }
 
 /// A folder a try runs in (#2562): the one the person chose, or the throwaway
@@ -374,7 +377,7 @@ pub async fn try_start_in(
     on: crate::try_on::TryOn,
     sink: Arc<dyn Sink>,
 ) -> Result<Started, IpcError> {
-    use crate::try_on::{TryOn, Throwaway, checked_path, leaf};
+    use crate::try_on::{Throwaway, TryOn, checked_path, leaf};
     use knobas_core::checkout::oneoff::Kind;
     let command = list(pool)
         .await?
@@ -410,9 +413,10 @@ pub async fn try_start_in(
             if folder {
                 (at, None, None)
             } else {
-                let parent = at.parent().map(Path::to_path_buf).ok_or_else(|| {
-                    IpcError::invalid(format!("{} has no folder", at.display()))
-                })?;
+                let parent = at
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| IpcError::invalid(format!("{} has no folder", at.display())))?;
                 (parent, Some(leaf(&at)), None)
             }
         }
@@ -467,7 +471,10 @@ async fn start_at(
     sink: Arc<dyn Sink>,
 ) -> Result<Started, IpcError> {
     let throwaway = picked.as_ref().and_then(|p| p.throwaway.clone());
-    let started = start_inner(runs, pool, entity_id, command_id, target, on_made, picked, sink).await;
+    let started = start_inner(
+        runs, pool, entity_id, command_id, target, on_made, picked, sink,
+    )
+    .await;
     // A try refused before it ran leaves no throwaway behind; one that ran removes it when it ends.
     if started.is_err()
         && let Some(dir) = throwaway
@@ -539,7 +546,13 @@ async fn start_inner(
     // the person chose, which is its `{root}` (#2562).
     let (root, path_root, placed, branch, commit) = if let Some(picked) = &picked {
         let placed = placed(picked.root.clone(), &target, None, None).await?;
-        (picked.root.clone(), Some(picked.root.clone()), placed, None, None)
+        (
+            picked.root.clone(),
+            Some(picked.root.clone()),
+            placed,
+            None,
+            None,
+        )
     } else if made_on.is_some() {
         let checkout = crate::checkout::resolve(pool, entity_id).await?;
         let Some(on) = &made_on else {

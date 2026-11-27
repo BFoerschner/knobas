@@ -136,7 +136,13 @@ pub async fn oneoff_try<R: tauri::Runtime>(
     channel: Channel<Batch>,
 ) -> Result<Started, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::oneoff::try_start(&pool, &command, on, Arc::new(ChannelSink::new(&app, channel))).await
+    crate::oneoff::try_start(
+        &pool,
+        &command,
+        on,
+        Arc::new(ChannelSink::new(&app, channel)),
+    )
+    .await
 }
 
 /// Stops a run with everything it started.

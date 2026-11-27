@@ -61,6 +61,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::oneoff::OneOffShell::export_all(cfg)?;
     crate::folder_render::FolderMarks::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderView::export_all(cfg)?;
+    crate::try_on::TryOn::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderMoved::export_all(cfg)?;
     crate::folder_render::runs::Ask::export_all(cfg)?;
     crate::folder_render::made::MadeTree::export_all(cfg)?;
