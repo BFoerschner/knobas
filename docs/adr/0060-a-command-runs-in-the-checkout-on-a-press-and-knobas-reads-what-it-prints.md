@@ -28,6 +28,14 @@ Björn, on ux55: "The command run doesn't work on a rendered folder. I also can'
 - **Identity.** The target names the renderer, the folder and the path; the kept folder's token is the run's own argument (`oneoff_run`'s `made_token`).
 - **Trust.** A program started in a kept folder reads what the renderer wrote there, which may be settings and code, from a repository that may not be cloned. The press is the consent, as above.
 
+## Amended 2026-11-27: a command tried on a folder of the person's own
+
+#2562 (ADR-0016 amended the same day): a command's settings page tries it on pasted text, a file or a folder chosen anywhere on the disk. **On a try a command runs in the chosen folder, which stands in the checkout's place.**
+
+- **What reaches an argument.** The chosen folder's own paths as a checkout's: `{root}` the folder, `{file}` and `{relfile}` the chosen file (or the pasted text's throwaway file), `{dir}` and `{reldir}` the folder, `{name}` its name. No git name: a command holding `{sha}`, `{base}`, `{head}` or `{branch}` is refused by name, and a command on a commit or a range is tried on a repository only.
+- **What it runs on.** A command for a file runs on the chosen file or the pasted text's file, on stdin where it reads stdin; one for a folder or a repository on the chosen folder, or on the throwaway folder holding the pasted text. A file's command is refused on a folder.
+- **What rests.** The run is a live read as any other and the dialog shows it, but it is no row in the list of runs (`command-runs/runs.json`), and the throwaway folder is removed when it ends. A place in its output opens no page: no page shows the folder.
+
 ## Rejected
 
 - **A copy of the file or folder, as a renderer gets.** A linter reads its settings, its plugins and the project around the file. On a copy it checks nothing, and a copy on every press is a write of the folder.

@@ -1,5 +1,5 @@
 ---
-status: accepted, amended by ADR-0021, ADR-0023, ADR-0033, ADR-0034, ADR-0035, ADR-0041 and ADR-0046
+status: accepted, amended by ADR-0021, ADR-0023, ADR-0033, ADR-0034, ADR-0035, ADR-0041 and ADR-0046, and on 2026-11-27 (#2562)
 ---
 
 # A spawned command takes no argument from the mirror
@@ -17,6 +17,15 @@ Amended by [ADR-0046](0046-a-folder-renderer-may-make-a-folder-of-files-knobas-k
 - Nothing knobas spawns writes to a working tree, with three amendments: [ADR-0021](0021-knobas-reads-a-checkouts-state-with-read-only-git.md) allows read-only `git status` at a checkout path, [ADR-0023](0023-knobas-clones-a-repository-into-the-clones-root.md) allows `git clone` into a new folder under the clones root with a URL built from the source's configured address, [ADR-0035](0035-a-pull-request-is-opened-in-a-worktree-under-the-clones-root.md) allows fetching a pull request's head into a worktree of knobas's own under the clones root, and [ADR-0041](0041-knobas-reads-a-branchs-tree-at-its-checkout-and-fetches-its-tip-there.md) allows fetching a branch tip the mirror names, by its checked sha, into a checkout's object store with no ref written. Nothing else that writes is allowed.
 - Command templates are a settings surface with defaults for macOS, Linux and Windows (Linux and Windows since #2275); on another platform the buttons say *not configured* until a template is set.
 - The clones-root scan and the per-repo override are knobas-owned data with their own migration and §10.8 entry. A repo entity gains no path column.
+
+## Amended 2026-11-27: Try it on (#2562)
+
+Björn, 2026-11-27: test renderers "with his own examples, not only inside existing repositories: by pasting text, or by choosing a file or a folder anywhere on the disk", and the same for *Open in…* applications and commands. Ruled by the implementer (Opus) under the orchestrator's ruling in the issue. **A path the person chose with the native picker is an argument of the kind a path they typed is, and a folder they chose may stand where a checkout stands, for a try from a settings page.**
+
+- **What reaches an argument.** The path the picker answered, held by the page and sent on the press that tries it, checked absolute and canonical, a file or a folder, nothing else (`try_on::checked_path`); or a throwaway folder knobas wrote under the system temp folder's `knobas-try/`, holding the pasted text as one file of the name the person gave it (held to a copy's name grammar, `try_on::checked_name`). Never a mirrored value: a try names no repository.
+- **Where it stands.** An application opens with the chosen folder (a file's own folder) in the checkout's place and the file as `{file}`, as on a generated folder (ADR-0046); `{url}` is refused. A command runs there as ADR-0060 runs it on a checkout (amended below in ADR-0060). A folder renderer is given a copy of the chosen folder, or of a folder holding only the file or the text, as ADR-0044 gives it a copy; a `.git` folder is left out and a link is a file holding its target. A file renderer and a pipeline get the bytes on stdin, as ADR-0033 says.
+- **Nothing is kept.** A try writes no row, no mirror, no folder-render cache and no generated-folders store: a folder renderer's try runs in a registry of its own whose generated folders are under `knobas-try/`, a command's try is no row in the list of runs and its throwaway file goes when it ends, an application's goes when the next is tried. `knobas-try/` is removed at bring-up and at quit.
+- **Only a saved one runs**, as before: each page saves its draft first and names it by its id.
 
 ## Rejected
 

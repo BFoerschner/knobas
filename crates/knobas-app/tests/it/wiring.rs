@@ -124,6 +124,10 @@ fn no_grant_reaches_further_than_the_app_does() {
             "opener:allow-open-path",
             "notification:allow-is-permission-granted",
             "notification:allow-request-permission",
+            // *Try it on*'s native picker (#2562): the open dialog only, never
+            // `dialog:default` (save dialogs, message boxes). The path it
+            // answers is read by knobas's `try_*` commands, not by a grant.
+            "dialog:allow-open",
         ],
         "a permission was added or widened -- every entry here is a door the \
          webview can open, and `opener:default` in particular also grants \
