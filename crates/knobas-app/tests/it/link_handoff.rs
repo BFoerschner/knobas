@@ -563,3 +563,47 @@ fn manifest_installer_writes_exact_firefox_native_messaging_schema() {
     assert!(!removed.installed);
     assert!(!status_in(Some(&target), &exe).installed);
 }
+
+/// **`normalize_web_url` says what `web_url_normalized!` says** (spec #2514's
+/// whole-branch review, N10): the bypass key and a rule's base are normalised
+/// in Rust, and ADR-0061 says they follow the mirror's rule, which
+/// `knobas-core` keeps in SQL alone. This table runs every URL through both
+/// and holds them to one answer, so the Rust copy cannot drift unseen.
+#[tokio::test]
+async fn the_bypass_key_follows_the_mirrors_url_rule() {
+    const NORMALIZE: &str = concat!(
+        "select ",
+        knobas_core::web_url_normalized!("$1::text"),
+        " as normalized"
+    );
+    let pool = pool("handoff_url_rule").await;
+    let urls = [
+        "https://jira.example/browse/PAY-231",
+        "https://jira.example/browse/PAY-231/",
+        "https://jira.example/browse/PAY-231#comment-42",
+        "https://jira.example/browse/PAY-231/#comment-42",
+        "HTTPS://JIRA.Example/browse/PAY-231",
+        "https://jira.example:8443/Browse/Pay-231///",
+        "https://jira.example/issues/?jql=project%20%3D%20PAY",
+        "https://jira.example/issues/?jql=a/b/#x",
+        "https://jira.example/a?x=1#frag?y",
+        "https://Jira.example?q=1",
+        "https://jira.example/",
+        "https://jira.example",
+        "http://user@Host.example/path//",
+        "https://BÜCHER.example/Wiki/Seite/",
+    ];
+    let mut differ = Vec::new();
+    for url in urls {
+        let sql: Option<String> = sqlx::query_scalar(NORMALIZE)
+            .bind(url)
+            .fetch_one(&pool)
+            .await
+            .expect("the rule is valid SQL");
+        let rust = knobas_app::link_handoff::normalize_web_url(url);
+        if sql != rust {
+            differ.push(format!("{url}: SQL {sql:?}, Rust {rust:?}"));
+        }
+    }
+    assert!(differ.is_empty(), "{differ:#?}");
+}

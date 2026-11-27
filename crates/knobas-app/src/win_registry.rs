@@ -1,5 +1,7 @@
 //! Writing string values under `HKEY_CURRENT_USER`: the one place knobas
-//! writes the Windows registry from. Its callers are the Firefox Native
+//! writes a registry value from. `link_handoff::manifest` still deletes its
+//! key (`RegDeleteTreeW`) and reads it back (`RegQueryValueExW`) itself. The
+//! writers are the Firefox Native
 //! Messaging host key (#2530, `link_handoff::manifest`) and the desktop
 //! notification identity under `Software\Classes\AppUserModelId` (#2529,
 //! `notify::platform`). Per-user keys only, so nothing here needs elevation.

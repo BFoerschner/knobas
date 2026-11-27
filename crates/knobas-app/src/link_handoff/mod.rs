@@ -109,6 +109,7 @@ pub fn is_http_or_https_url(url: &str) -> bool {
 /// Normalize an `http(s)` URL using the same four rules as `web_url_normalized!`:
 /// lowercase scheme + host[:port], strip `#fragment`, strip trailing `/` on the
 /// path, and keep `?query` verbatim. Returns `None` for non-`http(s)` URLs.
+/// `tests/it/link_handoff.rs` holds it to the SQL macro over a table of URLs.
 ///
 /// Not a second spelling of the mirror's rule (`knobas_core::web_url`): its
 /// output never meets a stored `web_url`. Both sides of every comparison it
@@ -127,7 +128,9 @@ pub fn normalize_web_url(url: &str) -> Option<String> {
     let rest_start = without_fragment[authority_end..]
         .find(['/', '?'])
         .map_or(without_fragment.len(), |i| authority_end + i);
-    let authority = without_fragment[..rest_start].to_ascii_lowercase();
+    // `lower()`'s, not ASCII's: the mirror's rule lower-cases `BÜCHER.example` to
+    // `bücher.example` (`the_bypass_key_follows_the_mirrors_url_rule`).
+    let authority = without_fragment[..rest_start].to_lowercase();
     let rest = &without_fragment[rest_start..];
     let (path, query) = match rest.find('?') {
         Some(q) => (&rest[..q], Some(&rest[q..])),
