@@ -249,7 +249,8 @@ const PLACES = [
   { name: "repo-local-rendered", fixture: true, late: "entity_file_bytes:400", start: `#/repo/${REPO}/local`, press: `${shown} .tf-diff[data-file="docs/retry.md (modified, not staged)"] .tf-fh .tf-seg button`, text: "Rendered", hash: null, ready: `${shown} .tf-rstage`, away: `#/repo/${REPO}/local` },
   { name: "open-in-menu", start: `#/repo/${REPO}`, press: `${shown} .tf-openin > button`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "app-add", optional: "real", start: `#/repo/${REPO}`, setup: `${shown} .tf-openin > button`, press: "[role=menu] [role=menuitem]", text: "Add an application", hash: "#/settings/checkouts/add/", away: `#/repo/${REPO}` },
-  { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "Escape", tabs: true },
+  // Left by the list's address: `Esc` goes up to the pull request's repository (#2576), which lists none to press (#2602).
+  { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "#/code/prs", tabs: true },
   { name: "builds", start: "#/time", nav: "builds", hash: "#/builds", away: "time", tabs: true },
   { name: "pipeline", start: "#/builds", press: `${shown} .tf-rail a[href^="#/builds/"], ${shown} a[href^="#/builds/"]`, hash: "#/builds/", away: "Escape" },
   { name: "run", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", away: "Escape", tabs: true },
@@ -353,6 +354,12 @@ const PLACES = [
   { name: "ticket-move-queued", fixture: true, once: true, fake: "fake-move=slow", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
   { name: "ticket-move-sent", fixture: true, once: true, start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-swrite` },
   { name: "ticket-move-refused", fixture: true, once: true, fake: "fake-move=refused", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
+  // *Create pull request* on Compare (#2584): the page of the create, `#/pr/new/<write>`, drawn from what was typed, then
+  // the pull request's own page in its place once the fixture's read-back names it (600 ms on), in the 5 s recorded; held
+  // *Queued* (`slow`); refused, its answers under the line. Once each: a second press is a second pull request.
+  ...[["pr-create", ""], ["pr-create-queued", "fake-pr-create=slow"], ["pr-create-refused", "fake-pr-create=refused"]].map(([name, fake]) => ({
+    name, fixture: true, once: true, ...(fake ? { fake } : {}), start: `#/repo/${REPO}/compare/spike%2Fsepa-instant`, press: `${shown} .tf-full button`, text: "Create pull request", hash: "#/pr/",
+  })),
   { name: "ticket-move-held", fixture: true, once: true, fake: "fake-move=held", start: MOVE_TICKET, setup: `${shown} .tf-statebtn`, press: "[role=menu] [role=menuitem]", text: "In progress", starts: true, hash: null, ready: `${shown} .tf-fact-note` },
   { name: "list-status-menu", fixture: true, start: "#/tickets", before: [{ eval: TO_LIST }], press: `${shown} .tf-statecell`, hash: null, ready: "[role=menu] [role=menuitem]", away: "Escape" },
   { name: "board-carry", fixture: true, start: "#/tickets", before: [{ eval: SELECT_TODO }], key: { key: "s", code: "KeyS", windowsVirtualKeyCode: 83 }, hash: null, ready: ".tf-board-wrap[data-held]", anywhere: true, away: "Escape" },

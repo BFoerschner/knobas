@@ -192,6 +192,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
+  // The pull requests being created (#2584), and the read-back listener with them.
+  "tf/pr/creating.svelte.ts#creating": async () => (await import("../tf/pr/creating.svelte")).forgetCreates(),
   // A pull request's state as a write this session queued leaves it (the pr-state fix), and its withdrawal listeners.
   "tf/pr/pr-state.svelte.ts#moves": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),
   "tf/pr/pr-state.svelte.ts#stops": async () => (await import("../tf/pr/pr-state.svelte")).forgetPrMoves(),

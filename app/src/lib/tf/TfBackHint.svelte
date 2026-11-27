@@ -14,10 +14,13 @@
   let {
     back,
     name = back.name,
+    held = false,
   }: {
     back: Pick<EscTargetOf, "name"> & Partial<EscTargetOf>;
     /** What the page calls the place, when it knows better than the shell. */
     name?: string;
+    /** Held unseen in its room while the page still reads which place is above it (#2602). */
+    held?: boolean;
   } = $props();
 
   const step = backStep();
@@ -40,7 +43,7 @@
 <!-- A key is told from the words by its face, and the whole link is underlined (F-053), so it reads as one link to the thing it names. -->
 {#snippet words()}{#if code}<span class="tf-esc-t">Back to <span class="tf-mono tf-key">{name}</span></span>{:else}<span class="tf-esc-t">Back to {name}</span>{/if}{/snippet}
 {#if back.hash === undefined}
-  <a class="tf-esc" href="#/" onclick={closePanel}>{@render words()} <kbd>Esc</kbd></a>
+  <a class="tf-esc" class:tf-held={held} href="#/" onclick={closePanel}>{@render words()} <kbd>Esc</kbd></a>
 {:else}
-  <a class="tf-esc" href={back.hash} onclick={press}>{@render words()} <kbd>Esc</kbd></a>
+  <a class="tf-esc" class:tf-held={held} href={back.hash} onclick={press}>{@render words()} <kbd>Esc</kbd></a>
 {/if}

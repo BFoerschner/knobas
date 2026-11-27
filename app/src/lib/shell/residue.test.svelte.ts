@@ -657,6 +657,7 @@ const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
+const TfPrCreating = (await import("../tf/pr/TfPrCreating.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
 const TfFindBar = (await import("../tf/TfFindBar.svelte")).default;
@@ -2892,6 +2893,32 @@ const CASES: Case[] = [
             submitWrite: () => deferred({} as never),
             prViewedFiles: () => deferred([]),
             setPrFileViewed: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
+  // A pull request being created (#2584): its write followed, modelled as a window listener, and its repository read late.
+  {
+    name: "TfPrCreating",
+    source: "lib/tf/pr/TfPrCreating.svelte",
+    open: (target) => ({
+      app: mount(TfPrCreating, {
+        target,
+        props: {
+          write: 1,
+          ports: {
+            follower: {
+              follow: () => {
+                const heard = () => {};
+                window.addEventListener("tauri:activity:new", heard);
+                return () => window.removeEventListener("tauri:activity:new", heard);
+              },
+            },
+            getEntity: () => deferred({ row: { entity_id: "gitea:tidewater/payout-service", title: "tidewater/payout-service" } } as never),
+            applyHeldWrite: () => deferred(undefined),
+            discardWrite: () => deferred(undefined),
+            readAhead: () => deferred(undefined),
           },
         },
       }),
