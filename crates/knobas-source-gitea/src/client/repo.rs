@@ -256,15 +256,27 @@ impl GiteaClient {
         {
             return Ok(String::new());
         }
-        // Its web route serves the diff to a token for a public repository
-        // (measured on 17.0.0); for a private one it answers 404 whatever the
+        // Its web route diffs `base...head` from `base`'s tip, not from the
+        // merge base (measured on 17.0.0, #2540): everything `base` gained
+        // since the branch was cut would be drawn as deleted. Where the
+        // compare's commits settle the merge base, the diff is read from it
+        // to the head's tip, which is `git diff base...head`; otherwise as
+        // asked.
+        let settled = serde_json::from_value::<crate::view::compare::Listing>(compare)
+            .ok()
+            .and_then(|listing| crate::view::compare::between(&listing, base, head));
+        let (from, to) = settled
+            .as_ref()
+            .map_or((base, head), |(from, to)| (from.as_str(), to.as_str()));
+        // It serves the diff to a token for a public repository (measured on
+        // 17.0.0); for a private one it answers 404 whatever the
         // credentials, so that case is a refusal that says why, not a diff.
         let path = format!(
             "/{}/{}/compare/{}...{}.diff",
             segment(owner)?,
             segment(repo)?,
-            escaped(base)?,
-            escaped(head)?
+            escaped(from)?,
+            escaped(to)?
         );
         let request = self.http.request(Method::GET, &path);
         match self.http.send(request).await {
