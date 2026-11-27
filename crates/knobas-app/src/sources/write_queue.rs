@@ -931,7 +931,9 @@ pub(crate) async fn after_landing(
     // What else the write moved, as its op declares it, each read at its own
     // source before the run (ADR-0064): the run reads only the write's own
     // source, takes minutes at size, and stands aside for a later write.
-    let effects = super::effects::read(scheduler, write, &entity).await;
+    let declared = serde_json::from_value::<WriteOp>(write.payload.clone())
+        .map_or(&[][..], |op| op.effects());
+    let effects = super::effects::read(scheduler, write, &entity, declared).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,

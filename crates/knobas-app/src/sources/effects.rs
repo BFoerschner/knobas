@@ -23,7 +23,6 @@
 
 use knobas_core::delivery::Effect;
 use knobas_core::write_queue::QueuedWrite;
-use knobas_source::WriteOp;
 use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::Scheduler;
 
@@ -141,18 +140,15 @@ async fn resolve(
     }
 }
 
-/// The effects `write` declares, each resolved against the write's target,
-/// once each, without `read_back` (the item already read back) and in the
-/// order the op declares them.
+/// `effects`, the ones `write`'s op declares, each resolved against the
+/// write's target, once each, without `read_back` (the item already read
+/// back) and in the order the op declares them.
 async fn named(
     scheduler: &Scheduler,
     write: &QueuedWrite,
     read_back: &str,
+    effects: &[Effect],
 ) -> Vec<(Effect, String)> {
-    let Ok(op) = serde_json::from_value::<WriteOp>(write.payload.clone()) else {
-        return Vec::new();
-    };
-    let effects = op.effects();
     if effects.is_empty() {
         return Vec::new();
     }
@@ -187,7 +183,9 @@ async fn named(
     named
 }
 
-/// Read each effect `write` declares, all at once, each at its own source
+/// Read `effects`, each one `write`'s op declares (handed in by
+/// [`super::write_queue::after_landing`], which decodes the op: the one
+/// place outside the queue that may, `write_choke_point.rs`), all at once, each at its own source
 /// under that source's lock, waited for at most [`EFFECT_PATIENCE`];
 /// `read_back` is the item already read back, which
 /// is not read again. Answers what each read answered, in the order the op
@@ -196,8 +194,9 @@ pub(crate) async fn read(
     scheduler: &Scheduler,
     write: &QueuedWrite,
     read_back: &str,
+    effects: &[Effect],
 ) -> Vec<EffectRead> {
-    let named = named(scheduler, write, read_back).await;
+    let named = named(scheduler, write, read_back, effects).await;
     futures_util::future::join_all(named.into_iter().map(|(effect, entity)| async move {
         let source = entity
             .split_once(':')
