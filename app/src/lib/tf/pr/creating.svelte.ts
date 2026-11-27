@@ -28,6 +28,8 @@ export interface CreatePr {
   title: string;
   head: string;
   base: string;
+  /** The repository's name as the opener's kept answers held it before the write dropped them, so the page reads none. */
+  repoName?: string | null;
 }
 
 /** One create this window queued. */
@@ -37,6 +39,8 @@ export interface Creating {
   title: string;
   head: string;
   base: string;
+  /** The repository's name, where the opener knew it ({@link CreatePr}). */
+  repoName: string | null;
   /** The pull request's entity id once the read-back named it, else `null`. */
   made: string | null;
 }
@@ -62,7 +66,7 @@ export function creatingOf(write: number): Creating | undefined {
 
 /** A `CreatePullRequest` was queued as write `write`: answers the address its page has until the source answers. */
 export function noteCreate(write: number, pr: CreatePr, listen: EchoListen = (event, handler) => windowListen(event, handler)): string {
-  creating[write] = { write, repo: pr.entity, title: pr.title, head: pr.head, base: pr.base, made: null };
+  creating[write] = { write, repo: pr.entity, title: pr.title, head: pr.head, base: pr.base, repoName: pr.repoName ?? null, made: null };
   unlisten ??= listen(EVENTS.itemRefreshed, ({ payload }) => {
     const ended = payload as RefreshEnded;
     const one = ended.write_id === null ? undefined : creating[ended.write_id];

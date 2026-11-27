@@ -135,6 +135,8 @@
     knowsPrTab,
     overviewParts,
     prHash,
+    prReposFilter,
+    PR_REPOS_LIMIT,
     railChecks,
     checkReading,
     readiness,
@@ -207,9 +209,6 @@
     /** Follows each queued write, so one held or refused drops its echo (#1424). */
     follower?: WriteFollower;
   } = $props();
-
-  /** How many repositories one read asks for: a source with more is read on with `offset` (#1825). */
-  const LIMIT = 1000;
 
   const route = $derived(readPrRoute(rest));
   const prId = $derived(route.prId);
@@ -463,20 +462,11 @@
   /** The repository the pull request is under: its declared parent, `owner/name`, in its source. */
   function readRepo(row: EntityRow, live: () => boolean) {
     if (row.path === null) return;
-    const filter: EntityFilter = {
-      sources: [row.source_id],
-      kinds: ["repo"],
-      updated_within_days: null,
-      order: "updated_desc",
-      context: null,
-      project: null,
-      include_deleted: false,
-      reach: null,
-    };
+    const filter = prReposFilter(row);
     // The source's repositories are read on past one read's rows until the
     // pull request's own turns up (#1825): its repository may sit anywhere.
     readAllRows(
-      (offset) => ports.listEntities(filter, LIMIT, offset),
+      (offset) => ports.listEntities(filter, PR_REPOS_LIMIT, offset),
       (rows) => repoOfRow(row, rows) !== null,
     ).then(
       (rows) => {

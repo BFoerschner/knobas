@@ -91,6 +91,7 @@
   import { itemHash, resolveTicket } from "../job/job";
   import { echoWrite, echoesOn, watchEchoes } from "../queued.svelte";
   import { noteCreate } from "../pr/creating.svelte";
+  import { heldRow } from "../../ipc/answer-cache";
   import { placeRestoring } from "../return-place";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -860,6 +861,8 @@
     const words = title.trim();
     try {
       const linkTo = ticket !== null && link ? ticket.id : undefined;
+      // Its name as the kept answers hold it, before the write drops them: the new pull request's page draws it at once.
+      const repoName = heldRow(repoId)?.title ?? null;
       const write = await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
       const prs = repoHash(repoId, "prs");
       // The press lands on the page that shows it, so the toast has nowhere to offer.
@@ -877,7 +880,7 @@
             action: { label: "Pull requests", run: () => (location.hash = prs) },
           });
       });
-      location.hash = noteCreate(write.id, { entity: repoId, title: words, head, base }, ports.listen);
+      location.hash = noteCreate(write.id, { entity: repoId, title: words, head, base, repoName }, ports.listen);
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;

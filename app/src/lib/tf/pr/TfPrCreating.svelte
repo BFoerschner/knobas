@@ -17,9 +17,30 @@
   - `Esc` goes to the repository, as from the pull request (#2559).
 -->
 <script lang="ts" module>
-  import type { EntityDetail } from "../../ipc/entity";
+  import { getEntity, listEntities, readViewAhead, type EntityDetail } from "../../ipc/entity";
+  import { listSources } from "../../ipc/sources";
   import type { WriteFollower } from "../../shell/follow-write";
   import type { EchoListen } from "../queued.svelte";
+  import { PRESS_KEEP_MS } from "../repo/hover-reads";
+  import { prReposFilter, PR_REPOS_LIMIT } from "./pr";
+
+  /**
+   * The first reads of the pull request's page (`TfPr.svelte`): its row, its view, the sources and its repository's
+   * list, each the call the page makes, so the page joins them or takes them kept. The write's read-back just dropped
+   * every kept answer, and the page opened cold hid its header for its reads and drew its crumbs after.
+   */
+  export function readPrAhead(made: string): Promise<unknown> {
+    const view = readViewAhead(made, null, PRESS_KEEP_MS);
+    const row = getEntity(made).then((found) => Promise.all([listEntities(prReposFilter(found.row), PR_REPOS_LIMIT, 0), listSources()]));
+    return Promise.all([view, row]);
+  }
+
+  /**
+   * How long the address waits on {@link readPrAhead} before it is taken anyway, ms. This page stands whole meanwhile, so
+   * waiting costs a moment more of *Sent*; the row's read and then its repository's are one after the other, which the
+   * fixture's late reads (`moves.mjs`) put at 550 ms, past the page's own 500 ms header hold.
+   */
+  export const SWAP_WAIT_MS = 1500;
 
   /** What the page reads and does, injectable so a test needs no bridge. */
   export interface CreatingPorts {
@@ -27,6 +48,8 @@
     getEntity: (entityId: string) => Promise<Pick<EntityDetail, "row">>;
     applyHeldWrite: (id: number) => Promise<void>;
     discardWrite: (id: number) => Promise<void>;
+    /** The pull request's page's first reads, started once the read-back names it ({@link readPrAhead}). */
+    readAhead: (made: string) => Promise<unknown>;
     /** How a read-back is heard when this page notes a create itself (after a reload); the window's events if absent. */
     listen?: EchoListen;
   }
@@ -34,7 +57,6 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { getEntity } from "../../ipc/entity";
   import { applyHeldWrite, discardWrite, type QueuedWrite } from "../../ipc/sources";
   import { mayHaveLanded, willNotGo, writeFollower } from "../../shell/follow-write";
   import { push } from "../../shell/toasts.svelte";
@@ -58,6 +80,7 @@
       getEntity: (entityId) => getEntity(entityId),
       applyHeldWrite: (id) => applyHeldWrite(id),
       discardWrite: (id) => discardWrite(id),
+      readAhead: readPrAhead,
     },
   }: {
     /** The create's write id, from the address. */
@@ -71,7 +94,9 @@
   let row = $state<QueuedWrite | null | undefined>(null);
   let withdrawn = $state(false);
   let busy = $state(false);
-  let repoName = $state<string | null>(null);
+  /** The repository's name as read here, where the opener held none (after a reload, or a write a source's dialog made). */
+  let readName = $state<string | null>(null);
+  const repoName = $derived(noted?.repoName ?? readName);
 
   $effect(() => {
     const id = write;
@@ -99,21 +124,34 @@
   });
 
   $effect(() => {
-    if (repo === null) return;
+    if (repo === null || noted?.repoName) return;
     const id = repo;
     let live = true;
     ports.getEntity(id).then(
-      (found) => live && (repoName = found.row.title),
+      (found) => live && (readName = found.row.title),
       () => {},
     );
     return () => (live = false);
   });
 
-  // Once the read-back names what it made, that is the page; a hidden kept page goes once it shows.
+  // Once the read-back names what it made, that is the page; a hidden kept page goes once it shows. The address waits on
+  // the page's first reads, at most `SWAP_WAIT_MS`, so it draws whole where this one stood.
   const shown = pageVisible();
   $effect(() => {
     const made = noted?.made ?? null;
-    if (made !== null && shown()) replaceAddress(prHash(made));
+    if (made === null || !shown()) return;
+    let live = true;
+    const go = () => {
+      if (!live) return;
+      live = false;
+      replaceAddress(prHash(made));
+    };
+    const late = setTimeout(go, SWAP_WAIT_MS);
+    ports.readAhead(made).then(go, go);
+    return () => {
+      live = false;
+      clearTimeout(late);
+    };
   });
 
   const stopped = $derived(row != null && willNotGo(row) ? row : null);

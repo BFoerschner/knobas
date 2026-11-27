@@ -64,6 +64,7 @@ async function draw(ports: Partial<CreatingPorts> & Pick<CreatingPorts, "followe
     getEntity: async () => ({ row: { entity_id: REPO, title: "tidewater/payout-service" } }) as never,
     applyHeldWrite: async () => {},
     discardWrite: async () => {},
+    readAhead: async () => {},
     ...ports,
   };
   view = mount(TfPrCreating, { target, props: { write: 1, back: null, ports: all }, context: pageContext(visible) });
@@ -165,4 +166,47 @@ test("after a reload a create still queued takes the pull request's address once
   await events.refreshed(MADE, 1);
   await settle();
   expect(location.hash).toBe(prHash(MADE));
+});
+
+test("the address waits on the pull request page's first reads, so it draws whole where this one stood (#2584)", async () => {
+  const events = echoEvents(settle);
+  const queue = echoFollower();
+  noteCreate(1, PR, events.listen);
+  let land = () => {};
+  const asked: string[] = [];
+  const reads = new Promise<void>((resolve) => (land = resolve));
+  await draw({ follower: queue.follower, readAhead: (made) => (asked.push(made), reads) });
+  await events.refreshed(MADE, 1);
+  await settle();
+  expect(asked).toEqual([MADE]);
+  expect(location.hash).toBe("#/pr/new/1");
+  land();
+  await settle();
+  expect(location.hash).toBe(prHash(MADE));
+});
+
+test("the repository's name the opener held draws in the first frame, with no read of it (#2584)", async () => {
+  const events = echoEvents(settle);
+  const queue = echoFollower();
+  noteCreate(1, { ...PR, repoName: "tidewater/payout-service" }, events.listen);
+  const read: string[] = [];
+  view = mount(TfPrCreating, {
+    target,
+    props: {
+      write: 1,
+      back: null,
+      ports: {
+        follower: queue.follower,
+        getEntity: async (id) => (read.push(id), { row: { entity_id: REPO, title: "x" } }) as never,
+        applyHeldWrite: async () => {},
+        discardWrite: async () => {},
+        readAhead: async () => {},
+      },
+    },
+    context: pageContext(() => true),
+  });
+  flushSync();
+  expect(text(target.querySelector(".tf-crumbs"))).toContain("tidewater/payout-service");
+  await settle();
+  expect(read).toEqual([]);
 });

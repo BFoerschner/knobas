@@ -25,6 +25,7 @@
   import { actionName, actionPayload, answeredAsDrawn, initialValues, missingFields } from "../detail/view/actions";
   import { drafts } from "./drafts.svelte";
   import { noteCreate } from "./pr/creating.svelte";
+  import { heldRow } from "../ipc/answer-cache";
   import TfDialog from "./settings/TfDialog.svelte";
 
   let {
@@ -108,13 +109,15 @@
       return;
     }
     busy = true;
+    // A pull request's repository by name as the kept answers hold it, before the write drops them (#2584).
+    const repoName = "CreatePullRequest" in payload ? (heldRow(payload.CreatePullRequest.entity)?.title ?? null) : null;
     try {
       const write = await submitWrite(payload);
       toastQueued(typeof what === "function" ? what(chose) : what, source, { write });
       onqueued?.(write, chose);
       cancel();
       // A pull request lands on its own page, addressed by its write until the source answers (#2584).
-      if ("CreatePullRequest" in payload) location.hash = noteCreate(write.id, payload.CreatePullRequest);
+      if ("CreatePullRequest" in payload) location.hash = noteCreate(write.id, { ...payload.CreatePullRequest, repoName });
     } catch (cause) {
       push({ text: `Could not queue the write: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;
