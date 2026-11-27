@@ -67,6 +67,11 @@ export interface TfPageContext {
    * does nothing, which draws no hint.
    */
   back: EscTarget | null;
+  /**
+   * The page the entry was opened from, which a page's own *Save* and *Cancel* hand back to, as Back would: not where
+   * `Esc` goes, which is {@link back} (#2559). `null` for an entry nothing opened.
+   */
+  came: (EscTarget & { opened: true }) | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
   /** The job the shell's pages default to (the chosen job, else the timer's ticket) with its entity id, or `null`. */

@@ -341,7 +341,7 @@ async function answered(): Promise<void> {
 }
 
 // Björn, 2026-11-25: "exit to the current page of the web version if I browsed inside knobas then go back with double esc".
-test("browsed from the page it was opened at to another knobas holds, the site's landing is that page, by its title", async () => {
+test("browsed from the page it was opened at to another knobas holds, the site's landing is that page, by its title; back on the first, it is the first (#2559)", async () => {
   const at = "https://wiki.example/display/PAY/Retry";
   const next = "https://wiki.example/pages/viewpage.action?pageId=9";
   named[at] = "confluence:2";
@@ -351,7 +351,7 @@ test("browsed from the page it was opened at to another knobas holds, the site's
   store.update(status({ url: at }));
   draw();
   await answered();
-  expect(store.landing.get("wiki"), "still on the page it was opened at").toBeUndefined();
+  expect(store.landing.get("wiki")?.entityId, "still on the page it was opened at: that page").toBe("confluence:2");
 
   store.update(status({ url: next }));
   flushSync();
@@ -360,14 +360,14 @@ test("browsed from the page it was opened at to another knobas holds, the site's
   expect(store.pending.has("wiki")).toBe(false);
   expect(store.landing.get("wiki")).toEqual({ hash: "#/page/confluence%3A9", name: "Retry budget", entityId: "confluence:9", kind: "page" });
 
-  // Back in the site to the page it was opened at, by another address of it: no landing.
+  // Back in the site to the page it was opened at, by another address of it: that page again.
   store.update(status({ url: "https://wiki.example/pages/viewpage.action?pageId=2" }));
   named["https://wiki.example/pages/viewpage.action?pageId=2"] = "confluence:2";
   await answered();
-  expect(store.landing.get("wiki")).toBeUndefined();
+  expect(store.landing.get("wiki")?.entityId).toBe("confluence:2");
 });
 
-test("an address the mirror does not hold leaves no landing, and leaving refreshes the landed page first", async () => {
+test("an address the mirror does not hold lands on the page the site was opened at (#2559), and leaving refreshes the landed page first", async () => {
   const at = "https://wiki.example/display/PAY/Retry";
   named[at] = "confluence:2";
   named["https://wiki.example/x/9"] = "confluence:9";
@@ -375,7 +375,7 @@ test("an address the mirror does not hold leaves no landing, and leaving refresh
   store.update(status({ url: "https://wiki.example/dosearchsite.action?q=retry" }));
   const { props } = draw();
   await answered();
-  expect(store.landing.get("wiki")).toBeUndefined();
+  expect(store.landing.get("wiki")?.entityId).toBe("confluence:2");
   store.update(status({ url: "https://wiki.example/x/9" }));
   await answered();
   expect(store.landing.get("wiki")?.entityId).toBe("confluence:9");

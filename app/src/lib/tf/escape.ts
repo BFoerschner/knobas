@@ -1,6 +1,6 @@
 /**
- * The ticket-first shell's `Esc` (#809, spec #2227): one layer per press, in
- * this order. `Esc` goes up one level, never sideways.
+ * The ticket-first shell's `Esc` (#809, spec #2227, #2559): one layer per press,
+ * in this order. `Esc` goes up one level, never sideways and never back.
  *
  * 1. a dialog is open           → close the topmost dialog;
  * 2. a drawer is open           → close it;
@@ -9,39 +9,31 @@
  *    empty filter falls through to the rungs below, and steps out only where they do nothing). So does a field marked
  *    {@link escThroughUntouched} while the reader hasn't touched it: *Title* on Compare, and only that;
  * 5. an inline panel is open    → close it;
- * 6. a top page                 → nothing;
- * 7. an opener is known         → go to the opener;
- * 8. a structural parent exists → go to it;
- * 9. otherwise                  → nothing.
+ * 6. a parent exists            → go to it;
+ * 7. otherwise                  → nothing.
  *
  * The ticket page has no tabs (#2399), so it has no rung of its own: an old
  * `/map` or `/conversation` address is the page, and `Esc` leaves it.
  *
- * A top page is a section's own page, the address its nav entry or the
- * Settings cog links to (`isTopPage` in `route.ts`): `Esc` never jumps from
- * one section to another, even when something opened it. The opener is the
- * page the current history entry was opened from by an in-app link or button
- * (`opener.ts`, #2229): a run opened from the Job page returns there, one
- * opened from another run returns to that run. An entry reached by a
- * deep link, startup or a nav entry has none, and a tab switch keeps the
- * page's own. The shell steps back in history when the opener is the entry
- * before, so `⌘]` goes forward to the detail again; otherwise it goes there, and
- * the new entry takes the stamp the opener had, so the next `Esc` still knows.
+ * `Esc` is not Back (Björn, 2026-11-27, #2559): it goes one level up the page's own section, whatever opened it, and
+ * never back to the page that opened it in another section. Back (the mouse's button, `⌘[`) steps through history.
+ * The parent is the crumb above the page: what the page says (`parentPage`: a pull request's repository, a run's
+ * pipeline by its name, a doc page's space, an asset's holder), else {@link parentOf}'s from the address, where every
+ * section's chain is written down. A section's own page, and its tabs, have none: `Esc` there does nothing, however
+ * the reader came, by a nav entry, the launcher, a ticket card's row or `⌘,`. An item's page and a note's page have
+ * none either. `Esc` never reads "the job you were last in" (#2228); a key that sometimes does nothing is what makes
+ * the others safe to press.
  *
- * With no opener, the structural parent is the crumb above the page: what the
- * page says (`parentPage`: a pull request's repository, a run's pipeline by its
- * name, an asset's holder), else `parentOf`'s from the address. A section's own
- * tabs and a pipeline picked on Builds have no parent: they are the section's
- * page, so `Esc` never goes sideways to a sibling.
- * An item's page and a note's page have no parent, so rung 8 leaves them
- * where they are. `Esc` never reads "the job you were last in" (#2228); a
- * key that sometimes does nothing is what makes the others safe to press.
+ * The opener (`opener.ts`, #2229) still says how, never where: when the parent is the page the entry was opened from,
+ * the shell steps back to it, so `⌘]` comes forward to the detail again, and the breadcrumb calls it by the name the
+ * page gave itself.
  *
- * On a source's site (ADR-0050) a rung comes before 7: where the site stands now is a page knobas holds, other than the
- * one the site was opened at and the opener's own → go to that page, in place of the site's entry (the site's
- * *landing*, Björn and Fable's ruling, 2026-11-25). He browsed in the site, and `Esc` twice lands where he is.
+ * On a source's site (ADR-0050) the parent is the page knobas holds for where the site stands now, else for the item it
+ * was opened at (#2559); with neither, `Esc` does nothing there. It comes after a first `Esc` that arms (decisions §9),
+ * and takes the site's entry in place (the site's *landing*, Björn and Fable's ruling, 2026-11-25), unless it is the
+ * opener's own page, which the shell steps back to.
  *
- * Rungs 6 to 9 are {@link escTarget}, which the breadcrumb's *Back to <name>*
+ * Rungs 6 and 7 are {@link escTarget}, which the breadcrumb's *Back to <name>*
  * reads too, so the hint and the key cannot disagree. No page answers `Esc` for
  * itself on those rungs: the asset tree's `←` walks up its columns, and its `Esc`
  * follows the bar like any page's, whatever has focus.
@@ -57,7 +49,8 @@ import type { Attachment } from "svelte/attachments";
 import { pageHeading } from "./focus-keep";
 import { segmentKey } from "./job/job";
 import { samePage } from "./opener";
-import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
+import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, sectionOf, type TfRoute } from "./route";
+import { settingsName, settingsPlace } from "./settings/settings";
 
 /** What `Esc` can see when it is pressed. */
 export interface EscState {
@@ -66,10 +59,8 @@ export interface EscState {
   /** The focused text field, or `null` when focus is not in one. */
   field: { filter: boolean; text: string; through?: boolean } | null;
   route: TfRoute;
-  /** The page the current history entry was opened from, and its name, or `null` (`opener.ts`). */
+  /** The page the current history entry was opened from, and its name, or `null` (`opener.ts`): how `Esc` goes, never where. */
   opener: EscTarget | null;
-  /** This top page was opened to be returned from: a ticket card's row (spec #2401), or *Manage link sets*. */
-  visiting?: boolean;
   /** The place the page says it sits under (`page-name.svelte.ts`), where the address cannot say it. */
   parent?: EscTarget | null;
   /** On a site's page: a first `Esc` is down and the second still counts (ADR-0050, decisions §9). */
@@ -83,7 +74,7 @@ export type EscStep =
   | { do: "close"; index: number }
   | { do: "clear-filter" }
   | { do: "blur" }
-  /** `opened`: the target is the entry's opener, which the shell may reach by stepping back. */
+  /** `opened`: the parent is also the entry's opener, which the shell may reach by stepping back. */
   | { do: "go"; hash: string; opened: boolean }
   /** On a site's page, the first `Esc`: the second within half a second goes back (decisions §9). */
   | { do: "arm" }
@@ -96,7 +87,7 @@ export interface EscTarget {
 }
 
 /**
- * An {@link EscTarget}, and whether it is the entry's opener (rung 7) rather than a structural parent; `lands`: a site's
+ * An {@link EscTarget}, and whether it is also the entry's opener, which the shell steps back to; `lands`: a site's
  * landing, which takes the site's entry in place.
  */
 export type EscTargetOf = EscTarget & { opened: boolean; lands?: boolean };
@@ -112,7 +103,7 @@ export function escStep(state: EscState): EscStep {
   }
   const panel = state.layers.map((layer) => layer.kind).lastIndexOf("panel");
   if (panel !== -1) return { do: "close", index: panel };
-  const target = escTarget(state.route, state.opener, state.visiting, state.parent, state.landing ?? null);
+  const target = escTarget(state.route, state.opener, state.parent, state.landing ?? null);
   // A site's page goes back on the second `Esc` only, one rule wherever the keyboard is (decisions §9).
   if (state.route.view === "site" && target !== null && state.armed !== true) return { do: "arm" };
   if (target !== null) return { do: "go", hash: target.hash, opened: target.opened };
@@ -185,29 +176,32 @@ export function escHolder(field: HTMLElement): HTMLElement | null {
 }
 
 /**
- * Rungs 6 to 9: where `Esc` goes from `route` once nothing is open, or `null`
- * where it does nothing. `opener` is the current entry's (`opener.ts`).
- * A section's top page does nothing, unless it was opened to be returned from
- * (`visiting`: a ticket card's row, spec #2401, *Manage link sets*, or the launcher): then it goes back.
- * Settings is the other: a place with no nav entry, visited from somewhere and
- * returned from, on every one of its sections alike. Assets has its entry again
- * (2026-11-19), so its own page is a top page like Monitors'.
+ * Rungs 6 and 7: where `Esc` goes from `route` once nothing is open, or `null` where it does nothing (#2559): the parent
+ * the page says (`parent`), else {@link parentOf}'s, else on a site its `landing`. `opener` is the current entry's
+ * (`opener.ts`), which only marks the parent `opened` when it is the same page, so the shell steps back to it.
  */
-export function escTarget(
-  route: TfRoute,
-  opener: EscTarget | null,
-  visiting = false,
-  parent: EscTarget | null = null,
-  landing: EscTarget | null = null,
-): EscTargetOf | null {
-  // A site's landing, unless it is the page that opened the site: that is the opener's own step back.
-  if (route.view === "site" && landing !== null && (opener === null || !samePage(landing.hash, opener.hash))) return { ...landing, opened: false, lands: true };
-  const visited = route.view === "full" && route.section === "settings";
-  if (isTopPage(route) && !(opener !== null && (visiting || visited))) return null;
-  if (opener !== null) return { hash: opener.hash, name: opener.name, opened: true };
-  if (parent !== null) return { ...parent, opened: false };
-  const up = parentOf(route);
-  return up === null ? null : { hash: up, name: placeName(parseTfHash(up)), opened: false };
+export function escTarget(route: TfRoute, opener: EscTarget | null, parent: EscTarget | null = null, landing: EscTarget | null = null): EscTargetOf | null {
+  if (route.view === "site") {
+    if (landing === null) return null;
+    return opener !== null && samePage(landing.hash, opener.hash) ? { ...opener, opened: true } : { ...landing, opened: false, lands: true };
+  }
+  if (isTopPage(route)) return null;
+  const hash = parent?.hash ?? parentOf(route);
+  if (hash === null) return null;
+  if (opener !== null && (opener.hash === hash || ownPageAs(opener.hash, hash))) return { ...opener, opened: true };
+  return { hash, name: parent?.name ?? placeName(parseTfHash(hash)), opened: false };
+}
+
+/**
+ * Whether `opener` is the section's own page `parent` is, in the form the reader left it: Tickets on a saved view, Code
+ * on *Pull requests*. Then `Esc` goes back to that form, and never to another page of the section.
+ */
+function ownPageAs(opener: string, parent: string): boolean {
+  const up = parseTfHash(parent);
+  const from = parseTfHash(opener);
+  // Home (`#/job`) lights Tickets but is not its page: a ticket opened from home goes to Tickets.
+  const own = (isTopPage(from) && from.view !== "job") || (from.view === "full" && from.head === from.section && parentOf(from) === null);
+  return isTopPage(up) && own && sectionOf(from) === sectionOf(up);
 }
 
 /**
@@ -250,6 +244,7 @@ function placeName(route: TfRoute): string {
   if (route.view === "tickets") return SECTION_NAME.tickets;
   if (route.view === "job") return SECTION_NAME.job;
   if (route.view !== "full") return "";
-  if (route.head === "settings" && route.rest[0] === "sources") return "Sources";
+  // A section of Settings a page sits under is called by its name: *Back to Checkouts*, *Back to Appearance*.
+  if (route.head === "settings" && route.rest[0] !== undefined) return settingsName(settingsPlace(route.rest).section);
   return (route.head !== route.section ? HEAD_NAME[route.head] : undefined) ?? SECTION_NAME[route.section];
 }
