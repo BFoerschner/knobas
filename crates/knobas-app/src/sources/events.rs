@@ -41,6 +41,9 @@ impl<R: tauri::Runtime> SyncEvents for TauriEvents<R> {
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.emit(crate::events::ITEM_REFRESHED, ended);
     }
+    fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
+        self.emit(crate::events::LOOKING_AGAIN, looking);
+    }
 }
 
 impl<R: tauri::Runtime> crate::notify::NotificationEvents for TauriEvents<R> {

@@ -305,6 +305,9 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
     }
+    fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
+        self.inner.looking_again(looking);
+    }
     // The files pass's index and progress, passed on wherever this wrapper
     // sits in the stack (`tests/it/files_on_sync.rs`).
     fn files(&self) -> Option<knobas_sync::code_files::Files> {
@@ -934,6 +937,10 @@ pub(crate) async fn after_landing(
     let declared =
         serde_json::from_value::<WriteOp>(write.payload.clone()).map_or(&[][..], |op| op.effects());
     let effects = super::effects::read(scheduler, write, &entity, declared).await;
+    // What the source does after a write that moves a branch (CI queues a
+    // build, the forge finishes the merge) is looked for on a short,
+    // bounded schedule, beside the run (ADR-0064 rule 2, #2585).
+    super::look_again::after_write(scheduler, write, declared).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
@@ -1027,6 +1034,9 @@ pub(crate) struct FollowLandings {
     /// ([`super::follow_run`], the TeamCity run fix). Not counted in
     /// `following`: a run that follows a write does not wait out a build.
     runs: super::follow_run::RunFollows,
+    /// The scopes looked at again after a branch moved
+    /// ([`super::look_again`], #2585).
+    lookouts: super::look_again::Lookouts,
 }
 
 /// How many landed writes of each source are still being followed: counted up
@@ -1121,6 +1131,7 @@ impl FollowLandings {
                 scheduler_slot,
                 following: Following::default(),
                 runs: super::follow_run::RunFollows::default(),
+                lookouts: super::look_again::Lookouts::default(),
             },
             slot,
         )
@@ -1132,10 +1143,28 @@ impl FollowLandings {
     pub(crate) fn runs(&self) -> super::follow_run::RunFollows {
         self.runs.clone()
     }
+
+    /// The scopes looked at again ([`super::look_again`]).
+    pub(crate) fn lookouts(&self) -> super::look_again::Lookouts {
+        self.lookouts.clone()
+    }
 }
 
 impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        // A run that ended `ok` and wrote something may have found a branch
+        // moved by a push knobas did not make: its repository is looked at
+        // again on the bounded schedule (ADR-0064 rule 2, #2585).
+        if !status.running
+            && status.last_outcome == Some(knobas_sync::SyncOutcome::Ok)
+            && let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade())
+        {
+            let (task, source) = (scheduler.clone(), status.source_id.clone());
+            let changed = status.last_changed != Some(false);
+            scheduler.background().spawn(async move {
+                super::look_again::after_run(&task, &source, changed).await;
+            });
+        }
         self.inner.sync_state(status);
     }
     fn source_health(&self, health: knobas_sync::CredentialHealth) {
@@ -1170,6 +1199,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     }
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
+    }
+    fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
+        self.inner.looking_again(looking);
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)

@@ -14,6 +14,7 @@ pub mod held;
 pub mod install;
 pub mod installed;
 pub mod live;
+pub mod look_again;
 pub mod paths;
 pub mod pick_on_sync;
 pub mod progress;
