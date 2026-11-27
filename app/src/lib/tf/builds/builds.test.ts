@@ -177,6 +177,9 @@ test("a group holding only one subgroup is one row with it, as far as the chain 
   expect(tree!.folds.map((f) => f.name)).toEqual(["A › B › C"]);
   expect(tree!.folds[0]!.pipelines.map((p) => p.name)).toEqual(["Deep"]);
   expect(tree!.folds[0]!.folds.map((f) => f.name)).toEqual(["D"]);
+  // Its place is one segment a group, whatever the chain joined: the folder's address (#2570).
+  expect(tree!.folds[0]!.path).toEqual(["teamcity", "A", "B", "C"]);
+  expect(tree!.folds[0]!.folds[0]!.path).toEqual(["teamcity", "A", "B", "C", "D"]);
 });
 
 test("a pipeline with no declared chain sits under its group; one sources' tree each", () => {
@@ -333,6 +336,8 @@ test("by repository: a fold for each repository a pipeline's runs built, by name
     ["tidewater/payout-service", ["Payout_Build", "Shared_Lint"], 1],
     ["No repository", ["Nightly"], 0],
   ]);
+  // A repository's place is its entity id; *No repository* has none (#2570).
+  expect(tree!.folds.map((f) => f.path)).toEqual([["~repo", "git:ledger"], ["~repo", "git:payout"], ["~repo"]]);
   // A pipeline in two folds is two rows, each with a key of its own.
   const rows = listRows([], [tree!], "all", () => true);
   const keys = rows.filter((r) => r.kind === "pipeline").map((r) => r.key);

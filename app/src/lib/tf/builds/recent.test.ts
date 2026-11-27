@@ -11,7 +11,10 @@ import {
   RECENT,
   RECENT_HASH,
   RECENT_HOLD,
+  folderPipelines,
   isRecent,
+  runScopeHash,
+  runScopeOf,
   placeWords,
   recentFilterOf,
   recentMarks,
@@ -101,16 +104,57 @@ test("a run read again at its source is laid in where it is held", () => {
 });
 
 test("the backend is asked the scope, the results and the source", () => {
-  expect(recentFilterOf({ scope: "all", results: [], source: null }, null)).toEqual({ sources: [], results: [], mine: false, branches: null });
+  expect(recentFilterOf({ scope: "all", results: [], source: null }, null)).toEqual({ sources: [], results: [], mine: false, branches: null, pipelines: [] });
   expect(recentFilterOf({ scope: "mine", results: ["Failed", "Bogus"], source: "tc" }, null)).toEqual({
     sources: ["tc"],
     results: ["Failed"],
     mine: true,
     branches: null,
+    pipelines: [],
   });
   expect(recentFilterOf({ scope: "job", results: [], source: null }, ["feature/PAY-231"]).branches).toEqual(["feature/PAY-231"]);
   // *This job* before its branches are read asks for none, not for every run.
   expect(recentFilterOf({ scope: "job", results: [], source: null }, null).branches).toEqual([]);
+});
+
+test("a folder's scope asks for its pipelines by id; every pipeline asks for none (#2570)", () => {
+  const choice = { scope: "all", results: [], source: null };
+  expect(recentFilterOf(choice, null, ["tc:buildType:B", "tc:buildType:A"]).pipelines).toEqual(["tc:buildType:A", "tc:buildType:B"]);
+  expect(recentFilterOf(choice, null).pipelines).toEqual([]);
+});
+
+test("Recent and a folder are run scopes with addresses of their own, under words no pipeline's id is (#2570)", () => {
+  expect(runScopeOf(["recent"])).toEqual({ kind: "all" });
+  expect(runScopeOf(["folder", "tc", "Payments", "Payout"])).toEqual({ kind: "folder", path: ["tc", "Payments", "Payout"] });
+  expect(runScopeOf(["folder", "~repo", "git:acme/pay"])).toEqual({ kind: "folder", path: ["~repo", "git:acme/pay"] });
+  expect(runScopeOf(["folder"]), "a folder names its place").toBeNull();
+  expect(runScopeOf(["tc:buildType:folder"])).toBeNull();
+  expect(runScopeOf([])).toBeNull();
+  expect(runScopeHash({ kind: "all" })).toBe(RECENT_HASH);
+  // Each segment encoded: a group may hold a slash, a space or a `›`.
+  const hash = runScopeHash({ kind: "folder", path: ["tc", "Pay/outs", "Nightly › EU"] });
+  expect(hash).toBe("#/builds/folder/tc/Pay%2Fouts/Nightly%20%E2%80%BA%20EU");
+  const back = hash.slice("#/builds/".length).split("/").map(decodeURIComponent);
+  expect(runScopeOf(back)).toEqual({ kind: "folder", path: ["tc", "Pay/outs", "Nightly › EU"] });
+  // A pipeline's address names its source and a `:`, never the word.
+  expect(pipelineHash("tc:buildType:folder").startsWith("#/builds/folder/")).toBe(false);
+});
+
+test("a folder lists every pipeline under it, by project from its source's groups, by repository from what its runs built", () => {
+  const at = (id: string, source: string, path: string[]) => ({ entity_id: id, source_id: source, path, group: path.at(-1) ?? null });
+  const list = [
+    at("tc:a", "tc", ["Payments", "Payout"]),
+    at("tc:b", "tc", ["Payments", "Payout", "Deploy"]),
+    at("tc:c", "tc", ["Payments", "Payroll"]),
+    at("tc:d", "tc", []),
+    at("other:e", "other", ["Payments", "Payout"]),
+  ];
+  const repos = (p: { entity_id: string }) => (p.entity_id === "tc:a" ? [{ id: "git:pay" }] : p.entity_id === "tc:c" ? [{ id: "git:pay" }, { id: "git:roll" }] : []);
+  expect(folderPipelines(list, ["tc", "Payments", "Payout"], repos)).toEqual(["tc:a", "tc:b"]);
+  expect(folderPipelines(list, ["tc", "Payments"], repos)).toEqual(["tc:a", "tc:b", "tc:c"]);
+  expect(folderPipelines(list, ["tc", "Pay"], repos), "a group, not a prefix of its name").toEqual([]);
+  expect(folderPipelines(list, ["~repo", "git:pay"], repos)).toEqual(["tc:a", "tc:c"]);
+  expect(folderPipelines(list, ["~repo"], repos), "No repository").toEqual(["tc:b", "tc:d", "other:e"]);
 });
 
 test("a pipeline's place is its folders, its source first where two or more list", () => {

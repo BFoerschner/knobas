@@ -4412,7 +4412,13 @@ mine: boolean,
 /**
  * Only the runs built on these branches (*This job*); `None` for any.
  */
-branches: Array<string> | null, };
+branches: Array<string> | null, 
+/**
+ * Only the runs of these pipelines, by entity id (#2570: a folder's
+ * scope); empty for every pipeline. Ids and not a folder's path, because
+ * *By repository*'s folders are not the source's.
+ */
+pipelines: Array<string>, };
 
 /**
  * A pipeline as *Recent* names it beside its runs: its name, its chain of
