@@ -383,7 +383,9 @@ fn numbered(tag: &str) -> Vec<String> {
 /// for each other until PostgreSQL ends one of them with `deadlock detected`.
 async fn crossed_with<F>(pool: &sqlx::PgPool, words: &[String], held: usize, writer: F)
 where
-    F: FnOnce(sqlx::Transaction<'static, sqlx::Postgres>) -> tokio::task::JoinHandle<Result<(), sqlx::Error>>,
+    F: FnOnce(
+        sqlx::Transaction<'static, sqlx::Postgres>,
+    ) -> tokio::task::JoinHandle<Result<(), sqlx::Error>>,
 {
     let s = source("dlheld");
     let mut first = pool.begin().await.unwrap();
@@ -462,7 +464,15 @@ async fn a_batchs_new_words_are_taken_in_their_order() {
     let tag = &uuid::Uuid::new_v4().simple().to_string()[..10];
     let words = numbered(tag);
     let bodies: Vec<String> = (0..10)
-        .map(|r| words.iter().skip(r).step_by(10).cloned().collect::<Vec<_>>().join(" "))
+        .map(|r| {
+            words
+                .iter()
+                .skip(r)
+                .step_by(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .collect();
     crossed_with(&pool, &words, 505, |mut tx| {
         tokio::spawn(async move {
@@ -500,10 +510,27 @@ async fn a_rewrites_new_words_are_taken_in_their_order_across_its_rows() {
     let s = source("dlrewrite");
     let ids: Vec<String> = (0..10).map(|r| format!("{s}:{r}")).collect();
     for id in &ids {
-        item(&pool, &s, "ticket", id.rsplit(':').next().unwrap(), "dl", "nothing new", at(0)).await;
+        item(
+            &pool,
+            &s,
+            "ticket",
+            id.rsplit(':').next().unwrap(),
+            "dl",
+            "nothing new",
+            at(0),
+        )
+        .await;
     }
     let bodies: Vec<String> = (0..10)
-        .map(|r| words.iter().skip(r).step_by(10).cloned().collect::<Vec<_>>().join(" "))
+        .map(|r| {
+            words
+                .iter()
+                .skip(r)
+                .step_by(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .collect();
     crossed_with(&pool, &words, 505, |mut tx| {
         tokio::spawn(async move {
