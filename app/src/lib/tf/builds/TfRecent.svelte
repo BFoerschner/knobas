@@ -196,15 +196,19 @@
       heldFor = wanted;
       failed = null;
       inFlightSoon();
-      untrack(() => ondrawn)?.();
       // The rest once the first rows have painted: asked at once, its answer came back inside the first rows' render on
       // the scale database at 6x, and the frame then drew all 200 in two passes (merger's review of #2569).
       if (first && next !== null) afterPaint(() => at === reads && void more(RECENT_PAGE - RECENT_FIRST));
-      // Shown: the sources asked once, then each minute (Fable's ruling 7).
-      if (!askedOnce) {
-        askedOnce = true;
-        void askSources();
-      }
+      // The Builds list (571 KB at Björn's scale) and the sources' first ask behind the paint too, not beside the
+      // render: their reads went out in this task and could land before the rows' frame (#2569b).
+      afterPaint(() => {
+        untrack(() => ondrawn)?.();
+        // Shown: the sources asked once, then each minute (Fable's ruling 7).
+        if (!askedOnce) {
+          askedOnce = true;
+          void askSources();
+        }
+      });
     } catch (cause) {
       if (at === reads) failed = ipcErrorMessage(cause);
       untrack(() => ondrawn)?.();

@@ -41,6 +41,9 @@ let page: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
   target = document.createElement("div");
   document.body.appendChild(target);
+  // A frame on the next turn: jsdom's own come on a 16 ms timer that a loaded machine misses, and Recent tells the list
+  // its first page drew once its rows have had their frame (#2569b).
+  vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) => setTimeout(() => run(performance.now()), 0));
 });
 
 afterEach(() => {
@@ -49,6 +52,7 @@ afterEach(() => {
   target.remove();
   runsRead.forget();
   buildsView.choose("pipelines");
+  vi.unstubAllGlobals();
 });
 
 async function settle() {
