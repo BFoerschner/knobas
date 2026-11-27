@@ -33,7 +33,7 @@
   import { HOLD_MS } from "../still-press";
 
   import Marked from "../filter/Marked.svelte";
-  import { heldOrder } from "../filter/ranked.svelte";
+  import { enterWhenRanked, heldOrder } from "../filter/ranked.svelte";
   import { inFloatHost, placeFloat } from "../floats";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import type { FieldOption } from "../../ipc/entity";
@@ -142,16 +142,13 @@
   const drawn = $derived(hits.slice(0, DRAWN_MOST));
   const marking = $derived(order.typed(typed, rows));
   /** `Enter` before the ranking answered what was typed picks from that answer, once it lands; typing on drops it. */
-  let entering = $state<string | null>(null);
-  $effect(() => {
-    if (entering === null) return;
-    if (entering !== typed) entering = null;
-    else if (order.settled(typed, rows)) {
-      entering = null;
+  const enter = enterWhenRanked(
+    () => ({ typed, settled: order.settled(typed, rows) }),
+    () => {
       const hit = drawn[at];
       if (hit !== undefined) pick(hit);
-    }
-  });
+    },
+  );
   const optionId = (index: number) => `${uid}-opt-${index}`;
 
   /** The one line under the list: how many of how many, where the list is read, or why it is not. */
@@ -199,12 +196,7 @@
       event.preventDefault();
       // `Enter` on arrival (the second of a double press on the opener) picks nothing: the press rule.
       if (typed === "" && performance.now() - openedAt < ARRIVAL_MS) return;
-      if (!order.settled(typed, rows)) {
-        entering = typed;
-        return;
-      }
-      const hit = drawn[at];
-      if (hit !== undefined) pick(hit);
+      enter.press();
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();

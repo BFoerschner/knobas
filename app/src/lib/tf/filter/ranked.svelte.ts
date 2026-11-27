@@ -17,6 +17,8 @@
  * with the first ask ({@link fuzzyHold}) and each key then sends only what was typed ({@link fuzzyRankHeld}). A list
  * the app dropped (it holds 32) answers `not_found`, and is held again once.
  */
+import { untrack } from "svelte";
+
 import { fuzzyDrop, fuzzyHold, fuzzyRank, fuzzyRankHeld } from "../../ipc/search";
 import type { FuzzyRanked } from "../../ipc/generated/search";
 import { markPairs, matcherOf, sliceMarks, wordPairs } from "./filter";
@@ -61,6 +63,38 @@ interface Answer<T> {
   texts: () => string[];
   /** Each kept text's place in `rows` and its marks, made once from `texts` when first carried. */
   kept?: Map<string, { at: number; marks: readonly number[] }>;
+}
+
+/**
+ * `Enter` before the ranking answered what was typed (#2535): what the press does waits for that answer and then
+ * happens, for the words it was pressed on only. Typing on drops it, so it never acts on what other words rank first.
+ *
+ * `now` reads the words and whether their answer has landed (`order.settled`), or `null` where nothing waits (the
+ * press acts at once, a waiting one is dropped). `act` is the press; `late` is what runs once the answer lands, `act`
+ * unless the press must wait a flush there. Made while a component sets up, as its `$effect` is.
+ */
+export function enterWhenRanked(
+  now: () => { typed: string; settled: boolean } | null,
+  act: () => void,
+  late: () => void = act,
+): { press(): void } {
+  let waiting = $state<string | null>(null);
+  $effect(() => {
+    if (waiting === null) return;
+    const at = now();
+    if (at === null || at.typed !== waiting) waiting = null;
+    else if (at.settled) {
+      waiting = null;
+      untrack(late);
+    }
+  });
+  return {
+    press() {
+      const at = now();
+      if (at !== null && !at.settled) waiting = at.typed;
+      else act();
+    },
+  };
 }
 
 export class FuzzyOrder<T> {

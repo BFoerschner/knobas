@@ -15,7 +15,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetRow } from "../../ipc/entity";
   import Marked from "../filter/Marked.svelte";
-  import { heldOrder } from "../filter/ranked.svelte";
+  import { enterWhenRanked, heldOrder } from "../filter/ranked.svelte";
   import type { Layers } from "../layers.svelte";
   import { goVisiting } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -102,20 +102,16 @@
    * answer leaves, not the first drawn for the words before, so the press waits for that answer. It is for the words
    * it was pressed on: typing on drops it, so it never applies what other words rank first.
    */
-  let waiting = $state<string | null>(null);
-  $effect(() => {
-    if (waiting === null) return;
-    if (waiting !== typed) waiting = null;
-    else if (order.settled(typed, rows)) {
-      waiting = null;
+  const enter = enterWhenRanked(
+    () => ({ typed, settled: order.settled(typed, rows) }),
+    () => {
       if (chosen !== null) onapply(chosen);
-    }
-  });
+    },
+  );
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
-    if (!order.settled(typed, rows)) waiting = typed;
-    else if (chosen !== null) onapply(chosen);
+    enter.press();
   }
 
   let filterEl = $state<HTMLInputElement | null>(null);

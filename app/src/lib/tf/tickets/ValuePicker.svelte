@@ -19,7 +19,7 @@
   import { tick } from "svelte";
 
   import Marked from "../filter/Marked.svelte";
-  import { heldOrder } from "../filter/ranked.svelte";
+  import { enterWhenRanked, heldOrder } from "../filter/ranked.svelte";
 
   /** The fewest values that are searched, not toggled. */
   const SEARCH_FROM = 9;
@@ -58,15 +58,7 @@
   const drawn = $derived(hits.slice(0, DRAWN_MOST));
   const marking = $derived(order.typed(typed, options));
   /** `Enter` before the ranking answered what was typed picks the best of that answer, once it lands; typing on drops it. */
-  let entering = $state<string | null>(null);
-  $effect(() => {
-    if (entering === null) return;
-    if (entering !== typed) entering = null;
-    else if (order.settled(typed, options)) {
-      entering = null;
-      pickCurrent();
-    }
-  });
+  const enter = enterWhenRanked(() => ({ typed, settled: order.settled(typed, options) }), () => pickCurrent());
 
   function pickCurrent() {
     const option = drawn[current];
@@ -96,8 +88,7 @@
     } else if (event.key === "Enter") {
       // Always the field's: Enter here must never save the view.
       event.preventDefault();
-      if (order.settled(typed, options)) pickCurrent();
-      else entering = typed;
+      enter.press();
     } else if (event.key === "Escape" && typed !== "") {
       // The dialog leaves a key a field has taken alone (`TfDialog`).
       event.preventDefault();
