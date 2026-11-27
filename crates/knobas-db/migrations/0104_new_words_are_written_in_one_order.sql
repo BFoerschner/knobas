@@ -21,10 +21,11 @@
 --
 -- ## What changes
 --
--- * **Every insert into `sync.word` orders its words** (`order by`, bytewise
---   as the column's `C` collation is), so within one statement two writers
---   take their shared words in the same order and one waits for the other,
---   never both for each other.
+-- * **Every insert into `sync.word` orders its words** (`order by ...
+--   collate "C"`: bytewise, the column's own order, whatever the database's
+--   default collation is, `en-US` on Windows), so within one statement two
+--   writers take their shared words in the same order and one waits for the
+--   other, never both for each other.
 -- * **A changed row's words are written once per statement**, not once per
 --   row: `0100`'s row trigger `after update of fts` took each row's words in
 --   turn, so two multi-row updates could still cross between rows. It is now
@@ -43,10 +44,10 @@ create or replace function sync.words_inserted() returns trigger
 language plpgsql as $fn$
 begin
   insert into sync.word (word)
-  select distinct w.w
+  select distinct w.w collate "C"
     from new_rows n
    cross join lateral sync.words_of(n.title, n.body_text) w(w)
-   order by w.w
+   order by w.w collate "C"
   on conflict do nothing;
   return null;
 end
@@ -61,12 +62,12 @@ language plpgsql as $fn$
 begin
   execute $q$
     insert into sync.word (word)
-    select distinct w.w
+    select distinct w.w collate "C"
       from new_rows n
       join old_rows o on o.entity_id = n.entity_id
      cross join lateral sync.words_of(n.title, n.body_text) w(w)
      where o.fts is distinct from n.fts
-     order by w.w
+     order by w.w collate "C"
     on conflict do nothing
   $q$;
   return null;
@@ -108,11 +109,11 @@ begin
     return;
   end if;
   insert into sync.word (word)
-  select distinct w.w
+  select distinct w.w collate "C"
     from sync.item i
    cross join lateral sync.words_of(i.title, i.body_text) w(w)
    where i.entity_id = any (looked[1:upto])
-   order by w.w
+   order by w.w collate "C"
   on conflict do nothing;
   insert into sync.word_filled_to (entity_id) values (looked[upto])
   on conflict (one) do update set entity_id = excluded.entity_id;
