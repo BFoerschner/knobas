@@ -43,7 +43,10 @@ fn gone() -> IpcError {
 ///
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for a token not held.
 pub fn made(token: &str) -> Result<Arc<Made>, IpcError> {
-    Runs::global().made(token).ok_or_else(gone)
+    Runs::global()
+        .made(token)
+        .or_else(|| crate::try_on::runs().made(token))
+        .ok_or_else(gone)
 }
 
 /// What two generated folders differ in (ux26, ADR-0049, ruling 7): the files only in one, and those in both whose bytes

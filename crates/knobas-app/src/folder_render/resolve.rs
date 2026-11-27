@@ -537,7 +537,7 @@ pub fn clone_items(tree: &local::LocalTree, folder: &str) -> Option<Vec<Item>> {
 
 /// The failure when `items` hold more files or bytes than `files` and
 /// `bytes`.
-fn past(items: &[Item], files: usize, bytes: u64, from: ReadFrom) -> Option<FolderFailure> {
+pub fn past(items: &[Item], files: usize, bytes: u64, from: ReadFrom) -> Option<FolderFailure> {
     let (count, size) = items
         .iter()
         .filter(|i| matches!(i.kind, ItemKind::File | ItemKind::Symlink))

@@ -54,6 +54,8 @@ pub struct RunHandle {
     /// The result's bytes: the stdout, the file under `{out}`, or the kept
     /// `{outdir}`.
     held: Mutex<Held>,
+    /// A try's throwaway folder (#2562), removed when the run ends.
+    throwaway: Mutex<Option<PathBuf>>,
 }
 
 /// Where a run's result's bytes are.
@@ -378,11 +380,21 @@ impl Runs {
             #[cfg(windows)]
             job: Mutex::new(None),
             held: Mutex::new(Held::Nothing),
+            throwaway: Mutex::new(None),
         });
         runs.push(Arc::clone(&handle));
         drop(runs);
         self.emit(&handle.row());
         Ok(handle)
+    }
+
+    /// Hold `dir`, a try's throwaway folder, until the run ends; at once when it already has.
+    pub fn throwaway(&self, handle: &RunHandle, dir: PathBuf) {
+        if lock(&handle.row).ended.is_some() {
+            let _ = std::fs::remove_dir_all(dir);
+        } else {
+            *lock(&handle.throwaway) = Some(dir);
+        }
     }
 
     /// The run with this id.
@@ -483,8 +495,14 @@ impl Runs {
         handle.flush(handle.started, Some(ended));
         lock(&handle.sinks).clear();
         let row = handle.row();
-        if let Some(history) = self.history.get() {
+        // A try is no row in the list of runs (#2562), and its throwaway file goes with it.
+        if let Some(history) = self.history.get()
+            && row.entity_id != crate::try_on::TRY_ENTITY
+        {
             history.ended(row.clone());
+        }
+        if let Some(dir) = lock(&handle.throwaway).take() {
+            let _ = std::fs::remove_dir_all(dir);
         }
         self.emit(&row);
         self.cap(KEPT_RUNS, KEPT_BYTES);

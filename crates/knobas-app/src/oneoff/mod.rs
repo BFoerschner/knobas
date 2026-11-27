@@ -330,6 +330,164 @@ pub async fn start_made(
     on_made: Option<OnMade>,
     sink: Arc<dyn Sink>,
 ) -> Result<Started, IpcError> {
+    start_at(runs, pool, entity_id, command_id, target, on_made, None, sink).await
+}
+
+/// A folder a try runs in (#2562): the one the person chose, or the throwaway
+/// folder holding their pasted text, in the checkout's place.
+pub struct Picked {
+    pub root: PathBuf,
+    /// The throwaway folder, removed when the run ends.
+    pub throwaway: Option<PathBuf>,
+}
+
+/// Saved command `command_id` tried on pasted text, a chosen file or a chosen
+/// folder (#2562): run as on a checkout, with the chosen folder (a file's own
+/// folder, or a throwaway folder holding the pasted text as its file) in the
+/// checkout's place. A command for a file is run on the file; one for a
+/// folder or a repository on the folder. A command that names a git value,
+/// or runs on a commit or a range, has nothing to run on outside a
+/// repository. The run is no row in the list of runs.
+///
+/// # Errors
+///
+/// As [`start_made`]; [`Invalid`](crate::IpcErrorCode::Invalid) for what the
+/// command cannot be tried on, a path refused or text past the cap.
+pub async fn try_start(
+    pool: &PgPool,
+    command_id: &str,
+    on: crate::try_on::TryOn,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
+    try_start_in(&Runs::global(), pool, command_id, on, sink).await
+}
+
+/// [`try_start`] in a registry of the caller's: a test's own.
+///
+/// # Errors
+///
+/// As [`try_start`].
+pub async fn try_start_in(
+    runs: &Arc<Runs>,
+    pool: &PgPool,
+    command_id: &str,
+    on: crate::try_on::TryOn,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
+    use crate::try_on::{TryOn, Throwaway, checked_path, leaf};
+    use knobas_core::checkout::oneoff::Kind;
+    let command = list(pool)
+        .await?
+        .into_iter()
+        .find(|c| c.id == command_id)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "'{command_id}' is not one of your commands: see Settings › Commands"
+            ))
+        })?;
+    if let Some(name) = made::git_name(&command) {
+        return Err(IpcError::invalid(format!(
+            "{} uses {name}, and what it is tried on is no git repository",
+            command.name
+        )));
+    }
+    let kind = command.kind();
+    if matches!(kind, Kind::Commit | Kind::Range) {
+        return Err(IpcError::invalid(format!(
+            "{} runs on a commit or a range: try it on a repository",
+            command.name
+        )));
+    }
+    // The folder it runs in, the file in it where there is one, and the throwaway folder.
+    let (root, file, throwaway) = match on {
+        TryOn::Text { name, text } => {
+            let made = Throwaway::write("command", &name, &text)?;
+            let file = leaf(&made.file);
+            (made.dir.clone(), Some(file), Some(made.dir))
+        }
+        TryOn::Path { path } => {
+            let (at, folder) = checked_path(&path).await?;
+            if folder {
+                (at, None, None)
+            } else {
+                let parent = at.parent().map(Path::to_path_buf).ok_or_else(|| {
+                    IpcError::invalid(format!("{} has no folder", at.display()))
+                })?;
+                (parent, Some(leaf(&at)), None)
+            }
+        }
+    };
+    let gone = |throwaway: &Option<PathBuf>| {
+        if let Some(dir) = throwaway {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    };
+    let target = match (kind, &file) {
+        (Kind::File, Some(file)) => Target::File {
+            path: file.clone(),
+            lines: None,
+            at: None,
+        },
+        (Kind::File, None) => {
+            gone(&throwaway);
+            return Err(IpcError::invalid(format!(
+                "{} runs on a file: choose a file or paste text",
+                command.name
+            )));
+        }
+        (Kind::Folder, _) => Target::Folder {
+            path: String::new(),
+        },
+        _ => Target::Repository,
+    };
+    let picked = Picked { root, throwaway };
+    start_at(
+        runs,
+        pool,
+        crate::try_on::TRY_ENTITY,
+        command_id,
+        target,
+        None,
+        Some(picked),
+        sink,
+    )
+    .await
+}
+
+/// [`start_made`], or a try's run in the folder `picked` names.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+async fn start_at(
+    runs: &Arc<Runs>,
+    pool: &PgPool,
+    entity_id: &str,
+    command_id: &str,
+    target: Target,
+    on_made: Option<OnMade>,
+    picked: Option<Picked>,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
+    let throwaway = picked.as_ref().and_then(|p| p.throwaway.clone());
+    let started = start_inner(runs, pool, entity_id, command_id, target, on_made, picked, sink).await;
+    // A try refused before it ran leaves no throwaway behind; one that ran removes it when it ends.
+    if started.is_err()
+        && let Some(dir) = throwaway
+    {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    started
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+async fn start_inner(
+    runs: &Arc<Runs>,
+    pool: &PgPool,
+    entity_id: &str,
+    command_id: &str,
+    target: Target,
+    on_made: Option<OnMade>,
+    picked: Option<Picked>,
+    sink: Arc<dyn Sink>,
+) -> Result<Started, IpcError> {
     let runs = Arc::clone(runs);
     let command = list(pool)
         .await?
@@ -340,7 +498,10 @@ pub async fn start_made(
                 "'{command_id}' is not one of your commands: see Settings › Commands"
             ))
         })?;
-    if let Some(running) = runs.running_of(&command.id, entity_id, &target) {
+    // A try is its own run every press: two examples may share a name.
+    if picked.is_none()
+        && let Some(running) = runs.running_of(&command.id, entity_id, &target)
+    {
         runs.attach(&running, sink);
         let row = running.row();
         return Ok(Started {
@@ -373,10 +534,17 @@ pub async fn start_made(
     } else {
         None
     };
-    let checkout = crate::checkout::resolve(pool, entity_id).await?;
     // A generated folder is run in where knobas kept it, cloned or not: the
-    // checkout only gives *Add to PATH*'s `{root}`.
-    let (root, path_root, placed, branch, commit) = if let Some(on) = &made_on {
+    // checkout only gives *Add to PATH*'s `{root}`. A try runs in the folder
+    // the person chose, which is its `{root}` (#2562).
+    let (root, path_root, placed, branch, commit) = if let Some(picked) = &picked {
+        let placed = placed(picked.root.clone(), &target, None, None).await?;
+        (picked.root.clone(), Some(picked.root.clone()), placed, None, None)
+    } else if made_on.is_some() {
+        let checkout = crate::checkout::resolve(pool, entity_id).await?;
+        let Some(on) = &made_on else {
+            unreachable!("checked above")
+        };
         let placed = made::placed(&on.made, &target)?;
         (
             on.made.dir.clone(),
@@ -386,6 +554,7 @@ pub async fn start_made(
             None,
         )
     } else {
+        let checkout = crate::checkout::resolve(pool, entity_id).await?;
         let root = PathBuf::from(checkout.path.ok_or_else(|| {
             IpcError::not_found(format!(
                 "{entity_id} is not cloned on this machine, so there is nothing to run {} in",
@@ -427,6 +596,9 @@ pub async fn start_made(
             kept::Limits::default(),
         )
         .map_err(|why| IpcError::invalid(why.to_string()))?;
+    if let Some(dir) = picked.and_then(|p| p.throwaway) {
+        runs.throwaway(&handle, dir);
+    }
     runs.attach(&handle, sink);
     let answer = |argv: Vec<String>, cwd: String| Started {
         run: handle.id.clone(),
