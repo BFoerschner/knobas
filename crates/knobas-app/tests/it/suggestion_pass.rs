@@ -357,6 +357,7 @@ fn sync_through_bring_up(
                 &handle,
                 knobas_app::sources::BringUp {
                     pool: pool.clone(),
+                    background: connector.background_pool(),
                     sync_pool: connector.pool(2).await.unwrap(),
                     connections: connector,
                     secrets,

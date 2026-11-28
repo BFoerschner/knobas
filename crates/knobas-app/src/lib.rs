@@ -1386,6 +1386,10 @@ async fn bring_up_app<R: tauri::Runtime>(
                 _ => naming_the_profile(error, profile),
             })?;
         let pool = db.pool().clone();
+        // What bring-up leaves running in the background, and what a sync's
+        // end starts, reads on a pool of its own (#2612): the pages keep the
+        // app pool's five connections to themselves.
+        let background = db.background_pool().clone();
         let connector = db.connector();
         // Taken now, while the server is the one this bring-up started, and
         // armed at `ready` (#1779). `None` for `KNOBAS_DB_URL`'s server.
@@ -1480,7 +1484,7 @@ async fn bring_up_app<R: tauri::Runtime>(
         // fuzzy-search decisions, 2026-11-19, D3), as a task of its own: it
         // needs none of the fills below, and a search before it lands is
         // answered as before.
-        sources::pick_on_sync::reload(lifecycle.picker().clone(), pool.clone());
+        sources::pick_on_sync::reload(lifecycle.picker().clone(), background.clone());
         // The state words each source's items were seen holding (migration
         // `0096`), counted in the background for a source never counted or
         // counted under other declarations: once after `0096`, and after an
@@ -1489,14 +1493,14 @@ async fn bring_up_app<R: tauri::Runtime>(
         // is one read of a few rows.
         lifecycle
             .seen_words()
-            .request(&pool, sources::state_colours::Owed::Stale);
+            .request(&background, sources::state_colours::Owed::Stale);
         // Each ticket's card, stored for the board and the search's words
         // (migration `0075`), filled in the background for the tickets that
         // have none: after `0075` itself, and after the declarations above
         // changed. Until a ticket is filled its reads walk its payload, the
         // same answer; a sync's own writes keep their tickets' cards.
         // After the declarations, which the cards are read under.
-        let fill_pool = pool.clone();
+        let fill_pool = background.clone();
         let words_picker = lifecycle.picker().clone();
         tokio::spawn(async move {
             let started = std::time::Instant::now();
@@ -1605,7 +1609,16 @@ async fn bring_up_app<R: tauri::Runtime>(
         // to start: the launcher then answers as before.
         open_files(&lifecycle, &pool, &profile.dir).await;
         step("starting the sync engine");
-        sources::start(handle, &pool, &connector, profile, registry, suggestions).await?;
+        sources::start(
+            handle,
+            &pool,
+            &background,
+            &connector,
+            profile,
+            registry,
+            suggestions,
+        )
+        .await?;
         // Beside the sync scheduler, not inside it: a backup is not a
         // source (see `backup`'s module docs).
         step("starting the nightly backup");
@@ -1642,12 +1655,12 @@ async fn bring_up_app<R: tauri::Runtime>(
                 Err(error) => tracing::debug!(%error, "smooth scrolling could not be read"),
             }
         }
-        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((pool, watch, generation))
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((pool, background, watch, generation))
     }
     .await;
 
     let message = match outcome {
-        Ok((pool, watch, generation)) => {
+        Ok((pool, background, watch, generation)) => {
             lifecycle.install(AppState::over(pool));
             // Installed *before* the state moves to `ready`: a frontend
             // that reacted to `ready` by fetching would otherwise race the
@@ -1660,7 +1673,7 @@ async fn bring_up_app<R: tauri::Runtime>(
             if let Some(watch) = watch {
                 spawn_watch(handle.clone(), watch, generation);
             }
-            spawn_docs_tree(handle.clone());
+            spawn_docs_tree(handle.clone(), background);
             return;
         }
         Err(error) => {
@@ -1714,11 +1727,16 @@ async fn bring_up_app<R: tauri::Runtime>(
 /// 600 ms of walking page payloads, which the first open of Docs would
 /// otherwise wait for. A moment after `ready`, so the window's own first
 /// reads go first; a failure is the next read's to meet.
-fn spawn_docs_tree<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+fn spawn_docs_tree<R: tauri::Runtime>(handle: tauri::AppHandle<R>, background: PgPool) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let lifecycle = handle.state::<Lifecycle>();
-        let Ok(pool) = lifecycle.pool() else { return };
+        // Not ready any more (a quit, a server gone): nobody will open Docs.
+        if lifecycle.pool().is_err() {
+            return;
+        }
+        // On the background pool (#2612): nobody is waiting for it.
+        let pool = background;
         let cache = handle.state::<docs::TreeCache>();
         // By its whole path: a line that starts `commands::entity::` is read as a registered command
         // (`commands::tests::registered`).

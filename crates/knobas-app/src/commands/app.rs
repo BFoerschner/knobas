@@ -372,6 +372,18 @@ impl Lifecycle {
         &self.restart_gate
     }
 
+    /// The held server's background pool (#2612), or `None` with no server
+    /// held: **for a test** of what bring-up runs on it.
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn background_pool(&self) -> Option<sqlx::PgPool> {
+        self.server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|db| db.background_pool().clone())
+    }
+
     /// The server [`hold_server`](Self::hold_server) was given, once: for the
     /// one caller that stops it -- the exit handler, or a bring-up that failed.
     pub(crate) fn take_server(&self) -> Option<knobas_db::EmbeddedDb> {
