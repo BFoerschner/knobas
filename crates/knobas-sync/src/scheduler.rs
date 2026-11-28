@@ -365,6 +365,11 @@ pub trait SyncEvents: Send + Sync + 'static {
     /// `code:files`, at each repository's end of a files pass: how far the
     /// source's repositories are read. The default hears nothing.
     fn code_files(&self, _progress: &crate::code_files::FilesProgress) {}
+    /// `looking:again` (ADR-0064 rule 2, #2585): a scope's bounded schedule
+    /// started, one of its sides stopped, or it ended. Told by `knobas-app`'s
+    /// `sources::look_again`. A wrapper passes it on; the default hears
+    /// nothing.
+    fn looking_again(&self, _looking: &LookingAgain) {}
 }
 
 /// The payload of the shell's `item:refreshed` event: a refresh of one item
@@ -379,6 +384,23 @@ pub struct RefreshEnded {
     pub write_id: Option<i64>,
     /// How it ended.
     pub ended: RefreshEnd,
+}
+
+/// The payload of the shell's `looking:again` event (ADR-0064 rule 2,
+/// #2585): what a scope's bounded schedule is still looking for. Told when
+/// the schedule starts, each time one of its sides stops, and once it ends
+/// (both `false`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct LookingAgain {
+    /// The item the schedule looks around: a repository, for a branch that
+    /// moved.
+    pub scope: String,
+    /// Whether its code side (branches, pull requests, commits) is still
+    /// read again.
+    pub code: bool,
+    /// Whether its builds are still looked for.
+    pub builds: bool,
 }
 
 /// How a refresh ended. A refresh that was not offered, or refused because

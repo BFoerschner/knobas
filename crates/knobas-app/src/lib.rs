@@ -127,6 +127,12 @@ pub mod events {
     /// and whether it was refreshed, gone or failed. Broadcast: every view
     /// that shows the item re-reads it, and a write's echo settles on it.
     pub const ITEM_REFRESHED: &str = "item:refreshed";
+    /// Payload: `knobas_sync::scheduler::LookingAgain` -- a scope's bounded
+    /// schedule after a branch moved (ADR-0064 rule 2, #2585) started, one of
+    /// its sides stopped, or it ended: what it still looks for. Broadcast:
+    /// the repository's Builds tab says *Looking for new builds…* while its
+    /// builds are looked for.
+    pub const LOOKING_AGAIN: &str = "looking:again";
     /// Payload: `sources::live::ViewFresh` -- a source view the shell was
     /// answered from memory was read again behind the answer, and the
     /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
@@ -1164,6 +1170,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_text_search,
         commands::api::api_answer_piped,
         commands::api::api_answer_piped_save,
+        // What knobas looks at again after a branch moved (ADR-0064 rule 2,
+        // #2585), appended at the foot (§10.8).
+        commands::sources::looking_again,
     ]
 }
 
@@ -2213,6 +2222,7 @@ mod tests {
             super::events::UPDATE_STATE,
             super::events::CLIPBOARD_STATE,
             super::events::LINK_HANDOFF_OPEN,
+            super::events::LOOKING_AGAIN,
         ];
         names.sort_unstable();
         declared.sort_unstable();

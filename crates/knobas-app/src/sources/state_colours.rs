@@ -336,6 +336,9 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
     }
+    fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
+        self.inner.looking_again(looking);
+    }
     // The files pass's index and progress, passed on wherever this wrapper
     // sits in the stack (`tests/it/files_on_sync.rs`).
     fn files(&self) -> Option<knobas_sync::code_files::Files> {

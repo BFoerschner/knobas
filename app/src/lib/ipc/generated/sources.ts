@@ -855,6 +855,28 @@ at: PayloadPath,
 entry: PayloadPath, };
 
 /**
+ * The payload of the shell's `looking:again` event (ADR-0064 rule 2,
+ * #2585): what a scope's bounded schedule is still looking for. Told when
+ * the schedule starts, each time one of its sides stops, and once it ends
+ * (both `false`).
+ */
+export type LookingAgain = { 
+/**
+ * The item the schedule looks around: a repository, for a branch that
+ * moved.
+ */
+scope: string, 
+/**
+ * Whether its code side (branches, pull requests, commits) is still
+ * read again.
+ */
+code: boolean, 
+/**
+ * Whether its builds are still looked for.
+ */
+builds: boolean, };
+
+/**
  * How a source writes a kind's prose (#2308): `text` (drawn as it is),
  * `markdown` (CommonMark with GitHub's extensions, Gitea's), or `jira_wiki`
  * (Jira's wiki markup: `h1.`, `{code}`, `*bold*`). The shell draws the last

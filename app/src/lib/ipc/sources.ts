@@ -17,6 +17,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "./invoke";
 import type {
+  LookingAgain,
   AdapterPreview,
   AdapterStatus,
   ConnectionReport,
@@ -76,6 +77,7 @@ export type {
   EntityRefresh,
   RefreshEnd,
   RefreshEnded,
+  LookingAgain,
   Removal,
   ReviewComment,
   ReviewSide,
@@ -331,6 +333,14 @@ export function syncAll(): Promise<number[]> {
  */
 export function syncRole(role: string): Promise<RoleRun[]> {
   return invoke<RoleRun[]>("sync_role", { role });
+}
+
+/**
+ * The repositories knobas looks at again now, after a branch moved (ADR-0064 rule 2, #2585): each schedule and the
+ * sides it still looks for. `looking:again` tells each change; this is the read on start.
+ */
+export function lookingAgain(): Promise<LookingAgain[]> {
+  return invoke<LookingAgain[]>("looking_again");
 }
 
 /**
