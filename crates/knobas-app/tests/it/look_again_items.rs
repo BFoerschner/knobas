@@ -566,12 +566,14 @@ async fn a_bot_comment_after_a_knobas_comment_shows_within_the_schedule() {
             .is_some_and(|payload| payload["comments"] == 2)
     })
     .await;
-    assert!(
+    // Told after the mirror is written (and the arrivals resolved), so
+    // heard a moment after the comment shows, not with it.
+    eventually("the window hears the pull request moved", || async {
         shared.refreshed.lock().unwrap().iter().any(|each| {
             each.entity_id == PR && each.write_id.is_none() && each.ended == RefreshEnd::Refreshed
-        }),
-        "the window hears the pull request moved"
-    );
+        })
+    })
+    .await;
 
     // Its linked ticket, which nothing moves, is read on to the end.
     clock.0.send_replace(Duration::from_secs(300));
