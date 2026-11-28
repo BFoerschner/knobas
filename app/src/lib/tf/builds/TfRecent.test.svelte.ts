@@ -579,3 +579,17 @@ test("a row's dot is in the colour of the bubble that counts its run, with its w
   expect(dot(2)?.className).toContain("tf-u-red");
   expect(dot(1), "a pass seen before the visit is in no bubble").toBeNull();
 });
+
+test("a new scope keeps the count's room while it reads, so the bar's controls hold still (#2572, moves' builds-folder-link)", async () => {
+  let reads = 0;
+  // The first page answers; the folder's read is still out.
+  const drawn = draw({ recent: () => (reads++ === 0 ? Promise.resolve(PAGE) : new Promise<RecentRuns>(() => {})) });
+  await settle();
+  const room = () => target.querySelector(".tf-fcount")?.getAttribute("data-room");
+  const before = room();
+  expect(before, "held for a page of 200 though the first brought three: the next page lands in it").toBe("199 of 200 runs");
+  drawn.scope("Payout", [LINT.entity_id]);
+  await settle();
+  expect(reads).toBe(2);
+  expect(room(), "the folder's runs still read: the count says nothing, in the room it had").toBe(before);
+});

@@ -580,7 +580,7 @@
 </header>
 
 <div class="tf-runbar tf-recentbar">
-  <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} held={heldBar} {after} />
+  <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} room={RECENT_PAGE} held={heldBar} {after} />
 </div>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->

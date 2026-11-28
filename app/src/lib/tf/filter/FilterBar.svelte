@@ -42,6 +42,7 @@
     filter,
     shown,
     total,
+    room = null,
     onchange = () => {},
     extra,
     after,
@@ -54,6 +55,11 @@
     shown: number | null;
     /** How many rows the view holds unfiltered, or `null` before it is known. */
     total: number | null;
+    /**
+     * The total the count's room is held for, at least, where a list reads in pages: Builds' runs land 60 first, then
+     * the rest of 200, and a room that followed the total's digits moved the bar's controls as the pages landed.
+     */
+    room?: number | null;
     onchange?: () => void;
     /** What the view adds after the dropdowns: Tickets' *Lanes*. */
     extra?: Snippet;
@@ -67,6 +73,7 @@
   } = $props();
 
   let field: HTMLInputElement | undefined = $state();
+  const roomFor = $derived(total === null && room === null ? null : Math.max(total ?? 0, room ?? 0));
 
   const scopes = $derived(config.scopes ?? []);
   const scope = $derived(filter.scope ?? scopes[0]?.id ?? null);
@@ -168,7 +175,7 @@
         class="tf-fcount"
         class:tf-fcount-held={heldWords !== ""}
         aria-live="polite"
-        data-room={total === null ? "" : countLine(Math.max(0, total - 1), total, config.noun, config.one)}
+        data-room={roomFor === null ? "" : countLine(Math.max(0, roomFor - 1), roomFor, config.noun, config.one)}
         data-held={held === undefined ? undefined : "Show 99 new"}
         ><span class="tf-fcount-n">{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
         >{#if held !== undefined && heldWords !== ""}<button
