@@ -28,12 +28,17 @@ export function afterSync(name: string, byHand: boolean): string {
 /** How long the note stays when nothing it names arrives: a sentence to read, and nothing to press but *Sync now*. */
 const NOTE_MS = 10_000;
 
-/** "in about 4 min", "in about 2 h", or nothing for a time past or unknown. */
+/**
+ * "in about 4 min", "in about 2 h", "in about 3 days", or nothing for a time past or unknown. The steps are `ageLabel`'s
+ * (`time/format.ts`), so a time ahead is spelled as an age is.
+ */
 function inAbout(at: string | null, now: number): string {
   if (at === null) return "";
   const minutes = Math.round((Date.parse(at) - now) / 60_000);
   if (!(minutes >= 1)) return "";
-  return minutes < 90 ? `, in about ${minutes} min` : `, in about ${Math.round(minutes / 60)} h`;
+  if (minutes < 60) return `, in about ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `, in about ${hours} h` : `, in about ${Math.round(hours / 24)} days`;
 }
 
 /** The sentence's ending for one line: when what it names shows. */
@@ -45,10 +50,21 @@ function when(line: Unread, now: number): string {
 
 /** What one line names, in the sentence. */
 function subject(line: Unread, note: WriteUnread): string {
-  if (line.why === "left_out") return `the other boards and filters with ${line.title}`;
+  if (line.why === "left_out") return `${OWN}the other boards and filters with ${line.title}`;
   // Beside the write's own item, "the write" is plain; alone, it names what the write was to.
-  if (line.entity_id === null) return note.unread.some((l) => l.entity_id === note.entity_id) ? "what else the write moved" : `what else the write to ${note.title} moved`;
+  if (line.entity_id === null) return note.unread.some((l) => l.entity_id === note.entity_id) ? `${OWN}what else the write moved` : `${OWN}what else the write to ${note.title} moved`;
   return line.title;
+}
+
+/** Marks a subject in the app's own words, the only kind a sentence's start may capitalise: a title keeps its case. */
+const OWN = "\u0001";
+
+/** `subjects` as the sentence's start: the app's own words take a capital, a title stays as the source wrote it. */
+function opening(subjects: readonly string[]): string {
+  const named = subjects.length <= 2 ? subjects.join(" and ") : `${subjects[0]} and ${subjects.length - 1} more`;
+  const own = named.startsWith(OWN);
+  const words = named.replaceAll(OWN, "");
+  return own ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : words;
 }
 
 /** A note on the toast, with what is left of it and the sources a run of which began after it came. */
@@ -81,9 +97,8 @@ function wordsOf(held: readonly { note: WriteUnread; left: readonly Unread[] }[]
     }
   return [...groups.values()]
     .map(({ ending, subjects, plural }) => {
-      const named = subjects.length <= 2 ? subjects.join(" and ") : `${subjects[0]} and ${subjects.length - 1} more`;
       const verb = plural || subjects.length > 1 ? "show" : "shows";
-      return `${named.charAt(0).toUpperCase()}${named.slice(1)} ${verb} ${ending}.`;
+      return `${opening(subjects)} ${verb} ${ending}.`;
     })
     .join(" ");
 }
@@ -97,9 +112,6 @@ export interface UnreadHow {
   sync?: (source: string) => void;
   now?: () => number;
 }
-
-/** What every note's toast is about, so a note told while another's toast stands joins it. */
-const SUBJECT = "unread";
 
 /**
  * The notes said, in **one toast**: a note told while the toast stands joins it, on a new time, so a burst of landed
@@ -116,6 +128,8 @@ export function unreadNotes(how: UnreadHow = {}): { say: (note: WriteUnread) => 
   // A toast's life is one generation: what its listeners hear, and what they answer, once it has gone is dropped.
   let generation = 0;
   const offs: (() => void)[] = [];
+  // Set while a standing toast is raised again with a note joined, so its going ends nothing.
+  let joining = false;
   const quiet = () => {
     generation += 1;
     held = [];
@@ -167,9 +181,15 @@ export function unreadNotes(how: UnreadHow = {}): { say: (note: WriteUnread) => 
     if (id === null || !toasts.items.some((toast) => toast.id === id)) {
       quiet();
       hearArrivals();
+    } else {
+      // Raised again holding every note, on a new time, as a `tally` is; no `subject`, since it holds several (the
+      // removal rule).
+      joining = true;
+      dismiss(id);
+      joining = false;
     }
     held.push({ note, left: [...note.unread], began: new Set() });
-    id = push({ text: wordsOf(held, now()), ms: NOTE_MS, subject: SUBJECT, onend: quiet, ...action() });
+    id = push({ text: wordsOf(held, now()), ms: NOTE_MS, onend: () => joining || quiet(), ...action() });
   };
   return {
     say,

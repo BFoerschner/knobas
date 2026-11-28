@@ -153,3 +153,24 @@ test("a burst of landed writes is one toast, each line going as it arrives", asy
   await settle();
   expect(texts()).toEqual(["PAY-1 shows after the next sync of Jira."]);
 });
+
+test("a title keeps the case its source wrote, and a time far ahead is spelled as an age is", () => {
+  const ios = [line({ title: "iOS push fails" })];
+  expect(unreadWords(note(ios), ios, NOW)).toBe("iOS push fails shows after the next sync of Jira.");
+  const later = [line({ next_run_at: "2026-11-28T11:15:00Z" })];
+  expect(unreadWords(note(later), later, NOW)).toBe("PAY-1 shows after the next sync of Jira, in about 1 h.");
+  const far = [line({ next_run_at: "2026-12-03T10:00:00Z" })];
+  expect(unreadWords(note(far), far, NOW)).toBe("PAY-1 shows after the next sync of Jira, in about 5 days.");
+});
+
+test("a note joining the toast raises it again with no subject, and the toast holds every note's lines", async () => {
+  const b = bridge();
+  const notes = unreadNotes({ listen: b.listen, now: () => NOW });
+  notes.say(note([line({})], { write_id: 7 }));
+  notes.say(note([line({ entity_id: "jira:PAY-2", title: "PAY-2" })], { write_id: 8 }));
+  await settle();
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]!.subject).toBeUndefined();
+  b.send(EVENTS.itemRefreshed, { entity_id: "jira:PAY-1", write_id: 7, ended: "refreshed" });
+  expect(texts()).toEqual(["PAY-2 shows after the next sync of Jira."]);
+});
