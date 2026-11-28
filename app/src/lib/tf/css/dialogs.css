@@ -88,6 +88,9 @@
 .tf-hidden { visibility: hidden; }
 /* The canonical header's actions (Controls, *Header*): a page's `.tf-fhead`, and a Settings page's `.tf-stg-h`. */
 .tf-fhead .tf-acts, .tf-stg-h .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+/* *Looking for changes…* before a written item's *Refresh* (#2615): quiet words in room held while they say nothing,
+   their end at the button, one line high with or without them, so nothing moves when they come or go. */
+.tf-looking { justify-items: end; align-self: center; height: 1.5em; line-height: 1.5; font-size: calc(var(--t-sm) * var(--fs)); color: var(--ink-2); }
 .tf-stg-h .tf-acts { margin-left: auto; }
 
 /* ---------- tabs ---------- */

@@ -11,6 +11,8 @@
   import Booting from "./lib/shell/Booting.svelte";
   import { startFollowingMerges } from "./lib/shell/follow-merges";
   import { startSayingUnread } from "./lib/shell/unread-toast";
+  import { startLooking } from "./lib/tf/builds/looking.svelte";
+  import { windowListen } from "./lib/ipc/shared-listen";
   import { health } from "./lib/shell/health.svelte";
   import { kindRegistry } from "./lib/shell/kind-registry.svelte";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
@@ -278,6 +280,8 @@
         ["health", () => health.start()],
         ["merge follower", () => startFollowingMerges()],
         ["unread note", () => startSayingUnread()],
+        // What knobas looks at again after a write (#2595): an item's page says *Looking for changes…* (#2615).
+        ["looking again", () => startLooking(windowListen)],
         ["inbox", () => inbox.start()],
         ["alerts", () => alerts.start()],
         ["timer", () => timer.begin()],

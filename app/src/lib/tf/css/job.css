@@ -164,6 +164,8 @@
 .tf-tkpagehead { display: flex; align-items: flex-start; gap: 16px; margin-bottom: -8px; }
 .tf-tkpagehead h1 { flex: 1; min-width: 0; font-size: calc(var(--t-3xl) * var(--fs)); line-height: 1.15; font-weight: 600; --fs: var(--size-head); letter-spacing: var(--ls-head); font-family: var(--head); --optical: auto; font-variation-settings: "wdth" 85; font-stretch: 85%; overflow-wrap: anywhere; }
 .tf-tkpagehead .tf-acts { flex: none; margin-top: -2px; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+/* *Looking for changes…* (#2615) beside the title's first line, not the middle of a title that wraps. */
+.tf-tkpagehead > .tf-looking { flex: none; align-self: flex-start; margin-top: 5px; }
 /* The description: the ticket's Markdown in a resting panel at body size, filling the panel. */
 .tf-tkdesc { padding: 14px 16px; }
 .tf-tkdesc .tf-md { padding: 0; font-size: calc(var(--t-md) * var(--fs)); }

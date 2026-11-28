@@ -765,7 +765,7 @@
           <TfFindBar root={() => reading} within="in this column" />
           <header class="tf-tkpagehead">
             <TfTitleEdit title={detail.row.title} edits={fieldEdits} bind:editing={retitling} {layers} />
-            <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} />
+            <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} looking />
           </header>
           <TfDetailBanners {detail} {refresh} reread={rereadJob} />
           {#if failure !== null}

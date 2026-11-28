@@ -924,10 +924,15 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     repo_branch_pulls: (args) =>
       new URLSearchParams(globalThis.location?.search).has("fake-branch-pulls") ? payoutBranchPulls(String(args["repoId"] ?? "")) : [],
     // After a branch moved, its repository's bounded schedule (#2585): nothing is looked at, but `?fake-looking`, which
-    // looks for `payout-service`'s builds, so its Builds tab says *Looking for new builds…*.
+    // looks for `payout-service`'s builds, so its Builds tab says *Looking for new builds…*, and reads a branch write's
+    // pull request, a ticket with its linked one and a Docs page by id (#2595), so their pages say *Looking for changes…*.
     looking_again: () =>
       new URLSearchParams(globalThis.location?.search).has("fake-looking")
-        ? [{ scope: "mock:tidewater/payout-service", code: true, builds: true, items: [] }]
+        ? [
+            { scope: "mock:tidewater/payout-service", code: true, builds: true, items: ["mock:payout-service#142"] },
+            { scope: "mock:PAY-240", code: false, builds: false, items: ["mock:PAY-240", "mock:PAY-241"] },
+            { scope: "confluence:sepa", code: false, builds: false, items: ["confluence:sepa"] },
+          ]
         : [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
     commit_repositories: (args) =>

@@ -972,6 +972,13 @@ async fn the_views_were_read_without_a_run(state: &SourcesState, shared: &Shared
         0,
         "no tracker run finished"
     );
+    // Side by side, so one view may land before the other is walked: the caller waited for one view's change, and
+    // under load the other's read can still be on its way (the gate of #2615). No run can finish meanwhile: the
+    // tracker's door is shut until `the_run_still_follows`.
+    eventually("both views are walked", || async {
+        shared.seen.walked.lock().unwrap().len() >= 2
+    })
+    .await;
     let mut walked = shared.seen.walked.lock().unwrap().clone();
     walked.sort();
     assert_eq!(walked, [BOARD, MINE], "read at once, side by side");

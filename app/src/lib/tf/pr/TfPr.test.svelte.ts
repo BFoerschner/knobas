@@ -309,9 +309,10 @@ test("somebody else's pull request names its author and offers Review…", async
   await draw([PR], ports({ author: "jonas", pr: theirs }));
   expect(text(".tf-fhead .tf-sub")).toBe("Open feature/PAY-231-sepa-retry into main, by jonas");
   expect(buttons()).toEqual(["Merge…", "Review…", "Edit…"]);
-  // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
+  // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238), with *Looking for
+  // changes…*'s room between them, empty while the pull request is not read again after a write (#2615).
   const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
-  expect(all.slice(-2, -1)).toEqual(["Open in…"]);
+  expect(all.slice(-3)).toEqual(["Open in…", "", "Refresh"]);
   expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")!.className).toContain("tf-ghost");
 });
 

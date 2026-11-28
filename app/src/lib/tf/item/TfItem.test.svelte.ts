@@ -215,6 +215,8 @@ test("the header runs the source's actions, then a ghost Open in, then Refresh l
   expect(acts).toEqual([
     ["Book repair", expect.stringContaining("tf-btn")],
     ["Open in Harbour surveys", "tf-btn tf-ghost"],
+    // *Looking for changes…*'s room, empty while the item is not read again after a write (#2615).
+    ["", "tf-looking tf-keepw"],
     ["Refresh", "tf-btn tf-refresh"],
   ]);
 });

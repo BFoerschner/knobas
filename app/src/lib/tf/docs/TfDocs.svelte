@@ -2298,9 +2298,9 @@
               {/if}
               {/if}
               {#if !syncInMore && !beside}
-                <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />
+                <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" looking />
               {:else if detail !== null}
-                <TfDetailRefresh {detail} {refresh} {reread} page noun="page" />
+                <TfDetailRefresh {detail} {refresh} {reread} page noun="page" looking />
               {/if}
             </div>
             {/if}

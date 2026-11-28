@@ -281,6 +281,11 @@ const PLACES = [
     ["junit", "junit.xml"],
     ["json", "psp-409-response.json"],
   ].map(([which, name]) => ({ name: `viewer-${which}`, fixture: true, late: "attachment_bytes:300", start: ATTACHED, setup: `${shown} section[aria-labelledby="tf-tkatt"] summary`, setupOnce: true, press: `${shown} .tf-tkatt .tf-r .tf-t`, text: name, starts: true, hash: null, ready: ".tf-vdoc .tf-xv-caret", away: "Escape" })),
+  // A written item's page while knobas reads it again (#2615): *Looking for changes…* comes 400 ms after the page drew,
+  // in the room the header held for it, and moves nothing beside it.
+  { name: "ticket-looking-late", fixture: true, fake: "fake-looking", late: "looking_again:400", start: "#/time", go: MOVE_TICKET, hash: MOVE_TICKET, away: "#/time" },
+  { name: "page-looking-late", fixture: true, fake: "fake-looking", late: "looking_again:400", start: "#/time", go: OTHER_PAGE, hash: OTHER_PAGE, away: "#/time" },
+  { name: "pr-looking-late", fixture: true, fake: "fake-looking", late: "looking_again:400", start: "#/time", go: "#/pr/mock%3Apayout-service%23142", hash: "#/pr/mock%3Apayout-service%23142", away: "#/time" },
   { name: "monitors", start: "#/time", nav: "monitors", hash: "#/monitors", away: "time", tabs: true },
   // A row opens its monitor beside the roster on the page, with no address of its own (the monitors-page pass, 2026-11-19).
   { name: "monitor", start: "#/monitors", press: `${shown} .tf-mon-row .tf-mon-state`, hash: null, ready: ".tf-mon-panel h2", away: "Escape" },
