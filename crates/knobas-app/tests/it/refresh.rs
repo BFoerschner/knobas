@@ -981,8 +981,11 @@ async fn a_linked_send_waits_for_the_landed_writes_follow_up_and_starts_no_run_o
         .id;
     assert_eq!(settled(&f.state, id).await, WriteState::Sent);
     run_after(&f.state.pool, SOURCE, id).await;
+    // Everything after it but the bounded schedule that looks at the filed
+    // ticket again for up to 120 s (#2595), which runs no source.
     until("the send and everything after it are over", || async {
-        f.state.scheduler.background().running() == 0
+        f.state.scheduler.background().running()
+            == knobas_app::sources::look_again::looking(&f.state.scheduler).len()
     })
     .await;
     let after: i64 = sqlx::query_scalar(

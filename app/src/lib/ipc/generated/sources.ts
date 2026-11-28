@@ -856,14 +856,14 @@ entry: PayloadPath, };
 
 /**
  * The payload of the shell's `looking:again` event (ADR-0064 rule 2,
- * #2585): what a scope's bounded schedule is still looking for. Told when
- * the schedule starts, each time one of its sides stops, and once it ends
- * (both `false`).
+ * #2585, #2595): what a scope's bounded schedule is still looking for. Told
+ * when the schedule starts, each time one of its sides stops, and once it
+ * ends (all `false`, no items).
  */
 export type LookingAgain = { 
 /**
  * The item the schedule looks around: a repository, for a branch that
- * moved.
+ * moved; the item a landed write made or touched, for any other write.
  */
 scope: string, 
 /**
@@ -874,7 +874,13 @@ code: boolean,
 /**
  * Whether its builds are still looked for.
  */
-builds: boolean, };
+builds: boolean, 
+/**
+ * The items still read again for what their source does after a landed
+ * write (#2595), by entity id: the one the write made or touched and
+ * those linked to it, so a page drawing one can say so.
+ */
+items: Array<string>, };
 
 /**
  * How a source writes a kind's prose (#2308): `text` (drawn as it is),

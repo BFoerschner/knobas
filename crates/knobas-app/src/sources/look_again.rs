@@ -9,16 +9,19 @@
 //! repository here), is read again about [`CADENCE`] after the trigger: 5 s,
 //! 15 s, 30 s, 60 s and 120 s.
 //!
-//! - **Two triggers.** A landed write whose op declares [`Effect::Parent`]
-//!   ([`after_write`], the trigger set read off `WriteOp::effects`, no second
-//!   list), and a run of a source that finds a branch's tip moved
-//!   ([`after_run`]: a push made outside knobas, or by a command in the
-//!   checkout).
+//! - **Two triggers.** A landed write ([`after_write`]): every one looks at
+//!   the item it made or touched and its linked tickets (#2595), and one whose
+//!   op declares [`Effect::Parent`] (read off `WriteOp::effects`, no second
+//!   list) at its repository too, in the same schedule. And a run of a source
+//!   that finds a branch's tip moved ([`after_run`]: a push made outside
+//!   knobas, or by a command in the checkout).
 //! - **Sides, each stopped once it moved.** The *code side* walks the
-//!   repository (its branches, pull requests and commits, ADR-0047) and reads
-//!   the pull request a write was made on by id (its state, head, checks and
-//!   mergeability). It has moved once a read found anything new
-//!   (`RefreshOutcome::Refreshed` or `Gone`). The *builds side* walks each of
+//!   repository (its branches, pull requests and commits, ADR-0047). It has
+//!   moved once a read found anything new (`RefreshOutcome::Refreshed` or
+//!   `Gone`). An *item side* ([`ItemSide`], #2595) reads one item by id (the
+//!   one the write made or touched, a pull request a branch write was made on
+//!   among them, or a ticket linked to it) and has moved once the mirror holds
+//!   it otherwise than after the write's read-back. The *builds side* walks each of
 //!   the repository's pipelines for its newest runs (#2564) and has moved
 //!   once the repository's Builds tab would draw a run it did not draw when
 //!   the schedule began. A side that cannot be read (`NotOffered`, its source
@@ -34,13 +37,16 @@
 //! - **Said, quietly.** Each start, each side that stops and each end is told
 //!   on `looking:again` ([`LookingAgain`]); [`looking`] answers the schedules
 //!   now. The repository's Builds tab says *Looking for new builds…* while
-//!   its builds side runs.
+//!   its builds side runs. An item side that moved tells `item:refreshed`
+//!   with no write behind it, as any refresh that moved something does, so a
+//!   page drawing the item reads it again.
 //!
-//! **Reused by #2595** (the written item and its linked items, for bots,
-//! automation and automatic merges): a scope is any entity id, and a side is
-//! anything that implements [`Side`]: a read and the test of whether it
-//! moved. [`begin`] takes the scope's key and its sides; the cadence, the
-//! restart, the cap, the lock and the telling come with it.
+//! **The written item** (#2595, for bots, automation and automatic merges):
+//! a scope is any entity id, and a side is anything that implements
+//! [`Side`]: a read and the test of whether it moved. [`begin`] takes the
+//! scope's key and its sides; the cadence, the restart, the cap, the lock and
+//! the telling come with it. One write starts one schedule, so no two of its
+//! schedules read one source at the same steps under [`Lock::Try`].
 //!
 //! Not taken up again after a restart: the next run of the source reads what
 //! the schedule would have.
@@ -108,12 +114,15 @@ impl Clock for RealClock {
 }
 
 /// Which side of a scope a [`Side`] is: what [`LookingAgain`] tells.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SideKind {
     /// Branches, pull requests and commits.
     Code,
     /// The pipelines' runs.
     Builds,
+    /// One item a landed write made or touched, or one linked to it, by
+    /// entity id (#2595): a page drawing it can say it is looked at.
+    Item(String),
 }
 
 /// What one read of a side found.
@@ -157,7 +166,9 @@ pub(crate) async fn run(
         let before = sides.len();
         let mut kept = Vec::with_capacity(before);
         for mut side in sides {
-            if *stop.borrow() {
+            // Up to a repository's sides and a write's eight items read one
+            // after another: the quit does not wait for the rest (#2595).
+            if *stop.borrow() || closed() {
                 return false;
             }
             if side.look().await == Look::Quiet {
@@ -235,6 +246,13 @@ fn looking_of(scope: &str, sides: &[SideKind]) -> LookingAgain {
         scope: scope.to_owned(),
         code: sides.contains(&SideKind::Code),
         builds: sides.contains(&SideKind::Builds),
+        items: sides
+            .iter()
+            .filter_map(|side| match side {
+                SideKind::Item(entity) => Some(entity.clone()),
+                SideKind::Code | SideKind::Builds => None,
+            })
+            .collect(),
     }
 }
 
@@ -553,8 +571,14 @@ fn source_of(entity: &str) -> String {
 }
 
 /// Look at `repository` on the schedule: its code side (the repository and
-/// `items` besides) and its builds side where a pipeline builds it.
-async fn look_at_repository(scheduler: &Scheduler, repository: &str, items: Vec<String>) -> bool {
+/// `items` besides), its builds side where a pipeline builds it, and `more`
+/// after them (a write's items, [`ItemSide`]).
+async fn look_at_repository(
+    scheduler: &Scheduler,
+    repository: &str,
+    items: Vec<String>,
+    more: Vec<Box<dyn Side>>,
+) -> bool {
     let mut read = vec![repository.to_owned()];
     read.extend(items.into_iter().filter(|item| item != repository));
     let mut sides: Vec<Box<dyn Side>> = vec![Box::new(CodeSide {
@@ -565,25 +589,185 @@ async fn look_at_repository(scheduler: &Scheduler, repository: &str, items: Vec<
     if let Some(builds) = BuildsSide::of(scheduler, repository).await {
         sides.push(Box::new(builds));
     }
+    sides.extend(more);
     begin(scheduler, repository, sides)
+}
+
+// -- the sides of a written item (#2595) ------------------------------------
+
+/// How many items one write's schedule reads on their own: the item the
+/// write made or touched first, then its linked tickets. As many as a ticket
+/// write's saved views (`effects::SAVED_VIEWS_AT_MOST`), and [`AT_ONCE`].
+pub const ITEMS_AT_MOST: usize = 8;
+
+/// What the mirror holds of `$1` live, as one fingerprint over the columns
+/// whose change rewrites the row (`ITEM_UPSERT` in `knobas-sync`): `None`
+/// once it is gone.
+const HELD: &str = "select md5(row(i.kind, i.title, i.body_text, i.author, i.item_updated_at,
+                               i.payload, i.web_url)::text)
+       from sync.item i
+       join sync.live_item l on l.entity_id = i.entity_id
+      where i.entity_id = $1";
+
+async fn held(pool: &sqlx::PgPool, entity: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(HELD)
+        .bind(entity)
+        .fetch_optional(pool)
+        .await
+}
+
+/// One item a landed write made or touched, or one linked to it, read by
+/// id. It has **moved** once the mirror holds it otherwise than it did after
+/// the write's read-back, or no longer holds it: whatever the source changed
+/// that its adapter mirrors (a ticket's status, assignee, `updated` or
+/// comment count, a page's version, a pull request's state, head, checks or
+/// comments, a run's state), brought by this side's read or by a run of its
+/// source between two steps.
+struct ItemSide {
+    scheduler: Scheduler,
+    entity: String,
+    /// What the mirror held of it when the schedule began.
+    then: String,
+}
+
+#[async_trait]
+impl Side for ItemSide {
+    fn kind(&self) -> SideKind {
+        SideKind::Item(self.entity.clone())
+    }
+
+    async fn look(&mut self) -> Look {
+        let outcome = read(&self.scheduler, &self.entity).await;
+        if over(&outcome) {
+            return Look::Over;
+        }
+        if let Err(error @ (RefreshError::Build(_) | RefreshError::Sync(_))) = &outcome {
+            tracing::info!(entity = %self.entity, %error, "a written item could not be read again");
+        }
+        match held(&self.scheduler.deps().pool, &self.entity).await {
+            Ok(Some(now)) if now == self.then => Look::Quiet,
+            Ok(_) => Look::Moved,
+            Err(error) => {
+                tracing::info!(entity = %self.entity, %error, "a written item's mirror could not be read");
+                Look::Quiet
+            }
+        }
+    }
+}
+
+/// The sides of the item a landed write made or touched (`read_back`) and of
+/// the tickets linked to it, at most [`ITEMS_AT_MOST`], its own first: each
+/// live, of a source turned on whose adapter reads its kind by id
+/// ([`super::refresh::template_refreshes`]). The *say so* rule (#2596)
+/// speaks for the rest. Not `read_back` when `followed`: the follow of a run
+/// reads it to its end; nor any of `skip`.
+async fn item_sides(
+    scheduler: &Scheduler,
+    read_back: &str,
+    followed: bool,
+    skip: &[String],
+) -> Vec<Box<dyn Side>> {
+    let deps = scheduler.deps();
+    let mut items = Vec::with_capacity(ITEMS_AT_MOST);
+    if !followed {
+        items.push(read_back.to_owned());
+    }
+    match super::effects::linked_tickets(&deps.pool, read_back).await {
+        Ok(linked) => items.extend(linked.into_iter().filter(|each| each != read_back)),
+        Err(error) => {
+            tracing::info!(%read_back, %error, "a written item's linked tickets could not be found");
+        }
+    }
+    items.retain(|each| !skip.contains(each));
+    items.truncate(ITEMS_AT_MOST);
+    let mut sides: Vec<Box<dyn Side>> = Vec::with_capacity(items.len());
+    for entity in items {
+        let readable: Option<(String, String)> = sqlx::query_as(
+            "select l.kind, s.kind from sync.live_item l
+               join knobas.source_config s on s.id = l.source_id
+              where l.entity_id = $1 and s.enabled",
+        )
+        .bind(&entity)
+        .fetch_optional(&deps.pool)
+        .await
+        .ok()
+        .flatten();
+        let Some((kind, adapter_kind)) = readable else {
+            continue;
+        };
+        if !super::refresh::template_refreshes(deps.registry.as_ref(), Some(&adapter_kind), &kind) {
+            continue;
+        }
+        let Ok(Some(then)) = held(&deps.pool, &entity).await else {
+            continue;
+        };
+        sides.push(Box::new(ItemSide {
+            scheduler: scheduler.clone(),
+            entity,
+            then,
+        }));
+    }
+    sides
 }
 
 // -- the triggers -----------------------------------------------------------
 
-/// After a landed write's effects were read ([`super::effects::read`]): where
-/// its op declares [`Effect::Parent`] (a write that moves a branch), look at
-/// the repository on the schedule. The repository is the target's declared
-/// parent, or the target itself where it is one (a branch made or a file
-/// committed on a repository). A pull request the write was made on is read
-/// by id besides. Answers the repositories looked at.
+/// After a landed write's effects were read ([`super::effects::read`]):
+/// look on the schedule at what the source may do after it. Answers the
+/// scopes looked at.
+///
+/// - **A write that moves a branch** (its op declares [`Effect::Parent`],
+///   #2585): the repository, the target's declared parent or the target
+///   itself where it is one (a branch made or a file committed on a
+///   repository), its code and builds sides.
+/// - **Every write** (#2595): the item it made or touched (`read_back`) and
+///   the tickets linked to it, each read by id until it moved
+///   ([`item_sides`]). A pull request the write was made on is one of them,
+///   and no longer read by the code side.
+///
+/// **One schedule per write.** Where the write moves a branch, its items are
+/// sides of the (first) repository's schedule; otherwise the scope is
+/// `read_back`. Two schedules a write started at once would read the same
+/// source at the same steps, each read under [`Lock::Try`], and one would
+/// skip every read the other made. `followed` is whether the follow of a run
+/// reads `read_back` to its end already.
 pub(crate) async fn after_write(
     scheduler: &Scheduler,
     write: &QueuedWrite,
+    read_back: &str,
     effects: &[Effect],
+    followed: bool,
 ) -> Vec<String> {
-    if !effects.contains(&Effect::Parent) || Lookouts::of(scheduler).is_none() {
+    if Lookouts::of(scheduler).is_none() {
         return Vec::new();
     }
+    let repositories = if effects.contains(&Effect::Parent) {
+        repositories_of(scheduler, write).await
+    } else {
+        Vec::new()
+    };
+    // A repository is its code side's: not read again as an item.
+    let mut items = item_sides(scheduler, read_back, followed, &repositories).await;
+    let mut began = Vec::new();
+    if repositories.is_empty() {
+        if begin(scheduler, read_back, items) {
+            began.push(read_back.to_owned());
+        }
+        return began;
+    }
+    note_tips(scheduler, &write.source_id, Noter::Own).await;
+    for repository in repositories {
+        let more = std::mem::take(&mut items);
+        if look_at_repository(scheduler, &repository, Vec::new(), more).await {
+            began.push(repository);
+        }
+    }
+    began
+}
+
+/// The repositories a write that moves a branch looks at: the target's
+/// declared parents, or the target itself where it is a parent.
+async fn repositories_of(scheduler: &Scheduler, write: &QueuedWrite) -> Vec<String> {
     let pool = &scheduler.deps().pool;
     let target = write.entity_id.as_str();
     let mut repositories = match super::effects::parents(pool, target).await {
@@ -596,19 +780,7 @@ pub(crate) async fn after_write(
     if repositories.is_empty() && answers_as_a_parent(pool, target).await {
         repositories.push(target.to_owned());
     }
-    let items = if is_a_proposal(scheduler, target).await {
-        vec![target.to_owned()]
-    } else {
-        Vec::new()
-    };
-    note_tips(scheduler, &write.source_id, Noter::Own).await;
-    let mut began = Vec::new();
-    for repository in repositories {
-        if look_at_repository(scheduler, &repository, items.clone()).await {
-            began.push(repository);
-        }
-    }
-    began
+    repositories
 }
 
 /// Whether `entity` is a live parent of something (`sync.item_parent`).
@@ -622,29 +794,6 @@ async fn answers_as_a_parent(pool: &sqlx::PgPool, entity: &str) -> bool {
     .fetch_one(pool)
     .await
     .unwrap_or(false)
-}
-
-/// Whether `entity` is a proposal (a pull request): its kind declares the
-/// branch it is opened from (`KindPaths::head`).
-async fn is_a_proposal(scheduler: &Scheduler, entity: &str) -> bool {
-    let deps = scheduler.deps();
-    let kind: Option<String> =
-        sqlx::query_scalar("select kind from sync.live_item where entity_id = $1")
-            .bind(entity)
-            .fetch_optional(&deps.pool)
-            .await
-            .ok()
-            .flatten();
-    let Some(kind) = kind else {
-        return false;
-    };
-    let Ok(declarations) = super::paths::declared_paths(&deps.pool, deps.registry.as_ref()).await
-    else {
-        return false;
-    };
-    declarations
-        .get(&source_of(entity), &kind)
-        .is_some_and(|paths| !paths.head.is_empty())
 }
 
 /// The tips of `source`'s live branches, by entity id, from the mirror.
@@ -763,7 +912,7 @@ pub(crate) async fn after_run(scheduler: &Scheduler, source: &str, changed: bool
     }
     let mut began = Vec::new();
     for repository in repositories {
-        if look_at_repository(scheduler, &repository, Vec::new()).await {
+        if look_at_repository(scheduler, &repository, Vec::new(), Vec::new()).await {
             began.push(repository);
         }
     }

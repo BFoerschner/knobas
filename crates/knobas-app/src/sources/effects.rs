@@ -167,6 +167,20 @@ pub(crate) async fn parents(pool: &sqlx::PgPool, entity: &str) -> Result<Vec<Str
         .await
 }
 
+/// The live tickets `entity` is linked to by a confirmed link, at either end
+/// ([`LINKED_TICKETS`]): what [`Effect::LinkedTickets`] names, and what
+/// [`super::look_again`] looks at again after a write on `entity` (#2595).
+pub(crate) async fn linked_tickets(
+    pool: &sqlx::PgPool,
+    entity: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(LINKED_TICKETS)
+        .bind(entity)
+        .bind(TICKET_KIND)
+        .fetch_all(pool)
+        .await
+}
+
 /// The items `effect` names for the write against `target`, from the mirror.
 /// The saved views are the ones of `read_back`, the item the write made or
 /// touched: a ticket filed names its project as its target, which the mirror
@@ -179,13 +193,7 @@ async fn resolve(
 ) -> Result<Vec<String>, sqlx::Error> {
     match effect {
         Effect::Parent => parents(pool, target).await,
-        Effect::LinkedTickets => {
-            sqlx::query_scalar(LINKED_TICKETS)
-                .bind(target)
-                .bind(TICKET_KIND)
-                .fetch_all(pool)
-                .await
-        }
+        Effect::LinkedTickets => linked_tickets(pool, target).await,
         Effect::SavedViews => {
             sqlx::query_scalar(SAVED_VIEWS)
                 .bind(read_back)
