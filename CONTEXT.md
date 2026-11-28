@@ -315,7 +315,7 @@ What a page draws of a write it has queued, muted beside what the source holds: 
 _Avoid_: optimistic copy, placeholder, ghost, queued mark
 
 **Effect**:
-What a landed [write-back](#write-back) moves beyond the item it is read back by, as its kind declares it beside its delivery: the target's [parent](#parent) (a merged pull request's repository, whose walk brings the base branch's new head, a deleted head branch and the issues the merge closed) or the tickets the target is [linked](#link) to, in whatever source holds them. Each is found in the [mirror](#mirror) and read at once after the write's own [refresh](#refresh), at its own source and in its own place, never by a run; the run of the write's source still follows. An effect whose read was not offered, its source turned off, or that failed shows after the next run of its source (ADR-0064).
+What a landed [write-back](#write-back) moves beyond the item it is read back by, as its kind declares it beside its delivery: the target's [parent](#parent) (a merged pull request's repository, whose walk brings the base branch's new head, a deleted head branch and the issues the merge closed); the tickets the target is [linked](#link) to, in whatever source holds them; or the saved views (a Jira board or filter) that hold the ticket written or another ticket of its project. Each is found in the [mirror](#mirror) and read at once after the write's own [refresh](#refresh), at its own source and in its own place, never by a run; the run of the write's source still follows. An effect whose read was not offered, its source turned off, or that failed shows after the next run of its source (ADR-0064).
 _Avoid_: side effect, ripple, consequence, dependent item
 
 **Note** (on a card or a field):
