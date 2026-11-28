@@ -3,9 +3,6 @@ name = "knobas-secrets"
 edition.workspace = true
 version.workspace = true
 
-# The keychain, behind a trait, so `just check` can run on a Linux CI box that
-# has no secret service and no D-Bus (interfaces §3: the store is injected and
-# every test uses `MemoryStore`).
 # The demo profile's credential file (`file_store`, #2384) in a build without
 # `debug_assertions`: only `knobas-app`'s `test-util` turns it on, for the
 # windowless backend the probes run as a release build (#2612). A shipped
@@ -13,6 +10,9 @@ version.workspace = true
 [features]
 file-store = []
 
+# The keychain, behind a trait, so `just check` can run on a Linux CI box that
+# has no secret service and no D-Bus (interfaces §3: the store is injected and
+# every test uses `MemoryStore`).
 [dependencies]
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
