@@ -1169,6 +1169,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::entity_text_search,
         commands::api::api_answer_piped,
         commands::api::api_answer_piped_save,
+        // What knobas looks at again after a branch moved (ADR-0064 rule 2,
+        // #2585), appended at the foot (§10.8).
+        commands::sources::looking_again,
         // Opening a run reads it (spec #2566, ADR-0063, `0105`), appended at
         // the foot (§10.8).
         commands::entity::mark_run_opened,
@@ -1179,9 +1182,6 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::move_seen,
         commands::entity::put_back_seen,
         commands::entity::builds_in_front,
-        // What knobas looks at again after a branch moved (ADR-0064 rule 2,
-        // #2585), appended at the foot (§10.8).
-        commands::sources::looking_again,
         // The Builds rail without its strips (spec #2566, #2571), appended
         // at the foot (§10.8).
         commands::entity::rail_pipelines,
