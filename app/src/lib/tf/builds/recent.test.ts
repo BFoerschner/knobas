@@ -16,6 +16,9 @@ import {
   isRunScopeHash,
   runScopeHash,
   runScopeOf,
+  folderColumn,
+  nameParts,
+  rowPipeline,
   placeWords,
   recentFilterOf,
   recentMarks,
@@ -198,4 +201,68 @@ test("a page's pipelines are laid over those held", () => {
   const after = withPipelines(held, [{ ...lint, name: "Lint again" }]);
   expect(after.get(lint.entity_id)?.name).toBe("Lint again");
   expect(held.get(lint.entity_id)?.name).toBe("Lint");
+});
+
+test("a pipeline's name is its last word and the lead before it, cut apart (#2572, the README's examples)", () => {
+  expect(nameParts("CarrierAdapters_Contract_Verification_Nightly")).toEqual(["CarrierAdapters_Contract_Verification_", "Nightly"]);
+  expect(nameParts("Payout_IntegrationTests")).toEqual(["Payout_", "IntegrationTests"]);
+  expect(nameParts("CustomsGateway_Build")[1], "Build and Contract stay apart").toBe("Build");
+  expect(nameParts("CustomsGateway_Contract")[1]).toBe("Contract");
+  expect(nameParts("Deploy to staging")).toEqual(["Deploy to ", "staging"]);
+  expect(nameParts("deploy-prod")).toEqual(["deploy-", "prod"]);
+  expect(nameParts("payments.api.v2"), "a short last word still tells v2 from v3").toEqual(["payments.api.", "v2"]);
+});
+
+test("a name with no _, space, - or . splits at its last capital, else it is all last word (#2572's ruling)", () => {
+  expect(nameParts("CustomsGatewayBuild")).toEqual(["CustomsGateway", "Build"]);
+  expect(nameParts("APIGatewayTests")).toEqual(["APIGateway", "Tests"]);
+  expect(nameParts("Build")).toEqual(["", "Build"]);
+  expect(nameParts("nightly")).toEqual(["", "nightly"]);
+  expect(nameParts("BUILD")).toEqual(["", "BUILD"]);
+  expect(nameParts("_Build"), "a separator that leads nothing").toEqual(["", "_Build"]);
+  expect(nameParts("Build_"), "a separator that ends it").toEqual(["", "Build_"]);
+  expect(nameParts("")).toEqual(["", ""]);
+});
+
+test("at a folder a pipeline's place is said from that folder down, with no source (#2572)", () => {
+  const deep = { ...lint, path: ["Payments", "Payout", "Nightly"] };
+  expect(placeWords(deep, true, ["tc", "Payments"])).toBe("Payout › Nightly");
+  expect(placeWords(deep, false, ["tc", "Payments", "Payout", "Nightly"]), "the folder itself: nothing").toBe("");
+  expect(placeWords(deep, true, ["~repo", "git:pay"]), "a repository is none of its folders: said whole").toBe("Tidewater TeamCity › Payments › Payout › Nightly");
+  expect(placeWords(deep, false, null)).toBe("Payments › Payout › Nightly");
+});
+
+test("at a folder a run's text and marks read the place as the row says it, from that folder down (#2572)", () => {
+  const pipes = withPipelines(new Map(), [{ ...lint, entity_id: "tc:buildType:Deploy", name: "Deploy", path: ["Ops", "Prod"] }]);
+  const deploy = at("2", 2, "tc:buildType:Deploy");
+  const own = runText(deploy.run);
+  expect(recentText(deploy, pipes, false, ["tc", "Ops"])).toBe(`${own} Deploy Prod Tidewater TeamCity`);
+  // "Pr" of the place said at the folder: its first letters, not the fifth and sixth of "Ops › Prod".
+  const place = own.length + 1 + "Deploy".length + 1;
+  expect(recentMarks(deploy, pipes, false, [place, place + 2], ["tc", "Ops"]).place).toEqual([0, 2]);
+});
+
+test("a row's pipeline cell: its name, the folders it says, their link and the whole path as its title (#2572)", () => {
+  const pipe = { ...lint, path: ["Platform", "Services", "Auth gateway"], name: "Build" };
+  expect(rowPipeline(pipe, false, null)).toEqual({
+    name: "Build",
+    place: "Platform › Services › Auth gateway",
+    folder: runScopeHash({ kind: "folder", path: ["tc", "Platform", "Services", "Auth gateway"] }),
+    whole: "Platform › Services › Auth gateway › Build",
+  });
+  const below = rowPipeline(pipe, true, ["tc", "Platform"]);
+  expect(below.place).toBe("Services › Auth gateway");
+  expect(below.folder, "the link is the pipeline's own folder, wherever the table stands").toBe(rowPipeline(pipe, false, null).folder);
+  expect(below.whole, "the title says the whole path, its source first where two list").toBe("Tidewater TeamCity › Platform › Services › Auth gateway › Build");
+  expect(rowPipeline(pipe, false, ["tc", "Platform", "Services", "Auth gateway"]).folder, "no folders said, no link").toBeNull();
+  expect(rowPipeline(undefined, false, null)).toEqual({ name: "", place: "", folder: null, whole: "" });
+});
+
+test("the folder column: wide at All pipelines, narrow at a folder with folders below it, gone without (#2572)", () => {
+  const a = { ...lint, entity_id: "tc:a", path: ["Payments", "Payout"] };
+  const b = { ...lint, entity_id: "tc:b", path: ["Payments"] };
+  expect(folderColumn([a, b], null)).toBe("long");
+  expect(folderColumn([a, b], ["tc", "Payments"])).toBe("short");
+  expect(folderColumn([a], ["tc", "Payments", "Payout"])).toBe("none");
+  expect(folderColumn([{ ...b, path: [], group: null }], ["~repo", "git:pay"]), "by repository the folders are said whole, a source's name too").toBe("long");
 });

@@ -1,14 +1,28 @@
 <!--
-  One run's row (#1452, ux18), as a pipeline's Runs tab and Builds' *Recent* (2026-11-25) draw it: one component, so
-  the two lists read the same. A pipeline's runs lead with the number and its state chip; *Recent* leads with the chip
-  and gives the next cell to the run's pipeline: its name in ink, the number after it, then the folders it sits in as
-  quiet text, the folders giving way first (cut at their start, so the nearest folder stays), then the name, never the
-  number (Fable's ruling 4).
+  One run's row (#1452, ux18), as a pipeline's Runs tab and Builds' run scopes (*All pipelines* and a folder, #2570)
+  draw it: one component, so the lists read the same. A pipeline's runs lead with the number and its state chip; a run
+  scope leads with the chip and gives the next cell to the run's pipeline (#2572, the mockup's *The run row*): its
+  folders, quiet, ending at one line, and its name and number starting at it, so down the table the names stand in one
+  column. What gives way: the folders from their start (the one nearest the name stays), then the name's lead, then its
+  last word (`nameParts`); never the number or the chip. The folders are a link to that folder.
 
-  The rest is the pipeline's row as it was: the unread dot hung in the first cell's gutter, the branch with the job's
-  chip, who or what started it, the tests, the duration bar or *running*, the start time, and *Mark as read*, *Log* and
-  *Run again…* on hover. A click anywhere on the row opens the run; the number stays the keyboard's link.
+  The rest is the pipeline's row as it was: the bubble's dot hung in the first cell's gutter (#2572), the branch with the
+  job's chip, who or what started it, the tests, the duration bar or *running*, the start time, and *Mark as read*, *Log*
+  and *Run again…* on hover. A click anywhere else on the row opens the run; the number stays the keyboard's link.
 -->
+<script lang="ts" module>
+  import type { Bubble as DotBubble } from "./builds";
+
+  /** A row's dot in words (#2572): its title, and what a screen reader says for its colour. #2575 owns the wording. */
+  const DOT_WORDS: Record<DotBubble, string> = {
+    blue: "Running, not opened yet.",
+    green: "Passed while you were away.",
+    yellow: "Passed with warnings while you were away.",
+    red: "Failed, unread. M marks it read.",
+    grey: "Cancelled while you were away.",
+  };
+</script>
+
 <script lang="ts">
   import type { Attachment } from "svelte/attachments";
   import TfKey from "../TfKey.svelte";
@@ -18,7 +32,8 @@
   import { secondsLabel, timeLabel } from "../../time/format";
   import { refusedAttrs } from "../../shell/refused-writes";
   import type { RunRow } from "../../ipc/entity";
-  import { failedRun, runTone, testsWords } from "./builds";
+  import { failedRun, runTone, testsWords, type Bubble } from "./builds";
+  import { nameParts } from "./recent";
   import { DURBAR_WIDTH, chipTone, durbarWidth, isStartedHere, triggerLabel, type RunMarks } from "./pipeline";
   import { runsRead } from "./runs-read.svelte";
 
@@ -58,8 +73,11 @@
     cannotRun?: string | null;
     /** A run started here and still in the write queue. */
     inQueue?: boolean;
-    /** *Recent*'s pipeline cell: its name and the quiet text of its place. `null` on a pipeline's own runs. */
-    pipeline?: { name: string; place: string } | null;
+    /**
+     * A run scope's pipeline cell (`rowPipeline`): its name, the folders said before it, their link and the whole path.
+     * `null` on a pipeline's own runs.
+     */
+    pipeline?: { name: string; place: string; folder: string | null; whole: string } | null;
     onopen: (event: MouseEvent) => void;
     onagain: () => void;
   } = $props();
@@ -69,12 +87,20 @@
   const failure = $derived(!here && failedRun(run));
   const unread = $derived(failure && runsRead.unread(run));
   const number = $derived(run.number !== null ? `#${run.number}` : "queued");
+  const dot = $derived(here ? null : runsRead.bubble(run));
+  const parts = $derived(pipeline === null ? null : nameParts(pipeline.name));
 </script>
+
+<!-- What a row's dot says (#2572): the bubble that counts its run, in its colour, as words for who can't see it. -->
+{#snippet bubbleDot(bubble: Bubble)}
+  {@const said = DOT_WORDS[bubble]}
+  <span class={`tf-unread tf-u-${bubble}`} title={said}><span class="tf-sr">{said}</span></span>
+{/snippet}
 
 <tr {@attach attach} data-run={run.entity_id} data-failed={failure ? "" : undefined} class:tf-row={!here || inQueue} class:tf-run-new={arrived} onclick={onopen}>
   <td class="tf-nowrap tf-run-no">
-    <!-- Unread (ux18): hung in the cell's gutter, so marking it moves nothing. -->
-    {#if unread}<span class="tf-unread" title="Unread. M marks it read."><span class="tf-sr">Unread</span></span>{/if}
+    <!-- The bubble's dot (ux18, #2572): hung in the cell's gutter, so marking it moves nothing. -->
+    {#if dot !== null}{@render bubbleDot(dot)}{/if}
     {#if here}
       <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
       <TfStateChip text={stateWord(run.state?.text ?? "queued")} class="tf-info" />
@@ -83,12 +109,19 @@
     {/if}
     {#if run.state !== null && !here}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
   </td>
-  {#if pipeline !== null}
+  {#if pipeline !== null && parts !== null}
+    <!-- The folders end at the cell's one line and the name starts at it; `rtl` cuts the folders at their start. -->
     <td class="tf-run-pipe"
-      ><span class="tf-run-pipein" title={pipeline.place === "" ? pipeline.name : `${pipeline.place} › ${pipeline.name}`}
-        ><span class="tf-run-pname"><Marked text={pipeline.name} {typed} pairs={marks?.name ?? []} /></span
-        ><a class="tf-run-pno" {href}><b><Marked text={number} {typed} pairs={marks?.number ?? []} /></b></a
-        >{#if pipeline.place !== ""}<span class="tf-run-place"><bdi><Marked text={pipeline.place} {typed} pairs={marks?.place ?? []} /></bdi></span>{/if}</span
+      ><span class="tf-run-id" title={pipeline.whole}
+        >{#if pipeline.folder !== null}<a class="tf-run-path" href={pipeline.folder} title={`Show the runs in ${pipeline.place}`}
+            ><bdi><Marked text={pipeline.place} {typed} pairs={marks?.place ?? []} /> ›</bdi></a
+          >{:else}<span class="tf-run-path"></span>{/if}<span class="tf-run-who"
+          ><span class="tf-run-nm"
+            >{#if parts[0] !== ""}<span class="tf-run-nmh"><Marked text={parts[0]} {typed} pairs={marks?.name ?? []} /></span>{/if}<span class="tf-run-nmt"
+              ><Marked text={parts[1]} {typed} pairs={marks?.name ?? []} from={parts[0].length} /></span
+            ></span
+          ><a class="tf-run-pno" {href}><Marked text={number} {typed} pairs={marks?.number ?? []} /></a></span
+        ></span
       ></td
     >
   {/if}

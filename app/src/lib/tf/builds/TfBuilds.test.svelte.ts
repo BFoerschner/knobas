@@ -1063,6 +1063,65 @@ test("a repository's folder turns the rail to By repository and lists the pipeli
   expect(target.querySelector('.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("tidewater/payout-service");
 });
 
+test("a folder reached by its address is revealed in the rail: the folds above it opened, its pill drawn, the rows shown (#2572)", async () => {
+  const nested: PipelineRow[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw(["folder", "teamcity", "Core", "Payments", "V2"], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const pill = target.querySelector<HTMLElement>('.tf-pl-rows summary.tf-tfold[aria-current="true"]');
+  expect(pill?.querySelector(".tf-fold-nm")?.textContent).toBe("V2");
+  const opened = (name: string) =>
+    ([...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)?.parentElement as HTMLDetailsElement | undefined)?.open;
+  expect([opened("Core"), opened("Payments"), opened("V2")]).toEqual([true, true, true]);
+  expect(opened("V1"), "a fold beside it stays as it was").toBe(false);
+  expect(target.querySelector(".tf-pl-rows")?.classList.contains("tf-unseen"), "shown once revealed").toBe(false);
+});
+
+test("a folder reached again, from All pipelines after a press in the rail, is revealed again (#2572)", async () => {
+  const nested: PipelineRow[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  const V2 = ["folder", "teamcity", "Core", "Payments", "V2"];
+  let rest = $state<string[]>(["recent"]);
+  page = mount(TfBuilds, {
+    target,
+    props: {
+      ready: true,
+      head: "builds",
+      get rest() {
+        return rest;
+      },
+      job: null,
+      ports: { pipelines: () => Promise.resolve(nested), runs: () => Promise.resolve([]), recent: QUIET_RECENT },
+    },
+  });
+  await settle();
+  const foldSummary = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name);
+  const opened = (name: string) => (foldSummary(name)?.parentElement as HTMLDetailsElement | undefined)?.open ?? false;
+  // Every fold open, then V2 pressed in the rail: in view already, so nothing is revealed.
+  foldSummary("Core")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  foldSummary("V2")!.querySelector<HTMLElement>(".tf-fold-nm")!.click();
+  rest = V2;
+  await settle();
+  // Back at All pipelines, the reader folds everything; then a row's folders lead to V2 again.
+  rest = ["recent"];
+  await settle();
+  foldSummary("Core")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(opened("Core")).toBe(false);
+  rest = V2;
+  await settle();
+  expect([opened("Core"), opened("Payments"), opened("V2")]).toEqual([true, true, true]);
+  expect(target.querySelector('.tf-pl-rows summary.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("V2");
+});
+
 test("a folder knobas does not hold says so, under the header and crumbs", async () => {
   draw(["folder", "teamcity", "Gone"]);
   await settle();
