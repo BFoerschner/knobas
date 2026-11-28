@@ -4371,6 +4371,23 @@ test("the tracker sees what is left behind, and stops seeing it when it is clean
   expect(globalThis.setTimeout).toBe(before);
 });
 
+test("a frame asked for and never drawn is left behind, one called off is not, and jsdom's own frame clock is not counted (#2569b)", async () => {
+  const track = trackResidue();
+  try {
+    const kept = requestAnimationFrame(() => {});
+    const dropped = requestAnimationFrame(() => {});
+    cancelAnimationFrame(dropped);
+    expect(track.residue().timers).toEqual(["requestAnimationFrame"]);
+    cancelAnimationFrame(kept);
+    expect(track.residue().timers).toEqual([]);
+    // Drawn, it is gone too.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(track.residue().timers).toEqual([]);
+  } finally {
+    track.stop();
+  }
+});
+
 /**
  * A removal with a **different function reference** balances nothing.
  *

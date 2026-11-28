@@ -298,6 +298,7 @@ function start(
     prefersDark?: () => boolean;
     onsearch?: (query: string) => void;
     monitorsDown?: number;
+    readBuilds?: () => Promise<void>;
     onstarttimer?: (entityId: string, title: string) => void;
     nav?: { back: () => void; forward: () => void };
     sources?: { id: string; display_name: string; roles?: RoleClaim[]; enabled?: boolean }[];
@@ -331,7 +332,7 @@ function start(
       inbox: { count: 3 },
       health: over.health ?? { all: [health("jira", "ok"), health("teamcity", "unauthorized")] },
       badges: createBadges({
-        readBuilds: () => Promise.resolve(),
+        readBuilds: over.readBuilds ?? (() => Promise.resolve()),
         builds: () => ({ blue: 0, green: 0, yellow: 0, red: 2, grey: 0 }),
         monitorsDown: () => Promise.resolve(over.monitorsDown ?? 0),
         listen: () => Promise.resolve(() => {}),
@@ -1431,6 +1432,15 @@ test("badges: inbox, and builds' bubble red for its failures; nothing drawn at z
     "Link sets": null,
     Time: null,
   });
+});
+
+test("the start reads the monitors' count and leaves the builds' counts to the runs store (#2569b)", async () => {
+  // The runs store reads them with its first word to the backend, 600 ms on; read here too, they went out beside
+  // Recent's first page at start.
+  let builds = 0;
+  start({ readBuilds: async () => void (builds += 1) });
+  await settle();
+  expect(builds).toBe(0);
 });
 
 // ---- home and the chosen job (spec #2227, #2230) ---------------------------

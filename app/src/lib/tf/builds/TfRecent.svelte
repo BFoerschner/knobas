@@ -45,7 +45,7 @@
   interface Kept {
     basis: string;
     runs: RecentRun[];
-    pipelines: Map<string, RecentPipeline>;
+    pipelines: ReadonlyMap<string, RecentPipeline>;
     next: RecentCursor | null;
     scroll: number;
     opened: string | null;
@@ -169,7 +169,7 @@
   // -- the reads ---------------------------------------------------------------
   const back = kept;
   let held = $state.raw<RecentRun[] | null>(back?.runs ?? null);
-  let pipelines = $state.raw<Map<string, RecentPipeline>>(back?.pipelines ?? new Map());
+  let pipelines = $state.raw<ReadonlyMap<string, RecentPipeline>>(back?.pipelines ?? new Map());
   let next = $state.raw<RecentCursor | null>(back?.next ?? null);
   let heldFor = back?.basis ?? "";
   let failed = $state<string | null>(null);
@@ -217,10 +217,11 @@
       // The rest once the first rows have painted: asked at once, its answer came back inside the first rows' render on
       // the scale database at 6x, and the frame then drew all 200 in two passes (merger's review of #2569).
       if (first && next !== null) afterPaint(() => at === reads && void more(RECENT_PAGE - RECENT_FIRST));
-      // Shown: the sources asked once, then each minute (Fable's ruling 7).
+      // Shown: the sources asked once, then each minute (Fable's ruling 7). The first ask once the first rows have
+      // painted too: its two reads went out beside their render (#2569b).
       if (!askedOnce) {
         askedOnce = true;
-        void askSources();
+        afterPaint(() => void askSources());
       }
     } catch (cause) {
       if (at === reads) failed = ipcErrorMessage(cause);

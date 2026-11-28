@@ -748,7 +748,9 @@
         if (!dead) sync = [...sync, ...rows.filter((row) => !sync.some((had) => had.source_id === row.source_id))];
       })
       .catch(() => {});
-    void badges.refresh();
+    // The monitors alone: the builds' counts come with the runs store's first word to the backend, 600 ms on (the
+    // effect below `afterOpen`). Read here too, they went out beside Recent's first page (#2569b).
+    void badges.readMonitors();
     void queue.refresh();
 
     hold(

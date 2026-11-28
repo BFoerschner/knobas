@@ -1410,6 +1410,12 @@ frame-budget *args:
 open-budget *args:
     testenv/perf/open-budget.sh {{args}}
 
+# Recent's first open on a cold start (#2569b, `testenv/perf/README.md`, *Opening a page*): the windowless backend started
+# afresh each round, the page loaded the moment it answers and Recent pressed as soon as the nav draws, against
+# `builds-recent-start`'s lines: `just open-cold --backend <headless_ipc> --home <a copy of the saved home>`.
+open-cold *args:
+    testenv/perf/open-cold.sh {{args}}
+
 # The movement gate (the nothing-moves pass of PR #2479, 2026-11-17, `testenv/perf/README.md`, *Nothing moves*; Björn:
 # "Check if any other page moves after it's drawn. That's not good behavior."): opens every place a person can open in a
 # headless Chrome, first open and return, at 1x and 4x, at 1440x868@1 and 2560x1440@1.25, and fails when anything drawn
