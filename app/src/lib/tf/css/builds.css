@@ -414,7 +414,7 @@
    room unseen. The list keeps its scrollbar's 8 px whether it scrolls or not, by scrolling always as Tickets' views
    list does (a kept gutter makes Chromium hit-test each wheel on the main thread, tf-css.test), and *All pipelines*
    stands 16 px in on the right (the list's 8 and the bar's 8), so the columns line up down the rail. */
-.tf-bv .tf-pl-list { overflow-y: scroll; }
+.tf-bv .tf-pl-list { overflow-y: scroll; background: var(--sheet); }
 .tf-pl-ub { flex: none; display: inline-grid; grid-template-columns: repeat(5, calc(16px * var(--fs))); column-gap: 2px; margin-left: auto; }
 .tf-pl :is(.tf-pi-when, .tf-pi-why) + .tf-pl-ub { margin-left: 0; }
 .tf-ub {
