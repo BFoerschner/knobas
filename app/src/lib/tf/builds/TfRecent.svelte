@@ -196,12 +196,13 @@
       heldFor = wanted;
       failed = null;
       inFlightSoon();
-      // The rest once the first rows have painted: asked at once, its answer came back inside the first rows' render on
-      // the scale database at 6x, and the frame then drew all 200 in two passes (merger's review of #2569).
-      if (first && next !== null) afterPaint(() => at === reads && void more(RECENT_PAGE - RECENT_FIRST));
-      // The Builds list (571 KB at Björn's scale) and the sources' first ask behind the paint too, not beside the
-      // render: their reads went out in this task and could land before the rows' frame (#2569b).
+      // Once the first rows have painted, and only if no other head read came in between (that one does it): the rest
+      // of the first page (asked at once, its answer came back inside the first rows' render on the scale database at
+      // 6x, and the frame then drew all 200 in two passes; merger's review of #2569), then the Builds list (571 KB at
+      // Björn's scale) and the sources' first ask, whose reads went out beside the render as well (#2569b).
       afterPaint(() => {
+        if (at !== reads) return;
+        if (first && next !== null) void more(RECENT_PAGE - RECENT_FIRST);
         untrack(() => ondrawn)?.();
         // Shown: the sources asked once, then each minute (Fable's ruling 7).
         if (!askedOnce) {
@@ -215,10 +216,29 @@
     }
   }
 
-  /** `run` once the page has painted (as `TfDocs`' `afterPaint`); at once where there are no frames. */
+  /** The frame, then the task, {@link afterPaint} waits on: given back when *Recent* goes. */
+  let painting: { frame: number; task?: ReturnType<typeof setTimeout> } | null = null;
+  /**
+   * `run` once the page has painted (as `TfDocs`' `afterPaint`); at once where there are no frames. One at a time: a
+   * later call takes an earlier one's place, whose head read was replaced anyway.
+   */
   function afterPaint(run: () => void): void {
     if (typeof requestAnimationFrame !== "function") return run();
-    requestAnimationFrame(() => setTimeout(run, 0));
+    stopPainting();
+    const now = { frame: 0 } as { frame: number; task?: ReturnType<typeof setTimeout> };
+    now.frame = requestAnimationFrame(() => {
+      now.task = setTimeout(() => {
+        if (painting === now) painting = null;
+        run();
+      }, 0);
+    });
+    painting = now;
+  }
+  function stopPainting(): void {
+    if (painting === null) return;
+    cancelAnimationFrame(painting.frame);
+    clearTimeout(painting.task);
+    painting = null;
   }
 
   /** An older page of `limit` runs, after what is held. */
@@ -517,6 +537,7 @@
   });
 
   onDestroy(() => {
+    stopPainting();
     clearTimeout(headSoon);
     clearTimeout(inFlightTimer);
     reads += 1;

@@ -4325,6 +4325,23 @@ test("the tracker sees what is left behind, and stops seeing it when it is clean
  * after the mismatched removal the listener is **still called**, and the
  * tracker has to agree with that, not with the count of calls made.
  */
+test("a frame asked for and never drawn is left behind, one called off is not, and jsdom's own frame clock is not counted (#2569b)", async () => {
+  const track = trackResidue();
+  try {
+    const kept = requestAnimationFrame(() => {});
+    const dropped = requestAnimationFrame(() => {});
+    cancelAnimationFrame(dropped);
+    expect(track.residue().timers).toEqual(["requestAnimationFrame"]);
+    cancelAnimationFrame(kept);
+    expect(track.residue().timers).toEqual([]);
+    // Drawn, it is gone too.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(track.residue().timers).toEqual([]);
+  } finally {
+    track.stop();
+  }
+});
+
 test("a removal with a different function reference does not balance the add", async () => {
   const track = trackResidue();
   try {
