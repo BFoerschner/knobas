@@ -212,6 +212,10 @@ function probe(file, args, env, limit = 60000) {
 // Each gate probe, its cases' first call never answered: each case is tried twice, reported failed-to-run, and the
 // probe ends with every case it was asked for, and fails its check.
 const HANG = { FAKE_CDP_HANG: "Emulation.setCPUThrottlingRate" };
+// Failed to run after its first call stalled: tried twice, or, under a loaded gate, given up when the fresh page for the
+// second try itself got no answer (`cdp.mjs`'s `then <call>`; seen as `then Page.enable got no answer in 300 ms`,
+// PR #2614's gate). Either way the probe reported the case and went on.
+const failedToRun = (said) => /(, twice|, then [\w.]+ got no answer in \d+ ms)$/.test(said ?? "");
 describe("the gate probes report instead of hanging", { concurrency: true }, () => {
   test("keys.mjs", async () => {
     const r = await probe("keys.mjs", ["--app", "http://127.0.0.1:9/", "--out", "$STATE/keys.json", "--only", "tickets-letter,docs-spaces-letter", "--throttle", "1,4", "--size", "1920x1080@2", "--check", join(perf, "budget-keys.json")], HANG);
@@ -220,7 +224,7 @@ describe("the gate probes report instead of hanging", { concurrency: true }, () 
     assert.match(r.err, /keys\.mjs 1920x1080@2 4x docs-spaces-letter: Emulation\.setCPUThrottlingRate got no answer in 300 ms/);
     const cases = r.json("keys.json").cases;
     assert.deepEqual(cases.map((x) => `${x.throttle}x ${x.name}`), ["1x tickets-letter", "1x docs-spaces-letter", "4x tickets-letter", "4x docs-spaces-letter"]);
-    assert.ok(cases.every((x) => /twice$/.test(x.failedToRun)), JSON.stringify(cases));
+    assert.ok(cases.every((x) => failedToRun(x.failedToRun)), JSON.stringify(cases));
     assert.match(r.out, /OVER FAILED TO RUN keys\.mjs 1920x1080@2 1x tickets-letter/);
     assert.match(r.out, /keys: 4 over their lines/);
   });
@@ -245,7 +249,7 @@ describe("the gate probes report instead of hanging", { concurrency: true }, () 
     const r = await probe("run.mjs", ["--app", "http://127.0.0.1:9/", "--out", "$STATE/run.json", "--kinds", "type,nav", "--only", "code-filter,#/inbox", "--throttle", "4"], { ...HANG, FAKE_CDP_VALUE: '"x"' });
     assert.equal(r.code, 0, r.out + r.err);
     const run = r.json("run.json");
-    assert.deepEqual([...run.type, ...run.nav].map((x) => [x.name ?? `${x.hash} ${x.round}`, /twice$/.test(x.failedToRun)]), [["code-filter", true], ["#/inbox first", true], ["#/inbox return", true]]);
+    assert.deepEqual([...run.type, ...run.nav].map((x) => [x.name ?? `${x.hash} ${x.round}`, failedToRun(x.failedToRun)]), [["code-filter", true], ["#/inbox first", true], ["#/inbox return", true]]);
     const budget = await new Promise((resolve) => {
       const p = spawn(process.execPath, [join(perf, "budget.mjs"), join(r.state, "run.json"), "--lines", "fake"], { stdio: ["ignore", "pipe", "pipe"] });
       let out = "";
