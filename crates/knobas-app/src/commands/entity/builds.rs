@@ -6,8 +6,8 @@ use super::*;
 
 use knobas_core::builds::RawRun;
 pub(super) use knobas_core::builds::{
-    BranchPull, CommitRepository, PipelineRow, RecentCursor, RecentFilter, RecentRuns, RepoBuilds,
-    RunRow,
+    BranchPull, CommitRepository, PipelineRow, RailPipeline, RecentCursor, RecentFilter,
+    RecentRuns, RepoBuilds, RunRow,
 };
 
 /// Every pipeline the sources filling the CI role declare, for the Builds
@@ -38,6 +38,24 @@ pub async fn pipelines_inner(
     let runs = knobas_core::builds::recent_runs(&mut pipelines);
     with_commits(pool, &declarations, None, runs).await?;
     Ok(pipelines)
+}
+
+/// Every pipeline as the Builds rail draws it (#2571): [`pipelines_inner`]'s
+/// rows without their strips ([`RailPipeline`]), each with its latest run, its
+/// runs in flight and the commits its last twelve built. The same read and
+/// the same commit links; the answer is what shrinks (571 KB at Björn's scale
+/// for the whole list). [`pipelines_inner`] stays for the readers that look
+/// for a run among a pipeline's last twelve.
+///
+/// # Errors
+///
+/// As [`pipelines_inner`].
+pub async fn rail_pipelines_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<Vec<RailPipeline>, IpcError> {
+    let rows = pipelines_inner(pool, registry).await?;
+    Ok(rows.into_iter().map(RailPipeline::from).collect())
 }
 
 /// The repository's Builds tab in one answer (the repo-builds pass,
@@ -961,6 +979,20 @@ pub async fn download_run_file<R: tauri::Runtime>(
 pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRow>, IpcError> {
     let pool = lifecycle.pool()?;
     pipelines_inner(&pool, lifecycle.registry()).await
+}
+
+/// The Builds rail (#2571).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`rail_pipelines_inner`] refuses with.
+#[tauri::command]
+pub async fn rail_pipelines(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<RailPipeline>, IpcError> {
+    let pool = lifecycle.pool()?;
+    rail_pipelines_inner(&pool, lifecycle.registry()).await
 }
 
 /// A page of Builds' *Recent* (2026-11-25): the newest runs across every

@@ -4165,6 +4165,26 @@ cell: string | null, };
 export type PullRequestWorktree = { repo_entity_id: string, number: number, path: string, closed: boolean, };
 
 /**
+ * One pipeline as the Builds rail draws it (#2571): a [`PipelineRow`]
+ * without its strip, which the rail has not drawn since 2026-11-13. The
+ * whole list was 571 KB at Björn's scale, most of it the twelve runs of
+ * every pipeline.
+ *
+ * `recent` is the runs the rail reads, newest first by when each was made
+ * (started, else the source's own time; the front's `runMade`): the latest
+ * of its last [`PIPELINE_RECENT`] (its glyph, its time, *Failing*), then
+ * every other one of them still in flight (*Running*). `commits` is the
+ * mirrored commits those twelve built, each once, newest first: what *By
+ * repository* groups it by. `unread` is [`PipelineRow::unread`], what the
+ * rail's right-click counts.
+ */
+export type RailPipeline = { entity_id: string, source_id: string, source_name: string, name: string, group: string | null, 
+/**
+ * The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+ */
+path: Array<string>, pinned: boolean, web_url: string | null, recent: Array<RunRow>, commits: Array<string>, unread: Array<string>, };
+
+/**
  * One commit of a [`DiffRange`]: its whole sha, its subject and a quiet
  * second reading (author, age) as a commit row has.
  */

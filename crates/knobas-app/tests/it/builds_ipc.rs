@@ -7,8 +7,8 @@
 //! back are told apart by `source_id` from anything else in this database.
 
 use knobas_app::commands::entity::{
-    commit_repositories_inner, pipeline_runs_inner, pipelines_inner, repo_branch_pulls_inner,
-    repo_pipelines_inner, set_pipeline_pinned_inner,
+    commit_repositories_inner, pipeline_runs_inner, pipelines_inner, rail_pipelines_inner,
+    repo_branch_pulls_inner, repo_pipelines_inner, set_pipeline_pinned_inner,
 };
 
 /// A TeamCity source nothing else in this database uses.
@@ -164,6 +164,85 @@ async fn pipelines_carry_their_name_group_and_last_twelve_runs() {
     assert_eq!(lint_row.recent[0].entity_id, lint_run);
     assert!(lint_row.recent[0].started.is_some());
     assert_eq!(lint_row.recent[0].finished, None, "in flight");
+}
+
+/// **The rail reads no strip** (#2571): the same pipelines as the list, by
+/// name, each with its latest run and the runs it has in flight, never the
+/// twelve; what the rail's right-click counts stays.
+#[tokio::test]
+async fn the_rail_reads_no_strip() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let lint = configuration(&pool, &tc, "Payout_Lint", "Lint").await;
+    for n in 0..14 {
+        let status = if n == 13 { "FAILURE" } else { "SUCCESS" };
+        let at = format!("2026-08-21T{:02}:00:00Z", n + 1);
+        build(
+            &pool,
+            &tc,
+            1000 + n,
+            "Payout_IntegrationTests",
+            Some(status),
+            &at,
+        )
+        .await;
+    }
+    build(
+        &pool,
+        &tc,
+        2000,
+        "Payout_Lint",
+        Some("SUCCESS"),
+        "2026-08-22T09:00:00Z",
+    )
+    .await;
+    let lint_run = build(
+        &pool,
+        &tc,
+        2001,
+        "Payout_Lint",
+        Some("running"),
+        "2026-08-22T11:45:00Z",
+    )
+    .await;
+    let registry = knobas_app::sources::Registry::for_process();
+
+    let listed = pipelines_inner(&pool, &registry).await.unwrap();
+    let rail = rail_pipelines_inner(&pool, &registry).await.unwrap();
+    let mine: Vec<_> = rail.iter().filter(|p| p.source_id == tc).collect();
+    let ids: Vec<&str> = mine.iter().map(|p| p.entity_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [tests.as_str(), lint.as_str()],
+        "the list's pipelines, by name"
+    );
+
+    let it = mine[0];
+    assert_eq!(it.group.as_deref(), Some("Payout"));
+    assert_eq!(it.source_name, "TeamCity");
+    let numbers: Vec<_> = it.recent.iter().map(|r| r.number.as_deref()).collect();
+    assert_eq!(
+        numbers,
+        [Some("1013")],
+        "the latest alone: nothing of its twelve runs"
+    );
+    let unread = &listed.iter().find(|p| p.entity_id == tests).unwrap().unread;
+    assert!(!unread.is_empty(), "the failure is unread");
+    assert_eq!(
+        &it.unread, unread,
+        "the right-click's runs, as the list names them"
+    );
+
+    let lint_row = mine[1];
+    let numbers: Vec<_> = lint_row
+        .recent
+        .iter()
+        .map(|r| r.number.as_deref())
+        .collect();
+    assert_eq!(numbers, [Some("2001")], "the run in flight is its latest");
+    assert_eq!(lint_row.recent[0].entity_id, lint_run);
+    assert_eq!(lint_row.recent[0].finished, None);
 }
 
 /// **The runs on the right** (#848's plain list until #851): one pipeline's

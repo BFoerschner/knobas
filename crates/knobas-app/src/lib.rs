@@ -1157,6 +1157,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::move_seen,
         commands::entity::put_back_seen,
         commands::entity::builds_in_front,
+        // The Builds rail without its strips (spec #2566, #2571), appended
+        // at the foot (§10.8).
+        commands::entity::rail_pipelines,
     ]
 }
 

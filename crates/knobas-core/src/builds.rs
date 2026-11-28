@@ -121,6 +121,78 @@ pub struct PipelineRow {
     pub unread: Vec<String>,
 }
 
+/// One pipeline as the Builds rail draws it (#2571): a [`PipelineRow`]
+/// without its strip, which the rail has not drawn since 2026-11-13. The
+/// whole list was 571 KB at Björn's scale, most of it the twelve runs of
+/// every pipeline.
+///
+/// `recent` is the runs the rail reads, newest first by when each was made
+/// (started, else the source's own time; the front's `runMade`): the latest
+/// of its last [`PIPELINE_RECENT`] (its glyph, its time, *Failing*), then
+/// every other one of them still in flight (*Running*). `commits` is the
+/// mirrored commits those twelve built, each once, newest first: what *By
+/// repository* groups it by. `unread` is [`PipelineRow::unread`], what the
+/// rail's right-click counts.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct RailPipeline {
+    pub entity_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    pub name: String,
+    pub group: Option<String>,
+    /// The chain of groups it sits in, outermost first, as [`PipelineRow::path`].
+    pub path: Vec<String>,
+    pub pinned: bool,
+    pub web_url: Option<String>,
+    pub recent: Vec<RunRow>,
+    pub commits: Vec<String>,
+    pub unread: Vec<String>,
+}
+
+impl From<PipelineRow> for RailPipeline {
+    /// The row's runs as the rail reads them; its `commit_id`s already
+    /// linked, so `commits` names what they name.
+    fn from(row: PipelineRow) -> Self {
+        // When a run counts as made, to the millisecond as the front parses
+        // it; a run with neither instant is the oldest (`Option`'s `None`).
+        let made = |run: &RunRow| {
+            run.started
+                .or(run.updated_at)
+                .map(|at| at.timestamp_millis())
+        };
+        let mut runs = row.recent;
+        // Stable: equals keep the read's order, as the front's sort does.
+        runs.sort_by_key(|run| std::cmp::Reverse(made(run)));
+        let mut commits: Vec<String> = Vec::new();
+        for id in runs.iter().filter_map(|run| run.commit_id.as_ref()) {
+            if !commits.contains(id) {
+                commits.push(id.clone());
+            }
+        }
+        let mut runs = runs.into_iter();
+        let recent = runs
+            .next()
+            .into_iter()
+            .chain(runs.filter(|run| run.started.is_some() && run.finished.is_none()))
+            .collect();
+        Self {
+            entity_id: row.entity_id,
+            source_id: row.source_id,
+            source_name: row.source_name,
+            name: row.name,
+            group: row.group,
+            path: row.path,
+            pinned: row.pinned,
+            web_url: row.web_url,
+            recent,
+            commits,
+            unread: row.unread,
+        }
+    }
+}
+
 /// One run in Builds' *Recent* (2026-11-25): the run as a pipeline's runs
 /// draw it, and the id of the pipeline it sits under, which
 /// [`RecentRuns::pipelines`] names.
@@ -1844,5 +1916,157 @@ mod tests {
         assert_eq!(stranger.commit_id, None);
         assert_eq!(untold.commit_id, None);
         assert_eq!(missing.commit_id, None);
+    }
+
+    /// A run of a pipeline row as the rail test lays it: its id, when it
+    /// started (`None` while queued), whether it finished, the source's own
+    /// time for it and the mirrored commit it built.
+    fn laid(
+        id: &str,
+        started: Option<&str>,
+        finished: bool,
+        updated: &str,
+        commit: Option<&str>,
+    ) -> RunRow {
+        let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
+        let mut row = run(None);
+        row.entity_id = id.to_owned();
+        row.started = started.map(at);
+        row.finished = finished.then(|| at(updated));
+        row.updated_at = Some(at(updated));
+        row.commit_id = commit.map(str::to_owned);
+        row
+    }
+
+    fn row(recent: Vec<RunRow>) -> PipelineRow {
+        PipelineRow {
+            entity_id: "tc:pipe".to_owned(),
+            source_id: "tc".to_owned(),
+            source_name: "TeamCity".to_owned(),
+            name: "Build".to_owned(),
+            group: Some("Payments".to_owned()),
+            path: vec!["Payments".to_owned()],
+            pinned: true,
+            web_url: None,
+            recent,
+            unread: vec!["tc:old-failure".to_owned()],
+        }
+    }
+
+    /// **The rail reads no strip** (#2571): of a pipeline's last twelve it
+    /// keeps its latest by when the run was made (started, else the source's
+    /// time, as the front's `runMade`), then every other run still in flight,
+    /// and the commits all twelve built, each once, newest first.
+    #[test]
+    fn a_rail_row_keeps_the_latest_run_the_runs_in_flight_and_the_commits() {
+        // In the read's order, the source's last word first: the long run
+        // that finished last started before the short one.
+        let rail = RailPipeline::from(row(vec![
+            laid(
+                "long",
+                Some("2026-08-21T09:00:00Z"),
+                true,
+                "2026-08-21T12:00:00Z",
+                Some("c1"),
+            ),
+            laid(
+                "short",
+                Some("2026-08-21T11:00:00Z"),
+                true,
+                "2026-08-21T11:05:00Z",
+                Some("c2"),
+            ),
+            laid(
+                "stuck",
+                Some("2026-08-21T08:00:00Z"),
+                false,
+                "2026-08-21T08:00:00Z",
+                Some("c1"),
+            ),
+            laid(
+                "passed",
+                Some("2026-08-21T07:00:00Z"),
+                true,
+                "2026-08-21T07:10:00Z",
+                Some("c3"),
+            ),
+            laid(
+                "old",
+                Some("2026-08-21T06:00:00Z"),
+                true,
+                "2026-08-21T06:10:00Z",
+                None,
+            ),
+        ]));
+        let ids: Vec<&str> = rail.recent.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["short", "stuck"],
+            "the latest started, then the one in flight"
+        );
+        assert_eq!(
+            rail.commits,
+            ["c2", "c1", "c3"],
+            "each commit once, newest first"
+        );
+        assert_eq!(
+            rail.unread,
+            ["tc:old-failure"],
+            "the right-click's count is kept"
+        );
+        assert_eq!(rail.name, "Build");
+        assert_eq!(rail.path, ["Payments"]);
+        assert!(rail.pinned);
+    }
+
+    /// A queued run is made when the source last touched it, and a run with
+    /// neither instant comes last; between equals the read's order stands.
+    #[test]
+    fn a_queued_run_is_the_latest_when_queued_after_the_rest_started() {
+        let rail = RailPipeline::from(row(vec![
+            laid(
+                "ran",
+                Some("2026-08-21T09:00:00Z"),
+                true,
+                "2026-08-21T09:30:00Z",
+                None,
+            ),
+            laid("queued", None, false, "2026-08-21T10:00:00Z", None),
+        ]));
+        let ids: Vec<&str> = rail.recent.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["queued"],
+            "queued last, and not in flight: the passed run is dropped"
+        );
+
+        let mut blank = laid("blank", None, false, "2026-08-21T10:00:00Z", None);
+        blank.updated_at = None;
+        let tie_a = laid(
+            "a",
+            Some("2026-08-21T09:00:00Z"),
+            true,
+            "2026-08-21T09:30:00Z",
+            None,
+        );
+        let tie_b = laid(
+            "b",
+            Some("2026-08-21T09:00:00Z"),
+            true,
+            "2026-08-21T09:20:00Z",
+            None,
+        );
+        let rail = RailPipeline::from(row(vec![blank, tie_a, tie_b]));
+        let ids: Vec<&str> = rail.recent.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["a"],
+            "no instant is the oldest; equals keep the read's order"
+        );
+        assert_eq!(
+            RailPipeline::from(row(vec![])).recent.len(),
+            0,
+            "nothing ran"
+        );
     }
 }
