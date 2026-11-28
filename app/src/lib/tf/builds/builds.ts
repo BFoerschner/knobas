@@ -6,7 +6,7 @@
  * flight* by its declared instants (started and not finished, or neither),
  * and a pipeline is named by its declared name (ADR-0022).
  */
-import type { JobPipeline, PipelineReason, PipelineRow, RailPipeline, RunRow } from "../../ipc/entity";
+import type { BubbleCounts, JobPipeline, PipelineReason, PipelineRow, RailPipeline, RunRow } from "../../ipc/entity";
 import { clockLabel } from "../../time/format";
 import { originLabel } from "../job/job";
 import { stateWord } from "../state-word";
@@ -272,12 +272,8 @@ export interface Fold {
   folds: Fold[];
   /** Every pipeline beneath it, at any depth. */
   count: number;
-  /** How many of those are failing: the count drawn, a fact. */
-  failing: number;
-  /** How many of those ask for attention (ux18: their failure unread): the count's err tone, and a fold opening. */
+  /** How many of those ask for attention (ux18: their latest failure unread): a fold opening by itself. */
   asking: number;
-  /** How many of those are running. */
-  running: number;
 }
 
 /** One source's tree: the pipelines at its top and its top folds. */
@@ -322,9 +318,7 @@ function fold(node: Draft, parentKey: string, parentPath: readonly string[], rea
     pipelines: at.pipelines,
     folds,
     count: at.pipelines.length + folds.reduce((sum, f) => sum + f.count, 0),
-    failing: at.pipelines.filter(isFailing).length + folds.reduce((sum, f) => sum + f.failing, 0),
     asking: at.pipelines.filter((p) => asksAttention(p, read)).length + folds.reduce((sum, f) => sum + f.asking, 0),
-    running: at.pipelines.filter(isRunning).length + folds.reduce((sum, f) => sum + f.running, 0),
   };
 }
 
@@ -400,6 +394,48 @@ export function namesEvery(pipelines: readonly Pick<PipelineRow, "recent" | "unr
 export function foldHolds(f: Fold, id: string | null): boolean {
   if (id === null) return false;
   return f.pipelines.some((p) => p.entity_id === id) || f.folds.some((kid) => foldHolds(kid, id));
+}
+
+/**
+ * Each fold's bubbles by its key (#2573): the sums of `countsOf` over every pipeline beneath it, at any depth, each fold
+ * walked once. What a folder's columns in the rail draw.
+ */
+export function foldSums(trees: readonly SourceTree[], countsOf: (id: string) => BubbleCounts): Map<string, BubbleCounts> {
+  const sums = new Map<string, BubbleCounts>();
+  const walk = (f: Fold): BubbleCounts => {
+    const sum = { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+    const add = (c: BubbleCounts) => {
+      for (const bubble of RAIL_COLUMNS) sum[bubble] += c[bubble];
+    };
+    for (const p of f.pipelines) add(countsOf(p.entity_id));
+    for (const kid of f.folds) add(walk(kid));
+    sums.set(f.key, sum);
+    return sum;
+  };
+  for (const tree of trees) tree.folds.forEach(walk);
+  return sums;
+}
+
+/**
+ * The rail's bubble columns (#2573), in the top bar's order (Björn on #2568: the most critical first, blue last). Every
+ * row draws all five, each in its own place, so a number that comes or goes moves nothing and the place says the
+ * colour to someone who can't tell red from green.
+ */
+export const RAIL_COLUMNS: readonly Bubble[] = ["red", "yellow", "green", "grey", "blue"];
+
+/** One of a row's columns: its bubble, its count, and what the cell says (nothing at zero, two figures at most). */
+export interface RailCell {
+  bubble: Bubble;
+  n: number;
+  text: string;
+}
+
+/** A row's five cells from its counts, all saying nothing before the counts are read (`null`). */
+export function railCells(counts: BubbleCounts | null): RailCell[] {
+  return RAIL_COLUMNS.map((bubble) => {
+    const n = counts?.[bubble] ?? 0;
+    return { bubble, n, text: n <= 0 ? "" : String(Math.min(n, 99)) };
+  });
 }
 
 /**
@@ -523,9 +559,7 @@ export function repoTreeOf(
     pipelines,
     folds: [],
     count: pipelines.length,
-    failing: pipelines.filter(isFailing).length,
     asking: pipelines.filter((p) => asksAttention(p, read)).length,
-    running: pipelines.filter(isRunning).length,
   });
   const folds = [...byRepo.entries()]
     .sort((a, b) => a[1].title.toLowerCase().localeCompare(b[1].title.toLowerCase()))

@@ -35,6 +35,8 @@ import {
   failedRun,
   unreadRun,
   unreadRunsOf,
+  foldSums,
+  railCells,
 } from "./builds";
 import twin from "./rail-twin.json";
 
@@ -163,7 +165,7 @@ test("the tree is as deep as the source's: a pipeline under its chain of groups,
   expect(tree!.pipelines.map((p) => p.name)).toEqual(["Loose"]);
   expect(tree!.folds.map((f) => f.name)).toEqual(["Data", "Payments"]);
   const payments = tree!.folds[1]!;
-  expect([payments.count, payments.failing]).toEqual([3, 1]);
+  expect([payments.count, payments.asking]).toEqual([3, 1]);
   expect(payments.pipelines).toEqual([]);
   expect(payments.folds.map((f) => f.name)).toEqual(["Ledger", "Payouts"]);
   const payouts = payments.folds[1]!;
@@ -362,12 +364,29 @@ test("a rail row shows a time only where it says something: when it failed, when
   expect(railTime(recovered, now)).toBeNull();
 });
 
-test("a folder counts its running pipelines beside its failing ones, at any depth", () => {
-  const go = (name: string, path: string[]) => pipeline(name, [running], { path });
-  const [tree] = treeOf([go("A_Build", ["Payments", "Payouts"]), go("B_Build", ["Payments", "Ledger"]), at("C_Build", ["Payments"])]);
-  const payments = tree!.folds[0]!;
-  expect([payments.count, payments.failing, payments.running]).toEqual([3, 0, 2]);
-  expect(payments.folds.map((f) => f.running)).toEqual([1, 1]);
+test("a folder's bubbles are the sums of its pipelines' at any depth, and a pipeline with none adds nothing (#2573)", () => {
+  const [tree] = treeOf([at("A_Build", ["Payments", "Payouts"]), at("B_Build", ["Payments", "Ledger"]), at("C_Build", ["Payments"]), at("D_Build", ["Data"])]);
+  const counts: Record<string, { blue: number; green: number; yellow: number; red: number; grey: number }> = {
+    A_Build: { blue: 1, green: 2, yellow: 0, red: 3, grey: 0 },
+    B_Build: { blue: 0, green: 5, yellow: 1, red: 0, grey: 2 },
+  };
+  const none = { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+  const sums = foldSums([tree!], (id) => counts[id.replace("teamcity:buildType:", "")] ?? none);
+  const [data, payments] = tree!.folds;
+  expect(sums.get(payments!.key)).toEqual({ blue: 1, green: 7, yellow: 1, red: 3, grey: 2 });
+  expect(payments!.folds.map((f) => sums.get(f.key))).toEqual([counts["B_Build"], counts["A_Build"]]);
+  expect(sums.get(data!.key)).toEqual(none);
+});
+
+test("the rail's cells stand in the top bar's order, one place per state, a zero saying nothing and a count past 99 saying 99 (#2573)", () => {
+  expect(railCells({ blue: 4, green: 0, yellow: 120, red: 1, grey: 0 })).toEqual([
+    { bubble: "red", n: 1, text: "1" },
+    { bubble: "yellow", n: 120, text: "99" },
+    { bubble: "green", n: 0, text: "" },
+    { bubble: "grey", n: 0, text: "" },
+    { bubble: "blue", n: 4, text: "4" },
+  ]);
+  expect(railCells(null).map((cell) => cell.text)).toEqual(["", "", "", "", ""]);
 });
 
 test("a rail row carries the prefix its folder's own pipelines share; a pinned row and a lone one carry none", () => {
@@ -398,7 +417,7 @@ test("by repository: a fold for each repository a pipeline's runs built, by name
     ],
   };
   const [tree] = repoTreeOf(list, (p) => repos[p.name] ?? []);
-  expect(tree!.folds.map((f) => [f.name, f.pipelines.map((p) => p.name), f.failing])).toEqual([
+  expect(tree!.folds.map((f) => [f.name, f.pipelines.map((p) => p.name), f.asking])).toEqual([
     ["tidewater/ledger-api", ["Shared_Lint"], 1],
     ["tidewater/payout-service", ["Payout_Build", "Shared_Lint"], 1],
     ["No repository", ["Nightly"], 0],
@@ -462,15 +481,15 @@ test("a read failure keeps its time in the second ink, an unread one in err", ()
   expect(railTime(p, now, new Set(["teamcity:build:9"]))).toEqual({ text: "10:09", tone: null });
 });
 
-test("a fold counts every failing pipeline and opens by itself only for one that asks", () => {
+test("a fold opens by itself only for a failing pipeline that asks", () => {
   const red = (name: string, id: string) => pipeline(name, [run({ entity_id: id, state: { text: "FAILURE", tone: "err" } })], { path: ["Loud"] });
   const [tree] = treeOf([red("A", "teamcity:build:1"), red("B", "teamcity:build:2")], new Set(["teamcity:build:1"]));
   const loud = tree!.folds[0]!;
-  expect(loud.failing).toBe(2);
+  expect(loud.count).toBe(2);
   expect(loud.asking).toBe(1);
   expect(foldOpen(undefined, loud, null, false)).toBe(true);
   const [quiet] = treeOf([red("A", "teamcity:build:1"), red("B", "teamcity:build:2")], new Set(["teamcity:build:1", "teamcity:build:2"]));
-  expect(quiet!.folds[0]!.failing).toBe(2);
+  expect(quiet!.folds[0]!.count).toBe(2);
   expect(quiet!.folds[0]!.asking).toBe(0);
   expect(foldOpen(undefined, quiet!.folds[0]!, null, false)).toBe(false);
   const [byRepo] = repoTreeOf([red("A", "teamcity:build:1")], () => [], new Set(["teamcity:build:1"]));
