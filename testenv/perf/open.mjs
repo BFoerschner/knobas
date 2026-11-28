@@ -120,7 +120,7 @@ const PLACES = [
   // A folder's runs (#2570): the scale estate's *Scale test › Payments*, twelve of its 91 pipelines, by its address from
   // Time. Its table waits for the pipeline list, which names the folder's pipelines.
   { name: "builds-folder", start: "#/time", go: "#/builds/folder/live-teamcity/Scale%20test/Payments", hash: "#/builds/folder/", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
-  { name: "recent-run", parent: "builds", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno, ${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
+  { name: "recent-run", parent: "builds", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno, ${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, backGo: "#/builds/recent" },
   // A run pressed on a repository's Builds tab (Björn, 2026-11-16: "click on the run … and open the build itself immediately"):
   // its cell is a link to the run on Builds, and `Esc` is back on the tab. A repository three pipelines built.
   { name: "repo-builds-run", parent: "code", start: "#/repo/live-gitea%3Ascale-data%2Fbi-dashboards/builds", press: `${shown} .tf-rbt a.tf-rbt-cell`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
