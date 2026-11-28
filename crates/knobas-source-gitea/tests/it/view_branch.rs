@@ -123,6 +123,8 @@ struct Served {
     /// `FIRST` on `FORK`, then `MERGE` of `FIRST` and `MERGED`, then `TIP`,
     /// so the range meets main at two commits.
     forgejo_merged_back: bool,
+    /// The compare JSON lists its commits oldest first, not newest first.
+    oldest_first: bool,
 }
 
 impl Default for Served {
@@ -147,6 +149,7 @@ impl Default for Served {
             forgejo_nothing_ahead: false,
             forgejo_parents: false,
             forgejo_merged_back: false,
+            oldest_first: false,
         }
     }
 }
@@ -239,7 +242,11 @@ async fn gitea(served: Served) -> MockServer {
         merge["parents"] = json!([{ "sha": FIRST }, { "sha": MERGED }]);
         let mut first = listed(FIRST, "PAY-231: retry", "2026-08-21T17:30:00Z", &[]);
         first["parents"] = json!([{ "sha": FORK }]);
-        json!({"total_commits": 3, "commits": [tip, merge, first], "files": []})
+        let mut commits = vec![tip, merge, first];
+        if served.oldest_first {
+            commits.reverse();
+        }
+        json!({"total_commits": 3, "commits": commits, "files": []})
     } else {
         json!({"total_commits": 2, "commits": [], "files": []})
     }
@@ -1216,12 +1223,24 @@ index 0000000..5786b13
 /// between the two tells (`total_commits` 0: nothing the other lacks). The
 /// diff is read from there: not from main's tip (every file main gained since
 /// drawn as deleted), and not from the fork (main's files the merge brought
-/// in drawn as the branch's).
+/// in drawn as the branch's). Whichever order the compare lists its commits.
 #[tokio::test]
 async fn a_forgejo_branch_that_merged_main_back_diffs_from_the_merged_commit() {
+    for oldest_first in [false, true] {
+        let paths = merged_back_diff(oldest_first).await;
+        assert_eq!(
+            paths,
+            ["src/retry.rs", "CHANGELOG.md"],
+            "the branch's own (oldest first: {oldest_first})"
+        );
+    }
+}
+
+async fn merged_back_diff(oldest_first: bool) -> Vec<String> {
     let server = gitea(Served {
         forgejo: Some(true),
         forgejo_merged_back: true,
+        oldest_first,
         ..Served::default()
     })
     .await;
@@ -1273,6 +1292,5 @@ index 5786b13..0000000
     let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
         panic!("a diff: {view:#?}");
     };
-    let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(paths, ["src/retry.rs", "CHANGELOG.md"], "the branch's own");
+    files.iter().map(|f| f.path.clone()).collect()
 }
