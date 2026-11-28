@@ -290,3 +290,163 @@ async fn a_compare_from_the_default_branch_lists_its_commits_in_its_range() {
         range.commits[0].meta
     );
 }
+
+/// A compare whose head merged its base back in (#2608) meets the base's
+/// history twice: where the head was cut (`FORK`) and the commit it merged
+/// (`MERGED`). The range starts at the merge base, the one the other is an
+/// ancestor of, which a compare between the two tells (`total_commits` 0).
+#[tokio::test]
+async fn a_head_that_merged_its_base_back_ranges_from_the_merged_commit() {
+    const FORK: &str = "2222222222222222222222222222222222222222";
+    const MERGED: &str = "3333333333333333333333333333333333333333";
+    const MERGE: &str = "4444444444444444444444444444444444444444";
+    const FIRST: &str = "5555555555555555555555555555555555555555";
+    let server = MockServer::builder().start().await;
+    let wire = format!("{REPO}/compare/main...feature");
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("output", "diff"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("files", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 3,
+            "commits": [
+                { "sha": HEAD, "parents": [{ "sha": MERGE }] },
+                { "sha": MERGE, "parents": [{ "sha": FIRST }, { "sha": MERGED }] },
+                { "sha": FIRST, "parents": [{ "sha": FORK }] }
+            ]
+        })))
+        .mount(&server)
+        .await;
+    for (from, to, total) in [(MERGED, FORK, 0), (FORK, MERGED, 1)] {
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO}/compare/{from}...{to}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "total_commits": total, "commits": [], "files": [] }),
+            ))
+            .mount(&server)
+            .await;
+    }
+    let view = source(&server)
+        .view(ENTITY, Some("compare:main...feature"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff");
+    };
+    let range = range.as_ref().expect("the merge base is asked, not missed");
+    assert_eq!((range.base.as_str(), range.head.as_str()), (MERGED, HEAD));
+}
+
+/// Serves `compare:main...feature` on Forgejo's terms: the diff, its commits
+/// `listing` (the head's first), and a compare between every two of `meets`
+/// that lists nothing exactly where the second is an ancestor of the first:
+/// `ancestor(a, b)` says whether `a` is one of `b`'s ancestors. The range the
+/// section draws.
+async fn ranged(
+    listing: serde_json::Value,
+    meets: &[&str],
+    ancestor: impl Fn(&str, &str) -> bool,
+) -> Option<knobas_source::view::DiffRange> {
+    let server = MockServer::builder().start().await;
+    let wire = format!("{REPO}/compare/main...feature");
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("output", "diff"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("files", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(listing))
+        .mount(&server)
+        .await;
+    for from in meets {
+        for to in meets.iter().filter(|to| *to != from) {
+            let total = if ancestor(to, from) { 0 } else { 1 };
+            Mock::given(method("GET"))
+                .and(path(format!("{REPO}/compare/{from}...{to}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "total_commits": total, "commits": [], "files": [] }),
+                ))
+                .mount(&server)
+                .await;
+        }
+    }
+    let view = source(&server)
+        .view(ENTITY, Some("compare:main...feature"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, range, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff");
+    };
+    assert_eq!(
+        paths_of(files),
+        ["src/retry.rs"],
+        "the diff is drawn either way"
+    );
+    range.clone()
+}
+
+/// A head that merged its base back in three times meets the base's history
+/// at four commits: where it was cut (`M0`) and each commit it merged
+/// (`M1` < `M2` < `M3`). The range starts at the latest, `M3`, whichever
+/// order the listing names them in: here `M2`, `M0`, `M3`, `M1`, so the one
+/// held is overtaken once and outlasts the others.
+#[tokio::test]
+async fn a_head_that_merged_its_base_back_three_times_ranges_from_the_last_merged_commit() {
+    const M: [&str; 4] = [
+        "a000000000000000000000000000000000000000",
+        "a100000000000000000000000000000000000000",
+        "a200000000000000000000000000000000000000",
+        "a300000000000000000000000000000000000000",
+    ];
+    const F1: &str = "b100000000000000000000000000000000000000";
+    const X: [&str; 3] = [
+        "c100000000000000000000000000000000000000",
+        "c200000000000000000000000000000000000000",
+        "c300000000000000000000000000000000000000",
+    ];
+    let listing = serde_json::json!({
+        "total_commits": 5,
+        "commits": [
+            { "sha": X[1], "parents": [{ "sha": X[0] }, { "sha": M[2] }] },
+            { "sha": F1, "parents": [{ "sha": M[0] }] },
+            { "sha": HEAD, "parents": [{ "sha": X[2] }] },
+            { "sha": X[2], "parents": [{ "sha": X[1] }, { "sha": M[3] }] },
+            { "sha": X[0], "parents": [{ "sha": F1 }, { "sha": M[1] }] }
+        ]
+    });
+    let index = |sha: &str| M.iter().position(|m| *m == sha).expect("a meeting point");
+    let range = ranged(listing, &M, |a, b| index(a) < index(b))
+        .await
+        .expect("the merge base is asked among all four");
+    assert_eq!((range.base.as_str(), range.head.as_str()), (M[3], HEAD));
+}
+
+/// A criss-cross: the head meets the base's history at two commits neither
+/// of which is the other's ancestor, so there is no single merge base to
+/// range from. The section draws its diff as read, with no range.
+#[tokio::test]
+async fn a_criss_cross_head_draws_its_diff_with_no_range() {
+    const A: &str = "a000000000000000000000000000000000000000";
+    const B: &str = "b000000000000000000000000000000000000000";
+    const FIRST: &str = "5555555555555555555555555555555555555555";
+    const MERGE: &str = "4444444444444444444444444444444444444444";
+    let listing = serde_json::json!({
+        "total_commits": 3,
+        "commits": [
+            { "sha": HEAD, "parents": [{ "sha": MERGE }] },
+            { "sha": MERGE, "parents": [{ "sha": FIRST }, { "sha": B }] },
+            { "sha": FIRST, "parents": [{ "sha": A }] }
+        ]
+    });
+    assert_eq!(ranged(listing, &[A, B], |_, _| false).await, None);
+}

@@ -8276,3 +8276,186 @@ async fn the_archive_hands_over_every_blob_of_the_tree() {
     assert!(!blobs.is_empty());
     assert_eq!(handed, blobs);
 }
+
+/// **A branch that merged its base back in** (#2608), in a scratch
+/// repository of its own: `feature` is cut from `main` at `base.txt`, adds
+/// `feature-1.txt`, merges `main` (which gained `main-2.txt`) back in, adds
+/// `feature-2.txt`, and `main` then gains `main-3.txt`. The branch's own
+/// changes are its two files. The branch's Diff tab and the repository's
+/// `compare:main...feature` section draw just those: not `main-3.txt` as deleted (a two-dot diff from
+/// main's tip, what Forgejo's web route serves), and not `main-2.txt` as
+/// added (a diff from where the branch was cut). The repository is removed
+/// first, in case a killed run left it, and afterwards by [`ScratchRepo`],
+/// also when the test panics partway.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
+    use knobas_source::view::{Block, DiffChange};
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let (admin, password) = TESTENV_ADMIN;
+    let scratch = "knobas-live-merged-back";
+    let full_name = format!("{}/{scratch}", env.owner);
+    drop(ScratchRepo {
+        api: api.clone(),
+        full_name: full_name.clone(),
+    });
+    let scratch_repo = ScratchRepo {
+        api: api.clone(),
+        full_name: full_name.clone(),
+    };
+    // Public: Forgejo serves its web diff to a token for a public
+    // repository only (measured on 17.0.0).
+    let created = http
+        .post(format!("{api}/orgs/{}/repos", env.owner))
+        .basic_auth(admin, Some(password))
+        .json(&serde_json::json!({
+            "name": scratch, "auto_init": true, "default_branch": "main", "private": false
+        }))
+        .send()
+        .await
+        .expect("POST /orgs/{owner}/repos");
+    assert!(
+        created.status().is_success(),
+        "create the repository: {}",
+        created.status()
+    );
+
+    let dir = std::env::temp_dir().join(format!("knobas-live-merged-back-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let remote = env
+        .url
+        .replacen("://", &format!("://{admin}:{password}@"), 1)
+        + &format!("/{full_name}.git");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=knobas",
+                "-c",
+                "user.email=knobas@tidewater.example",
+            ])
+            .args(args)
+            .current_dir(if args[0] == "clone" {
+                std::env::temp_dir()
+            } else {
+                dir.clone()
+            })
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let commit = |file: &str| {
+        std::fs::write(dir.join(file), format!("{file}\n")).expect("write the file");
+        git(&["add", file]);
+        git(&["commit", "-q", "-m", &format!("knobas live: {file}")]);
+    };
+    git(&["clone", "-q", &remote, dir.to_str().expect("a UTF-8 path")]);
+    commit("base.txt");
+    git(&["checkout", "-q", "-b", "feature"]);
+    commit("feature-1.txt");
+    git(&["checkout", "-q", "main"]);
+    commit("main-2.txt");
+    git(&["checkout", "-q", "feature"]);
+    git(&["merge", "-q", "--no-ff", "--no-edit", "main"]);
+    commit("feature-2.txt");
+    git(&["checkout", "-q", "main"]);
+    commit("main-3.txt");
+    git(&["push", "-q", "origin", "main", "feature"]);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let source = env.source(serde_json::json!({ "repos": [full_name] }));
+    let branch = format!("gitea:{full_name}@refs/heads/feature");
+    let repository = format!("gitea:{full_name}");
+    let mut drawn = Vec::new();
+    for (id, section) in [(&branch, "diff"), (&repository, "compare:main...feature")] {
+        let view = source.view(id, Some(section)).await;
+        let files = match &view {
+            Ok(Some(view)) => match view.sections.first().and_then(|s| s.blocks.first()) {
+                Some(Block::Diff { files, .. }) => Some(
+                    files
+                        .iter()
+                        .map(|f| (f.change, f.path.clone()))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            },
+            _ => None,
+        };
+        let count = view
+            .as_ref()
+            .ok()
+            .and_then(|v| v.as_ref())
+            .and_then(|v| v.sections.first())
+            .and_then(|s| s.count);
+        println!("merged back  {section}: count {count:?}, files {files:?}");
+        drawn.push((
+            section,
+            files,
+            view.map(|_| ()).map_err(|e| format!("{e:?}")),
+        ));
+    }
+    drop(scratch_repo);
+
+    let own = Some(vec![
+        (DiffChange::Added, "feature-1.txt".to_owned()),
+        (DiffChange::Added, "feature-2.txt".to_owned()),
+    ]);
+    for (section, files, read) in drawn {
+        assert_eq!(read, Ok(()), "{section} is read");
+        assert_eq!(files, own, "{section} draws the branch's own files only");
+    }
+}
+
+/// A scratch repository the test removes from `Drop`, so a run that panics
+/// partway leaves nothing behind (*The failure path is the success path*,
+/// above). The removal is read back: the repository must answer 404.
+struct ScratchRepo {
+    api: String,
+    full_name: String,
+}
+
+impl Drop for ScratchRepo {
+    fn drop(&mut self) {
+        let (api, full_name) = (self.api.clone(), self.full_name.clone());
+        knobas_live_cleanup::Cleanup::new(
+            "the live suite did not remove its scratch repository",
+            format!("{full_name} may still be standing; the test removes it first on its next run"),
+        )
+        .within(std::time::Duration::from_secs(60))
+        .run(move || async move {
+            let (admin, password) = TESTENV_ADMIN;
+            let http = reqwest::Client::builder()
+                .timeout(live_env::REQUEST_BUDGET)
+                .build()
+                .map_err(|error| format!("a client: {error}"))?;
+            let url = format!("{api}/repos/{full_name}");
+            let _ = http
+                .delete(&url)
+                .basic_auth(admin, Some(password))
+                .send()
+                .await;
+            let status = http
+                .get(&url)
+                .basic_auth(admin, Some(password))
+                .send()
+                .await
+                .map_err(|error| format!("GET {url}: {error}"))?
+                .status();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                Ok(())
+            } else {
+                Err(format!("GET {url} answered {status} after its DELETE"))
+            }
+        });
+    }
+}
