@@ -50,13 +50,26 @@ export const RAIL_RUNS = 12;
  * A pipeline's runs as the rail reads them (#2571), the backend's `RailPipeline::from` over the same runs: of the first
  * {@link RAIL_RUNS} (newest first as the mirror answers them), the latest by {@link runMade}, then every other one still in
  * flight; and the mirrored commits they built, each once, newest first. What the glyph, the time, *Failing*, *Running*
- * and *By repository* read, so a pipeline's runs read again lay into its row as the list's read laid it.
+ * and *By repository* read, so a pipeline's runs read again lay into its row as the list's read laid it. Held to the
+ * Rust by `rail-twin.json`.
  */
 export function railRuns(runs: readonly RunRow[]): Pick<RailPipeline, "recent" | "commits"> {
   const [latest, ...rest] = newestFirst(runs.slice(0, RAIL_RUNS));
   const commits = [...new Set([latest, ...rest].flatMap((run) => (run?.commit_id == null ? [] : [run.commit_id])))];
   const recent = latest === undefined ? [] : [latest, ...rest.filter((run) => run.started !== null && run.finished === null)];
   return { recent, commits };
+}
+
+/**
+ * A rail row with its pipeline's runs read again laid in (a run's refresh, #2571): its runs as {@link railRuns} lays them,
+ * and `unread` holding the failures of the first {@link RAIL_RUNS} besides what the list named. A run that failed after
+ * the list was read and is no longer the latest leaves `recent`, so the right-click's *Mark N runs as read* counts it
+ * through `unread` until the list's next read, as it counted it through the strip before; {@link unreadRunsOf} keeps the
+ * window's marks out of it.
+ */
+export function relaid<P extends RailPipeline>(pipeline: P, runs: readonly RunRow[]): P {
+  const failed = runs.slice(0, RAIL_RUNS).filter(failedRun).map((run) => run.entity_id);
+  return { ...pipeline, ...railRuns(runs), unread: [...new Set([...failed, ...pipeline.unread])] };
 }
 
 /** A whole list row as the rail's read answers it: the dev fake's `rail_pipelines`. */
@@ -359,8 +372,8 @@ export function foldPipelines(f: Fold): PipelineRow[] {
  * The unread failed runs of `pipelines` over their whole history (#2543): what a right-click's *Mark N runs as read*
  * counts, and what its press, which marks by pipeline, draws read at once. Each pipeline's `unread` is what the backend
  * named as the list was read; `read`, the window's marks, keeps it fresh across every mark since, and a run the rail
- * reads (its latest, #2571) counts by its own row, so a failure a run's refresh brought counts before the list is read
- * again. Newest first.
+ * reads (its latest, #2571) counts by its own row. A failure a run's refresh brought counts before the list is read
+ * again: by its row while it is the latest, else through the `unread` that {@link relaid} adds it to. Newest first.
  */
 export function unreadRunsOf(pipelines: readonly Pick<PipelineRow, "recent" | "unread">[], read: ReadonlySet<string> | null): string[] {
   return pipelines.flatMap((p) => {

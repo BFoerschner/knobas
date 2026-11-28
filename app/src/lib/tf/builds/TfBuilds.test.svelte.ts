@@ -917,6 +917,10 @@ test("a run in flight under a newer one still moves its row: its end reads the r
   await settle();
   expect(reads, "its row's runs, read again").toBeGreaterThan(before);
   expect(names(), "nothing in flight: Running keeps none").toEqual([]);
+  // Its failure is no longer the latest, yet the right-click counts it before the list is read again.
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!.click();
+  flushSync();
+  expect(thingAt(lint().querySelector(".tf-pi-nm"))?.thing).toMatchObject({ kind: "pipeline", unread: ["teamcity:build:900"] });
   forgetEchoes();
 });
 

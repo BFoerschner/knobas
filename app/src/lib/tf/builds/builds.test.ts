@@ -28,11 +28,14 @@ import {
   recentNewestFirst,
   railOf,
   railRuns,
+  relaid,
   RAIL_RUNS,
   asksAttention,
   failedRun,
   unreadRun,
+  unreadRunsOf,
 } from "./builds";
+import twin from "./rail-twin.json";
 
 function run(extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -294,6 +297,37 @@ test("the rail's read names the commits a pipeline's last twelve runs built, eac
   const thirteen = [...Array.from({ length: RAIL_RUNS }, (_, i) => built(`r${i}`, 20 - i, "same")), built("old", 1, "older")];
   expect(railRuns(thirteen).commits).toEqual(["same"]);
   expect(railRuns([])).toEqual({ recent: [], commits: [] });
+});
+
+test("the twin holds to the Rust: the shared cases of rail-twin.json (#2571)", () => {
+  expect(RAIL_RUNS).toBe(twin.rail_runs);
+  for (const c of twin.cases) {
+    const runs = c.runs.map((r) => run({ entity_id: r.id, started: r.started, finished: r.finished, updated_at: r.updated, commit_id: r.commit }));
+    const laid = railRuns(runs);
+    expect(laid.recent.map((r) => r.entity_id), c.name).toEqual(c.recent);
+    expect(laid.commits, c.name).toEqual(c.commits);
+  }
+});
+
+test("a run's refresh lays the rail's runs into the row and keeps its failures for the right-click (#2571)", () => {
+  const at = (h: number) => `2026-08-22T${String(h).padStart(2, "0")}:00:00Z`;
+  const listed = railOf(
+    pipeline("P", [
+      run({ entity_id: "newer", started: at(11), finished: at(11), updated_at: at(11) }),
+      run({ entity_id: "stuck", started: at(9), finished: null, updated_at: at(9), state: { text: "running", tone: "info" } }),
+    ], { unread: ["old-failure"] }),
+  );
+  // The run in flight failed after the list was read, under a newer pass: no longer the latest, still unread.
+  const reread = [
+    run({ entity_id: "newer", started: at(11), finished: at(11), updated_at: at(11) }),
+    run({ entity_id: "stuck", started: at(9), finished: at(10), updated_at: at(10), state: { text: "FAILURE", tone: "err" } }),
+  ];
+  const row = relaid(listed, reread);
+  expect(row.recent.map((r) => r.entity_id)).toEqual(["newer"]);
+  expect(row.unread).toEqual(["stuck", "old-failure"]);
+  expect(unreadRunsOf([row], new Set())).toEqual(["stuck", "old-failure"]);
+  expect(unreadRunsOf([row], new Set(["stuck"])), "a mark keeps it out").toEqual(["old-failure"]);
+  expect(relaid(row, reread).unread, "read again, each once").toEqual(["stuck", "old-failure"]);
 });
 
 test("a folder's pipelines share the prefix they all start with, cut at a separator, never a whole name", () => {

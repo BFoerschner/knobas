@@ -133,7 +133,7 @@
     foldOpen,
     groupsOf,
     recentNewestFirst,
-    railRuns,
+    relaid,
     asksAttention,
     unreadRunsOf,
     namesEvery,
@@ -259,8 +259,8 @@
 
   /**
    * A pipeline's row read again when a run it draws moved, or a run queued on it here was read back (the TeamCity run
-   * fix, 2026-11-25): its runs alone, laid into its row as the rail's read lays them (`railRuns`), not the whole list. At once on the
-   * first, then at most once in `RAIL_AGAIN_MS`, the last always read.
+   * fix, 2026-11-25): its runs alone, laid into its row as the rail's read lays them (`relaid`), not the whole list. At
+   * once on the first, then at most once in `RAIL_AGAIN_MS`, the last always read.
    */
   const RAIL_AGAIN_MS = 5_000;
   let railReadAt = 0;
@@ -289,7 +289,7 @@
     }
     // A read of the whole list since answers for this row too.
     if (at !== listReads || all === null) return;
-    all = all.map((p) => (p.entity_id === pipelineId ? { ...p, ...railRuns(rows) } : p));
+    all = all.map((p) => (p.entity_id === pipelineId ? relaid(p, rows) : p));
   }
   /** The listed pipeline whose run the refresh that ended moved, or on which it read back a run queued here; `null` for none. */
   function movedPipeline(ended: RefreshEnded): string | null {
