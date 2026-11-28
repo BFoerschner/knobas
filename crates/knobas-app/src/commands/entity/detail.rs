@@ -651,9 +651,9 @@ mod tests {
 
     /// Per kind, not per adapter (#2146): TeamCity reads a build by id and a
     /// build configuration with its newest builds (#2564, ADR-0047 as amended
-    /// 2026-11-27), so both details draw *Refresh*; Jira's saved view draws
-    /// *Sync now* from the start. A kind the adapter does not declare is not
-    /// refreshed either.
+    /// 2026-11-27), so both details draw *Refresh*; so does Jira's saved
+    /// view, read by its key since #2593. A kind the adapter does not declare
+    /// is not refreshed.
     #[test]
     fn can_refresh_is_the_kinds_declaration() {
         assert!(refreshes(&registry(), Some("teamcity"), "build"));
@@ -663,7 +663,7 @@ mod tests {
         for kind in ["repo", "branch", "commit"] {
             assert!(refreshes(&registry(), Some("gitea"), kind), "gitea {kind}");
         }
-        assert!(!refreshes(&registry(), Some("jira"), "jira_view"));
+        assert!(refreshes(&registry(), Some("jira"), "jira_view"));
         assert!(!refreshes(&registry(), Some("mock"), "no-such-kind"));
     }
 
@@ -697,7 +697,7 @@ mod tests {
             })
             .collect();
         assert!(
-            !fake.is_empty(),
+            !fake.is_empty() || !body.contains("new Set("),
             "no entries read from NOT_REFRESHED:\n{body}"
         );
         let declared: BTreeMap<String, BTreeSet<String>> = registry()

@@ -200,10 +200,10 @@ const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "
  * answers `refreshes` for the row's kind, not the adapter. Held to the
  * templates by knobas-app's `the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`. Gitea reads every kind since
  * ADR-0047: a repository, a branch and a commit by walking their repository; TeamCity since #2564: a build
- * configuration by walking its newest builds.
+ * configuration by walking its newest builds; Jira since #2593: a board or filter by its key.
  */
 const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {
-  jira: new Set(["jira_view"]),
+  // None: every refreshing adapter reads every kind it declares.
 };
 
 /** Whether `adapterKind`'s refresh reads an item of `kind`. */

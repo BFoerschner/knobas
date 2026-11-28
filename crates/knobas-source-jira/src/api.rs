@@ -113,6 +113,11 @@ pub(crate) trait JiraApi: Send + Sync {
     ) -> Result<crate::views::BoardPage, SourceError> {
         Err(no_agile())
     }
+    /// `GET rest/agile/1.0/board/{id}`: one board as the listing names it,
+    /// for a view read by its key (#2593).
+    async fn board(&self, _board: u64) -> Result<crate::views::Board, SourceError> {
+        Err(no_agile())
+    }
     /// `GET rest/agile/1.0/board/{id}/configuration`.
     async fn board_configuration(
         &self,
@@ -296,6 +301,10 @@ impl JiraApi for crate::http::HttpClient {
 
     async fn favourite_filters(&self) -> Result<Vec<crate::views::FavouriteFilter>, SourceError> {
         get_json(self, "rest/api/2/filter/favourite", &[]).await
+    }
+
+    async fn board(&self, board: u64) -> Result<crate::views::Board, SourceError> {
+        get_json(self, &format!("rest/agile/1.0/board/{board}"), &[]).await
     }
 
     async fn board_configuration(

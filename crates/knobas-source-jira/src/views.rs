@@ -116,11 +116,18 @@ pub(crate) struct Sprint {
     pub end_date: Option<String>,
 }
 
-/// `GET rest/api/2/filter/{id}`, the part read.
-#[derive(Debug, Clone, Deserialize)]
+/// `GET rest/api/2/filter/{id}`, the parts read: a board's filter gives its
+/// JQL; a favourite filter read by its key (#2593) gives what the favourites
+/// listing gives for it, the same record.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Filter {
     #[serde(default)]
     pub jql: String,
+    pub name: Option<String>,
+    pub view_url: Option<String>,
+    /// Whether this account holds it as a favourite.
+    pub favourite: Option<bool>,
 }
 
 /// One entry of `GET rest/api/2/filter/favourite` (#878), the parts read.
@@ -641,6 +648,149 @@ pub(crate) fn gone(source_id: &str, key: &str) -> knobas_source::SyncItem {
     }
 }
 
+/// Whether an item key names a view: `board-<id>` or `filter-<id>`.
+pub(crate) fn is_view(key: &str) -> bool {
+    ["board-", "filter-"].iter().any(|prefix| {
+        key.strip_prefix(prefix)
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
+/// One view read by its key (#2593), the way a run reads it now, through
+/// the same reads and the same mappers, so the item is the one a run emits.
+/// `None` for a view a run would leave out: gone from Jira, one this account
+/// may no longer read or Jira can no longer run, a filter no longer a
+/// favourite, or one the *Boards and filters* setting no longer brings in.
+/// A board read refused with 403 is an error, not gone: it is what a Jira
+/// Software that refuses this account answers (#2374).
+async fn read_one(
+    api: &(dyn JiraApi + '_),
+    cfg: &crate::JiraConfig,
+    base_url: &str,
+    key: &str,
+) -> Result<Option<JiraView>, SourceError> {
+    let left_out = |error: &SourceError| not_readable(error) || error.status() == Some(400);
+    if let Some(id) = key.strip_prefix("board-") {
+        let Ok(id) = id.parse::<u64>() else {
+            return Ok(None);
+        };
+        if cfg.boards == BoardScope::None {
+            return Ok(None);
+        }
+        let board = match api.board(id).await {
+            Ok(board) => board,
+            Err(error) if error.status() == Some(404) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let only: Option<std::collections::HashSet<String>> =
+            if cfg.boards == BoardScope::Favourites {
+                let favourites = match api.favourite_filters().await {
+                    Ok(favourites) => favourites,
+                    Err(error) if error.status() == Some(404) => Vec::new(),
+                    Err(error) => return Err(error),
+                };
+                Some(favourites.iter().map(FavouriteFilter::id).collect())
+            } else {
+                None
+            };
+        let names: std::collections::HashMap<String, String> = api
+            .statuses()
+            .await?
+            .into_iter()
+            .map(|status| (status.id, status.name))
+            .collect();
+        return match one(api, base_url, &board, &names, only.as_ref()).await {
+            Ok(view) => Ok(view),
+            Err(error) if left_out(&error) => Ok(None),
+            Err(error) => Err(error),
+        };
+    }
+    let Some(id) = key.strip_prefix("filter-") else {
+        return Ok(None);
+    };
+    if !cfg.favourite_filters {
+        return Ok(None);
+    }
+    let filter = match api.filter(id).await {
+        Ok(filter) if filter.favourite != Some(false) => filter,
+        Ok(_) => return Ok(None),
+        Err(error) if not_readable(&error) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let favourite = FavouriteFilter {
+        id: Value::String(id.to_owned()),
+        name: filter.name.unwrap_or_default(),
+        jql: filter.jql,
+        view_url: filter.view_url,
+    };
+    match filter_view(api, base_url, &favourite).await {
+        Ok(view) => Ok(Some(view)),
+        Err(error) if left_out(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// A view walked as the parent of the tickets it holds (#2593, ADR-0047 as
+/// amended): read by its key, and its position, the fingerprint the cursor
+/// keeps of what was delivered for it, moved with it. The fingerprint is the
+/// run's change gate for a view, so a view written past an unmoved one would
+/// be judged against it: a board that went back to what the cursor holds
+/// would never be delivered again. The ticket watermark, the overlap, the
+/// board stamp and every other view's position stay as they are.
+///
+/// A view whose fingerprint the cursor already holds walks to nothing. One a
+/// run would leave out walks to its tombstone and leaves the position. No
+/// cursor, or one this build cannot read, is `NotOffered`: a full sync is
+/// owed, as for every walk.
+///
+/// The search index lags a write by seconds. A landed write reads its ticket
+/// back first (`crate::refresh`), which waits until the index holds the
+/// ticket as written, and its views after that (ADR-0064), so the keys
+/// searched here are the written ticket's.
+pub(crate) async fn walk(
+    api: &(dyn JiraApi + '_),
+    cfg: &crate::JiraConfig,
+    source_id: &str,
+    base_url: &str,
+    key: &str,
+    cursor: Option<&str>,
+) -> Result<knobas_source::UnderAnswer, SourceError> {
+    let position = cursor.and_then(crate::cursor::JiraCursor::parse);
+    let (true, Some(mut position)) = (is_view(key), position) else {
+        return Ok(knobas_source::UnderAnswer::NotOffered);
+    };
+    let held = position.views.iter().position(|seen| seen.k == key);
+    let (item, moved) = match read_one(api, cfg, base_url, key).await? {
+        Some(view) => {
+            let seen = crate::cursor::SeenView {
+                k: key.to_owned(),
+                h: knobas_source::fingerprint::of(&view.payload),
+            };
+            match held {
+                Some(at) if position.views[at] == seen => {
+                    return Ok(knobas_source::UnderAnswer::Walked {
+                        items: Vec::new(),
+                        cursor: None,
+                    });
+                }
+                Some(at) => position.views[at] = seen,
+                None => position.views.push(seen),
+            }
+            (item(source_id, &view), true)
+        }
+        None => {
+            if let Some(at) = held {
+                position.views.remove(at);
+            }
+            (gone(source_id, key), held.is_some())
+        }
+    };
+    Ok(knobas_source::UnderAnswer::Walked {
+        items: vec![item],
+        cursor: moved.then(|| position.encode()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,6 +837,9 @@ mod tests {
         board_pages: std::sync::atomic::AtomicU32,
         /// Jira Software refuses the account: an expired licence (#2374).
         software_refused: bool,
+        /// Filters this account can still read but no longer holds as a
+        /// favourite: `(id, name, jql, keys)`.
+        unfavoured: Vec<(u64, &'static str, &'static str, Vec<&'static str>)>,
     }
 
     impl Agile {
@@ -843,10 +996,28 @@ mod tests {
             ] })).unwrap())
         }
         async fn filter(&self, id: &str) -> Result<Filter, SourceError> {
+            let held = |filters: &[(u64, &str, &str, Vec<&str>)], favourite: bool| {
+                filters.iter().find(|f| f.0.to_string() == id).map(|f| {
+                    serde_json::from_value(json!({
+                        "id": id, "name": f.1, "jql": f.2,
+                        "viewUrl": format!("https://jira.example/issues/?filter={id}"),
+                        "favourite": favourite,
+                    }))
+                    .unwrap()
+                })
+            };
+            if let Some(filter) = held(&self.favourites, true).or(held(&self.unfavoured, false)) {
+                return Ok(filter);
+            }
             let board_id: u64 = id.parse::<u64>().unwrap() - 100;
             Ok(Filter {
                 jql: self.board(board_id).ok_or_else(not_found)?.3.to_owned(),
+                ..Filter::default()
             })
+        }
+        async fn board(&self, id: u64) -> Result<Board, SourceError> {
+            let b = self.board(id).ok_or_else(not_found)?;
+            Ok(serde_json::from_value(json!({ "id": b.0, "name": b.1, "type": b.2 })).unwrap())
         }
         async fn statuses(&self) -> Result<Vec<Status>, SourceError> {
             Ok(["To Do", "In Progress", "In Review", "Done"]
@@ -1384,5 +1555,142 @@ mod tests {
         let pages = api.key_pages.lock().unwrap();
         assert!(!pages.is_empty());
         assert!(pages.iter().all(|&max| max == 1000), "{pages:?}");
+    }
+
+    // ---- one view read by its key (#2593, ADR-0047's walk of one parent) ----
+
+    /// A view's walk from `cursor`, as `Source::refresh_under` asks it.
+    async fn walk_of(
+        api: &Agile,
+        cfg: &crate::JiraConfig,
+        key: &str,
+        cursor: Option<&str>,
+    ) -> knobas_source::UnderAnswer {
+        walk(api, cfg, "jira", "https://jira.example/", key, cursor)
+            .await
+            .expect("the walk succeeds")
+    }
+
+    fn walked(answer: knobas_source::UnderAnswer) -> (Vec<knobas_source::SyncItem>, Option<String>) {
+        match answer {
+            knobas_source::UnderAnswer::Walked { items, cursor } => (items, cursor),
+            knobas_source::UnderAnswer::NotOffered => panic!("the view was not walked"),
+        }
+    }
+
+    /// What a run from nothing emits for `key` over `api` as it stands now.
+    async fn as_a_run_emits(
+        api: &Agile,
+        cfg: &crate::JiraConfig,
+        key: &str,
+    ) -> knobas_source::SyncItem {
+        let (items, _) = sync_with(api, cfg, None).await;
+        items
+            .into_iter()
+            .find(|item| item.entity.key == key)
+            .expect("the run emits the view")
+    }
+
+    fn same_item(read: &knobas_source::SyncItem, run: &knobas_source::SyncItem) {
+        assert_eq!(read.entity, run.entity);
+        assert_eq!(read.kind, run.kind);
+        assert_eq!(read.title, run.title);
+        assert_eq!(read.payload, run.payload);
+        assert_eq!(read.web_url, run.web_url);
+        assert_eq!(read.deleted, run.deleted);
+    }
+
+    /// **A board whose query a transition left reads back without a run**:
+    /// the Kanban board's walk emits the item a run would emit for it now,
+    /// and moves that board's position alone, so the next board read finds
+    /// it delivered and the ticket watermark and the board stamp stay.
+    #[tokio::test]
+    async fn a_boards_walk_emits_the_item_a_run_emits_and_moves_only_its_position() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        api.boards[1].6 = vec!["WEB-5", "PAY-240"]; // PAY-231 went to Done
+        let (items, cursor) = walked(walk_of(&api, &cfg(), "board-22", Some(&first)).await);
+        assert_eq!(items.len(), 1, "{items:?}");
+        same_item(&items[0], &as_a_run_emits(&api, &cfg(), "board-22").await);
+        assert_eq!(items[0].payload["keys"], json!(["WEB-5", "PAY-240"]));
+
+        let moved = crate::cursor::JiraCursor::parse(&cursor.expect("the position moves")).unwrap();
+        let before = crate::cursor::JiraCursor::parse(&first).unwrap();
+        assert_eq!(moved.updated_to, before.updated_to);
+        assert_eq!(moved.seen, before.seen);
+        assert_eq!(moved.board_read, before.board_read);
+        assert_eq!(moved.scope, before.scope);
+        assert_eq!(moved.views[0], before.views[0], "board 21's position stays");
+        assert_ne!(moved.views[1], before.views[1]);
+
+        api.clock_minutes = 120; // an hour on: the boards are read again
+        let (again, _) = sync(&api, Some(moved.encode())).await;
+        assert!(again.is_empty(), "the run finds the walked board delivered: {again:?}");
+    }
+
+    /// From the position a run just left, a board nothing changed on walks
+    /// to nothing and moves nothing (battery clause 13).
+    #[tokio::test]
+    async fn a_walk_of_an_unchanged_board_emits_nothing_and_leaves_the_position() {
+        let api = seeded();
+        let (_, first) = sync(&api, None).await;
+        let (items, cursor) = walked(walk_of(&api, &cfg(), "board-21", Some(&first)).await);
+        assert!(items.is_empty(), "{items:?}");
+        assert_eq!(cursor, None);
+    }
+
+    /// A board deleted in Jira walks to its tombstone, and leaves the
+    /// position, so the next board read does not deliver it gone again.
+    #[tokio::test]
+    async fn a_board_gone_from_jira_walks_to_its_tombstone() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        api.boards.remove(0);
+        let (items, cursor) = walked(walk_of(&api, &cfg(), "board-21", Some(&first)).await);
+        assert_eq!(keys_of(&items), [("board-21", true)]);
+        let moved = crate::cursor::JiraCursor::parse(&cursor.expect("the position moves")).unwrap();
+        assert!(moved.views.iter().all(|seen| seen.k != "board-21"));
+
+        api.clock_minutes = 120;
+        let (again, _) = sync(&api, Some(moved.encode())).await;
+        assert!(again.is_empty(), "gone once: {again:?}");
+    }
+
+    /// **A filter keyed on the assignee reads back without a run**: the
+    /// favourite filter's walk emits what a run emits for it now.
+    #[tokio::test]
+    async fn a_favourite_filters_walk_emits_the_item_a_run_emits() {
+        let mut api = with_favourites();
+        let (_, first) = sync(&api, None).await;
+        api.favourites[0].3 = vec!["PAY-240", "WEB-9", "PAY-231", "PAY-250"];
+        let (items, cursor) = walked(walk_of(&api, &cfg(), "filter-10300", Some(&first)).await);
+        assert_eq!(items.len(), 1, "{items:?}");
+        same_item(&items[0], &as_a_run_emits(&api, &cfg(), "filter-10300").await);
+        assert!(cursor.is_some());
+    }
+
+    /// A filter this account no longer holds as a favourite is one a run
+    /// would deliver gone, and so is the walk's answer.
+    #[tokio::test]
+    async fn a_filter_no_longer_a_favourite_walks_to_its_tombstone() {
+        let mut api = with_favourites();
+        let (_, first) = sync(&api, None).await;
+        api.unfavoured.push(api.favourites.remove(0));
+        let (items, _) = walked(walk_of(&api, &cfg(), "filter-10300", Some(&first)).await);
+        assert_eq!(keys_of(&items), [("filter-10300", true)]);
+    }
+
+    /// No position, no walk (ADR-0047): the app runs the source.
+    #[tokio::test]
+    async fn a_view_with_no_position_to_walk_from_is_not_offered() {
+        let api = seeded();
+        assert!(matches!(
+            walk_of(&api, &cfg(), "board-21", None).await,
+            knobas_source::UnderAnswer::NotOffered
+        ));
+        assert!(matches!(
+            walk_of(&api, &cfg(), "board-21", Some("not a cursor")).await,
+            knobas_source::UnderAnswer::NotOffered
+        ));
     }
 }
