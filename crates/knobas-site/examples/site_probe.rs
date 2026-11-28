@@ -110,9 +110,13 @@ fn recorded(kind: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
 
 // ------------------------------------------------------------------ the site
 
+/// The field check 7 types into opts out of macOS's inline predictive text
+/// (`writingsuggestions="false"`, #2550): with it on, the `x` typed first
+/// draws a suggestion, and the first Esc dismisses it inside AppKit before
+/// any local monitor sees the key, so the hook's count started at the second.
 const PAGE: &str = r#"<!doctype html><meta charset="utf-8"><title>probe site</title>
 <body style="font:14px system-ui;background:#fff;margin:24px">
-<h1 id="h">site page</h1><input id="f" placeholder="site field">
+<h1 id="h">site page</h1><input id="f" placeholder="site field" writingsuggestions="false">
 <a id="blank" href="/page?name=blank-target" target="_blank">target blank</a>
 <script>
 const q = new URLSearchParams(location.search); const name = q.get('name') || '';
