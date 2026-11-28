@@ -677,7 +677,12 @@ mod tests {
     #[tokio::test]
     async fn a_folder_past_twenty_thousand_entries_is_answered_whole() {
         let (dir, sha) = big_repo();
-        let tree = tree(dir.path(), &sha).await.expect("the tree reads");
+        // Read without `tree`'s ten-second wait: on a loaded gate 25,300
+        // entries ran past it (PR #2614's gate), and the wait is not what
+        // this holds.
+        let tree = read_tree(&Reader::at(dir.path()), &sha)
+            .await
+            .expect("the tree reads");
         assert!(!tree.truncated);
         let z = listing(&tree, "z", None).expect("z is there");
         assert!(z.complete);
