@@ -8,9 +8,10 @@ use knobas_source::SourceError;
 use super::{API_ROOT, GiteaClient, page_params, segment};
 
 /// The most places a range may meet its base's history for the merge base to
-/// be asked among them, at up to `n × (n − 1)` compares (#2608). A branch
-/// that merged its base back in meets it at two.
-const MEETS_ASKED: usize = 3;
+/// be asked among them, at up to `2 × (n − 1)` compares (#2608). A branch
+/// that merged its base back in once meets it at two, and at one more for
+/// each further merge-back of a later base commit.
+const MEETS_ASKED: usize = 8;
 
 /// The most bytes of one repository's archive spooled: past it the read stops.
 pub(crate) const ARCHIVE_STOP: u64 = 4 << 30;
@@ -323,40 +324,50 @@ impl GiteaClient {
 
     /// The one of `commits` every other is an ancestor of: where a range
     /// meets its base's history, the merge base (#2608). One is that one
-    /// with no read. Otherwise a compare `{a}...{b}` with nothing listed
-    /// says `b` is an ancestor of `a`, so one or two reads settle the usual
-    /// two (where a branch was cut, and the base commit it merged back in).
-    /// `None` when none is (a criss-cross merge has no single merge base),
-    /// when there are more than [`MEETS_ASKED`], or when a compare fails.
+    /// with no read. Otherwise the latest so far is held against each next
+    /// one: one read when it stays, two when the next one takes over. Being
+    /// an ancestor is transitive, so the one held at the end has every other
+    /// below it. The usual two (where a branch was cut, and the base commit
+    /// it merged back in) cost one or two reads, each further merge-back one
+    /// or two more. `None` when two are not in line (a criss-cross merge has
+    /// no single merge base), when there are more than [`MEETS_ASKED`], or
+    /// when a compare fails.
     pub(crate) async fn latest_of(
         &self,
         owner: &str,
         repo: &str,
         commits: &[String],
     ) -> Option<String> {
+        let (first, rest) = commits.split_first()?;
+        if commits.len() > MEETS_ASKED {
+            return None;
+        }
+        let mut latest = first;
+        for other in rest {
+            if self.is_ancestor(owner, repo, other, latest).await? {
+                continue;
+            }
+            if !self.is_ancestor(owner, repo, latest, other).await? {
+                return None;
+            }
+            latest = other;
+        }
+        Some(latest.clone())
+    }
+
+    /// Whether `older` is an ancestor of `newer` (or is it): the compare
+    /// `{newer}...{older}` lists nothing `newer` lacks. `None` when the
+    /// compare fails.
+    async fn is_ancestor(&self, owner: &str, repo: &str, older: &str, newer: &str) -> Option<bool> {
         #[derive(serde::Deserialize)]
         struct Ahead {
             total_commits: Option<u64>,
         }
-        if let [only] = commits {
-            return Some(only.clone());
-        }
-        if commits.len() > MEETS_ASKED {
-            return None;
-        }
-        'candidates: for latest in commits {
-            for other in commits.iter().filter(|c| *c != latest) {
-                let ahead = self
-                    .compare_commits::<Ahead>(owner, repo, latest, other)
-                    .await
-                    .ok()?;
-                if ahead.total_commits != Some(0) {
-                    continue 'candidates;
-                }
-            }
-            return Some(latest.clone());
-        }
-        None
+        let ahead = self
+            .compare_commits::<Ahead>(owner, repo, newer, older)
+            .await
+            .ok()?;
+        Some(ahead.total_commits == Some(0))
     }
 
     /// How many commits `sha` has that `not` does not, by Gitea's own
