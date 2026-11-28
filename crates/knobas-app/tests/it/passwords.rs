@@ -851,7 +851,7 @@ async fn a_written_entry_reaches_the_mirror_keeping_the_path_it_had() {
         )
         .await;
     assert!(
-        matches!(&answer, WriteAnswer::Written { entity_id } if entity_id == "pw:e2"),
+        matches!(&answer, WriteAnswer::Written { entity_id, path_unread: false } if entity_id == "pw:e2"),
         "{answer:?}"
     );
     let mirrored = cmd::passwords_entry(fx.handle(), "pw:e2".into())
@@ -914,6 +914,46 @@ async fn a_written_entry_reaches_the_mirror_keeping_the_path_it_had() {
     );
 }
 
+/// **An entry moved to another folder says its path shows after the next
+/// sync** (ADR-0064 rule 3, #2596): the one listing it is read back from
+/// names no ancestors, and the old path is not kept for a new folder.
+#[tokio::test]
+async fn an_entry_moved_to_another_folder_says_its_path_shows_after_the_next_sync() {
+    let fx = Fixture::new("pw_write_moved").await;
+    let answer = fx
+        .write(
+            Write::EditEntry {
+                entity: "pw:e2".into(),
+                title: None,
+                username: None,
+                address: None,
+                notes: None,
+                expires: None,
+                folder: Some(Some("pw:ops".into())),
+                otp_key: None,
+                comment: None,
+                listed_in: Some("pw:pay".into()),
+            },
+            Written {
+                item: Some(entry(
+                    "e2",
+                    "Adyen",
+                    EntryRecord {
+                        folder: Some("pw:ops".into()),
+                        path: Vec::new(),
+                        ..in_payments()
+                    },
+                )),
+                otp_key: None,
+            },
+        )
+        .await;
+    assert!(
+        matches!(&answer, WriteAnswer::Written { entity_id, path_unread: true } if entity_id == "pw:e2"),
+        "{answer:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_written_code_key_is_kept_and_read_at_the_next_code() {
     let fx = Fixture::new("pw_write_key").await;
@@ -937,7 +977,7 @@ async fn a_written_code_key_is_kept_and_read_at_the_next_code() {
         )
         .await;
     assert!(
-        matches!(&answer, WriteAnswer::Written { entity_id } if entity_id == "pw:e3"),
+        matches!(&answer, WriteAnswer::Written { entity_id, path_unread: false } if entity_id == "pw:e3"),
         "{answer:?}"
     );
     let before = code_now(OTHER_SEED);
@@ -966,7 +1006,7 @@ async fn a_written_code_key_is_kept_and_read_at_the_next_code() {
         )
         .await;
     assert!(
-        matches!(&answer, WriteAnswer::Written { entity_id } if entity_id == "pw:new"),
+        matches!(&answer, WriteAnswer::Written { entity_id, .. } if entity_id == "pw:new"),
         "{answer:?}"
     );
     let lines: Vec<(String, Option<String>)> =

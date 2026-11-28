@@ -10,6 +10,7 @@
   import { Launcher } from "./lib/launcher";
   import Booting from "./lib/shell/Booting.svelte";
   import { startFollowingMerges } from "./lib/shell/follow-merges";
+  import { startSayingUnread } from "./lib/shell/unread-toast";
   import { health } from "./lib/shell/health.svelte";
   import { kindRegistry } from "./lib/shell/kind-registry.svelte";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
@@ -276,6 +277,7 @@
       for (const [name, start] of [
         ["health", () => health.start()],
         ["merge follower", () => startFollowingMerges()],
+        ["unread note", () => startSayingUnread()],
         ["inbox", () => inbox.start()],
         ["alerts", () => alerts.start()],
         ["timer", () => timer.begin()],

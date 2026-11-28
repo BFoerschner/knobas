@@ -24,7 +24,7 @@
 use knobas_core::delivery::Effect;
 use knobas_core::write_queue::QueuedWrite;
 use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
-use knobas_sync::scheduler::Scheduler;
+use knobas_sync::scheduler::{Scheduler, Unread, UnreadWhy, WriteUnread};
 
 /// How long an effect's read waits behind a run of its source before it
 /// gives up: past a run that stands aside, and past the other effects read
@@ -74,7 +74,8 @@ const LINKED_TICKETS: &str = "select distinct i.entity_id
 /// holding no ticket of the project yet is not found; the next run of its
 /// source brings it.
 ///
-/// At most `$2` ([`SAVED_VIEWS_AT_MOST`]), the views holding `$1` first, as
+/// At most `$2` (one past [`SAVED_VIEWS_AT_MOST`], so a cut is known), the
+/// views holding `$1` first, as
 /// those are the ones a write takes it out of; then by view id. The project's
 /// items are one range of `item_project_census_idx`, hashed once, so the
 /// members are scanned once whatever the project's size.
@@ -124,6 +125,9 @@ pub enum EffectAnswer {
     RunInFlight,
     /// Its source is turned off, so nothing was read.
     TurnedOff,
+    /// Not asked: a saved view past [`SAVED_VIEWS_AT_MOST`], the first of
+    /// those left out. The run that follows the write brings them.
+    LeftOut,
     /// The read failed, or could not be asked, and nothing changed.
     Failed {
         /// The reason, in the engine's words.
@@ -143,7 +147,8 @@ pub struct EffectRead {
 }
 
 impl EffectAnswer {
-    fn of(outcome: Result<RefreshOutcome, RefreshError>) -> Self {
+    /// What a refresh answered, as an effect's (or the item's) read.
+    pub(crate) fn of(outcome: Result<RefreshOutcome, RefreshError>) -> Self {
         match outcome {
             Ok(RefreshOutcome::Refreshed | RefreshOutcome::Gone) => Self::Read,
             Ok(RefreshOutcome::Unchanged) => Self::Unchanged,
@@ -197,22 +202,36 @@ async fn resolve(
         Effect::SavedViews => {
             sqlx::query_scalar(SAVED_VIEWS)
                 .bind(read_back)
-                .bind(SAVED_VIEWS_AT_MOST)
+                .bind(SAVED_VIEWS_AT_MOST + 1)
                 .fetch_all(pool)
                 .await
         }
     }
 }
 
+/// The items of `effect` that are read, and the first left out past the cap
+/// on saved views ([`SAVED_VIEWS_AT_MOST`]), which is said instead. Only
+/// saved views are capped.
+fn capped(effect: Effect, mut items: Vec<String>) -> (Vec<String>, Option<String>) {
+    let cap = usize::try_from(SAVED_VIEWS_AT_MOST).unwrap_or(usize::MAX);
+    if effect != Effect::SavedViews || items.len() <= cap {
+        return (items, None);
+    }
+    let left_out = items.split_off(cap).into_iter().next();
+    (items, left_out)
+}
+
 /// `effects`, the ones `write`'s op declares, each resolved against the
 /// write's target, once each, without `read_back` (the item already read
-/// back) and in the order the op declares them.
+/// back) and in the order the op declares them. Past the cap on saved views
+/// the first one left out comes last of its effect, marked `true`: it is
+/// said ([`EffectAnswer::LeftOut`]), not read.
 async fn named(
     scheduler: &Scheduler,
     write: &QueuedWrite,
     read_back: &str,
     effects: &[Effect],
-) -> Vec<(Effect, String)> {
+) -> Vec<(Effect, String, bool)> {
     if effects.is_empty() {
         return Vec::new();
     }
@@ -232,12 +251,15 @@ async fn named(
     let mut named = Vec::new();
     for &effect in effects {
         match resolve(&deps.pool, effect, &write.entity_id, read_back).await {
-            Ok(entities) => named.extend(
-                entities
+            Ok(entities) => {
+                let fresh: Vec<String> = entities
                     .into_iter()
                     .filter(|entity| seen.insert(entity.clone()))
-                    .map(|entity| (effect, entity)),
-            ),
+                    .collect();
+                let (read, left_out) = capped(effect, fresh);
+                named.extend(read.into_iter().map(|entity| (effect, entity, false)));
+                named.extend(left_out.map(|entity| (effect, entity, true)));
+            }
             Err(error) => tracing::warn!(
                 write_id = write.id,
                 ?effect,
@@ -263,7 +285,14 @@ pub(crate) async fn read(
     effects: &[Effect],
 ) -> Vec<EffectRead> {
     let named = named(scheduler, write, read_back, effects).await;
-    futures_util::future::join_all(named.into_iter().map(|(effect, entity)| async move {
+    futures_util::future::join_all(named.into_iter().map(|(effect, entity, left_out)| async move {
+        if left_out {
+            return EffectRead {
+                effect,
+                entity,
+                answer: EffectAnswer::LeftOut,
+            };
+        }
         let source = entity
             .split_once(':')
             .map_or_else(String::new, |(source, _)| source.to_owned());
@@ -304,9 +333,304 @@ pub(crate) async fn read(
     .await
 }
 
+/// What [`unsaid`] knows of the write beside its reads.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Said<'a> {
+    /// The write's source.
+    pub source: &'a str,
+    /// Whether it syncs only by hand (ADR-0056): no run follows the write.
+    pub by_hand: bool,
+    /// Whether the write is a source's own action (`WriteOp::SourceAction`),
+    /// whose other changes knobas cannot know.
+    pub own_action: bool,
+}
+
+/// One thing a landed write moved that was not read back, before it is
+/// named for the shell ([`tell`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Unsaid {
+    /// The item, or `None` for what else the write moved, unnamed.
+    pub entity: Option<String>,
+    /// The source whose next run brings it.
+    pub source: String,
+    pub why: UnreadWhy,
+}
+
+/// The source an entity id names: what precedes its first `:`.
+fn source_of(entity: &str) -> &str {
+    entity.split_once(':').map_or(entity, |(source, _)| source)
+}
+
+/// **What a landed write did not read back** (ADR-0064 rule 3): the item
+/// `read_back`, where its read answered `item`, then each of `effects` not
+/// read, in the order found, then what else the write moved where nothing
+/// will read it soon: a source that syncs by hand, where no run follows the
+/// write, or a source's own action, which nobody declared. Empty when every
+/// read answered; a write read back whole tells nothing.
+pub(crate) fn unsaid(
+    read_back: &str,
+    item: &EffectAnswer,
+    effects: &[EffectRead],
+    said: Said<'_>,
+) -> Vec<Unsaid> {
+    let why = |answer: &EffectAnswer| match answer {
+        EffectAnswer::Read | EffectAnswer::Unchanged => None,
+        EffectAnswer::NotOffered => Some(UnreadWhy::NotOffered),
+        EffectAnswer::RunInFlight => Some(UnreadWhy::RunInFlight),
+        EffectAnswer::TurnedOff => Some(UnreadWhy::TurnedOff),
+        EffectAnswer::Failed { .. } => Some(UnreadWhy::Failed),
+        EffectAnswer::LeftOut => Some(UnreadWhy::LeftOut),
+    };
+    let mut unsaid: Vec<Unsaid> = why(item)
+        .map(|why| Unsaid {
+            entity: Some(read_back.to_owned()),
+            source: source_of(read_back).to_owned(),
+            why,
+        })
+        .into_iter()
+        .collect();
+    unsaid.extend(effects.iter().filter_map(|read| {
+        why(&read.answer).map(|why| Unsaid {
+            // The views past the cap are many and unnamed: the first one
+            // left out stands for them only by its source.
+            entity: (why != UnreadWhy::LeftOut).then(|| read.entity.clone()),
+            source: source_of(&read.entity).to_owned(),
+            why,
+        })
+    }));
+    let rest = if said.by_hand {
+        Some(UnreadWhy::ByHand)
+    } else {
+        said.own_action.then_some(UnreadWhy::Unknown)
+    };
+    unsaid.extend(rest.map(|why| Unsaid {
+        entity: None,
+        source: said.source.to_owned(),
+        why,
+    }));
+    unsaid
+}
+
+/// The `write:unread` event for a landed write whose reads left `unsaid`
+/// (ADR-0064 rule 3, #2596), each named as the shell says it: the item's
+/// title, the source's name, whether that source syncs by hand, and when it
+/// runs next where that is what brings it. `None` when nothing is unsaid.
+pub(crate) async fn tell(
+    pool: &sqlx::PgPool,
+    write: &QueuedWrite,
+    read_back: &str,
+    unsaid: Vec<Unsaid>,
+) -> Option<WriteUnread> {
+    if unsaid.is_empty() {
+        return None;
+    }
+    let mut ids: Vec<String> = vec![read_back.to_owned()];
+    ids.extend(unsaid.iter().filter_map(|line| line.entity.clone()));
+    let titles: std::collections::HashMap<String, String> =
+        sqlx::query_as("select id, title from knobas.entity where id = any($1) and title <> ''")
+            .bind(&ids)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+    let title = |id: &str| titles.get(id).cloned().unwrap_or_else(|| id.to_owned());
+    let mut sources: Vec<String> = unsaid.iter().map(|line| line.source.clone()).collect();
+    sources.sort();
+    sources.dedup();
+    let named: std::collections::HashMap<String, (String, bool)> = sqlx::query_as(
+        "select id, display_name, sync_by_hand from knobas.source_config where id = any($1)",
+    )
+    .bind(&sources)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(id, name, by_hand): (String, String, bool)| (id, (name, by_hand)))
+    .collect();
+    let mut next_runs = std::collections::HashMap::new();
+    for source in &sources {
+        // The write's own source runs right after the write (ADR-0031), or
+        // not at all where it syncs by hand: no countdown is the truth.
+        if *source == write.source_id {
+            continue;
+        }
+        if let Ok(Some(status)) = knobas_sync::scheduler::status_for(pool, source).await {
+            next_runs.insert(source.clone(), status.next_run_at);
+        }
+    }
+    let unread = unsaid
+        .into_iter()
+        .map(|line| {
+            let (source_name, by_hand) = named
+                .get(&line.source)
+                .cloned()
+                .unwrap_or_else(|| (line.source.clone(), false));
+            Unread {
+                title: title(line.entity.as_deref().unwrap_or(read_back)),
+                entity_id: line.entity,
+                source_name: if source_name.is_empty() {
+                    line.source.clone()
+                } else {
+                    source_name
+                },
+                by_hand,
+                next_run_at: next_runs
+                    .get(&line.source)
+                    .copied()
+                    .flatten()
+                    .filter(|_| !by_hand),
+                source_id: line.source,
+                why: line.why,
+            }
+        })
+        .collect();
+    Some(WriteUnread {
+        write_id: write.id,
+        entity_id: read_back.to_owned(),
+        title: title(read_back),
+        unread,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn read(effect: Effect, entity: &str, answer: EffectAnswer) -> EffectRead {
+        EffectRead {
+            effect,
+            entity: entity.to_owned(),
+            answer,
+        }
+    }
+
+    fn line(entity: Option<&str>, source: &str, why: UnreadWhy) -> Unsaid {
+        Unsaid {
+            entity: entity.map(str::to_owned),
+            source: source.to_owned(),
+            why,
+        }
+    }
+
+    /// **What a landed write did not read back is told, and what it read is
+    /// not** (ADR-0064 rule 3): the item a 1.3.0 component does not refresh,
+    /// an effect its adapter does not read, one a run held past its patience,
+    /// one whose source is off or whose read failed, the views past the cap,
+    /// in the order found; an effect read or unchanged says nothing.
+    #[test]
+    fn every_effect_not_read_is_told_in_the_order_found_and_none_that_was() {
+        let effects = [
+            read(Effect::Parent, "forge:tide/pay", EffectAnswer::Read),
+            read(Effect::LinkedTickets, "jira:PAY-1", EffectAnswer::Unchanged),
+            read(
+                Effect::LinkedTickets,
+                "jira:PAY-2",
+                EffectAnswer::RunInFlight,
+            ),
+            read(Effect::LinkedTickets, "ext:T-1", EffectAnswer::NotOffered),
+            read(Effect::LinkedTickets, "off:T-2", EffectAnswer::TurnedOff),
+            read(
+                Effect::LinkedTickets,
+                "jira:PAY-3",
+                EffectAnswer::Failed {
+                    reason: "503".to_owned(),
+                },
+            ),
+            read(Effect::SavedViews, "jira:board-9", EffectAnswer::LeftOut),
+        ];
+        assert_eq!(
+            unsaid(
+                "forge:tide/pay#7",
+                &EffectAnswer::NotOffered,
+                &effects,
+                Said::default()
+            ),
+            [
+                line(Some("forge:tide/pay#7"), "forge", UnreadWhy::NotOffered),
+                line(Some("jira:PAY-2"), "jira", UnreadWhy::RunInFlight),
+                line(Some("ext:T-1"), "ext", UnreadWhy::NotOffered),
+                line(Some("off:T-2"), "off", UnreadWhy::TurnedOff),
+                line(Some("jira:PAY-3"), "jira", UnreadWhy::Failed),
+                line(None, "jira", UnreadWhy::LeftOut),
+            ]
+        );
+    }
+
+    /// **Past eight saved views, the first left out is said, not read**; at
+    /// eight nothing is left out, and no other effect is capped.
+    #[test]
+    fn the_views_past_the_cap_are_said_by_the_first_left_out() {
+        let views = |n: usize| {
+            (0..n)
+                .map(|i| format!("jira:board-{i}"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            capped(Effect::SavedViews, views(9)),
+            (views(8), Some("jira:board-8".to_owned()))
+        );
+        assert_eq!(capped(Effect::SavedViews, views(8)), (views(8), None));
+        assert_eq!(capped(Effect::LinkedTickets, views(9)), (views(9), None));
+    }
+
+    /// **A write whose item and effects were all read tells nothing.**
+    #[test]
+    fn a_write_read_back_whole_tells_nothing() {
+        let effects = [read(Effect::Parent, "forge:tide/pay", EffectAnswer::Read)];
+        assert!(
+            unsaid(
+                "forge:tide/pay#7",
+                &EffectAnswer::Read,
+                &effects,
+                Said::default()
+            )
+            .is_empty()
+        );
+        assert!(
+            unsaid(
+                "forge:tide/pay#7",
+                &EffectAnswer::Unchanged,
+                &[],
+                Said::default()
+            )
+            .is_empty()
+        );
+    }
+
+    /// **A source that syncs by hand says what else the write moved waits for
+    /// *Sync now***, once, and a source's own action on it says nothing more
+    /// (the press brings both). A source's own action on a scheduled source
+    /// says its other changes are unknown.
+    #[test]
+    fn a_by_hand_source_and_a_sources_own_action_tell_what_else_moved() {
+        let by_hand = Said {
+            source: "kuma",
+            by_hand: true,
+            own_action: true,
+        };
+        assert_eq!(
+            unsaid("kuma:7", &EffectAnswer::Read, &[], by_hand),
+            [line(None, "kuma", UnreadWhy::ByHand)]
+        );
+        let scheduled = Said {
+            source: "surveys",
+            by_hand: false,
+            own_action: true,
+        };
+        assert_eq!(
+            unsaid(
+                "surveys:survey-1",
+                &EffectAnswer::NotOffered,
+                &[],
+                scheduled
+            ),
+            [
+                line(Some("surveys:survey-1"), "surveys", UnreadWhy::NotOffered),
+                line(None, "surveys", UnreadWhy::Unknown),
+            ]
+        );
+    }
 
     /// **A ticket write reads at most [`SAVED_VIEWS_AT_MOST`] views, the
     /// ones holding the ticket first**: on a project that sits on more boards
@@ -402,8 +726,9 @@ mod tests {
         let read = resolve(&pool, Effect::SavedViews, &ticket, &ticket)
             .await
             .unwrap();
+        // Eight are read; the ninth is answered so the cut is known.
         let mut expected = vec![id("board-99")];
-        expected.extend((0..7).map(|n| id(&format!("board-{n:02}"))));
+        expected.extend((0..8).map(|n| id(&format!("board-{n:02}"))));
         assert_eq!(read, expected);
     }
 }

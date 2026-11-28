@@ -28,7 +28,7 @@ use knobas_source::{
 use knobas_sync::refresh::{Lock, RefreshError, RefreshOutcome};
 use knobas_sync::scheduler::{
     AdapterRegistry, RefreshEnd, RefreshEnded, RunConnections, SchedulerDeps, SchedulerTiming,
-    SyncEvents,
+    SyncEvents, UnreadWhy,
 };
 use serde_json::json;
 use tokio::sync::Semaphore;
@@ -376,9 +376,13 @@ impl RunConnections for Connections {
     }
 }
 
-/// The events the scheduler hands on, the refreshes' kept.
+/// The events the scheduler hands on: the refreshes', and what a landed
+/// write said it could not read back (#2596).
 #[derive(Clone, Default)]
-struct Heard(Arc<Mutex<Vec<RefreshEnded>>>);
+struct Heard(
+    Arc<Mutex<Vec<RefreshEnded>>>,
+    Arc<Mutex<Vec<knobas_sync::scheduler::WriteUnread>>>,
+);
 
 impl SyncEvents for Heard {
     fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
@@ -387,6 +391,24 @@ impl SyncEvents for Heard {
     fn refresh_ended(&self, ended: &RefreshEnded) {
         self.0.lock().unwrap().push(ended.clone());
     }
+    fn write_unread(&self, unread: &knobas_sync::scheduler::WriteUnread) {
+        self.1.lock().unwrap().push(unread.clone());
+    }
+}
+
+/// What the landed write `id` said it could not read back, as
+/// `(item, source, why)` per line: it is told before the run that follows
+/// it, so once that run began it has been.
+fn unread_of(heard: &Heard, id: i64) -> Vec<(Option<String>, String, UnreadWhy)> {
+    heard
+        .1
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|told| told.write_id == id)
+        .flat_map(|told| told.unread.iter())
+        .map(|line| (line.entity_id.clone(), line.source_id.clone(), line.why))
+        .collect()
 }
 
 const HELD_OFF: SchedulerTiming = SchedulerTiming {
@@ -1290,6 +1312,11 @@ async fn a_landed_write_on_an_external_source_is_refreshed_across_the_boundary()
             RefreshEnd::Refreshed
         )]
     );
+    assert_eq!(
+        unread_of(&heard, id),
+        [(None, "surveys".to_owned(), UnreadWhy::Unknown)],
+        "the survey was read; only what else the action changed is unknown"
+    );
     state.scheduler.shutdown().await;
 }
 
@@ -1315,6 +1342,19 @@ async fn a_landed_write_on_a_1_3_0_external_source_gets_the_run_alone() {
         "nothing was refreshed"
     );
     assert!(heard.0.lock().unwrap().is_empty(), "no refresh happened");
+    // Said, not waited on (#2596): the survey shows after the next sync of
+    // its source, and so does whatever else the action changed.
+    assert_eq!(
+        unread_of(&heard, id),
+        [
+            (
+                Some("surveys:survey-1".to_owned()),
+                "surveys".to_owned(),
+                UnreadWhy::NotOffered
+            ),
+            (None, "surveys".to_owned(), UnreadWhy::Unknown),
+        ]
+    );
     state.scheduler.shutdown().await;
 }
 

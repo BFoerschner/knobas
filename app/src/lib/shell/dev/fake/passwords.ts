@@ -236,8 +236,10 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     clipboard_state: () => clip,
     passwords_write: (args) => {
       if (offline) return { kind: "unreachable", message: "unreachable: the server did not answer" };
-      const write = args["write"] as { write: string; entity?: string; source?: string };
-      return { kind: "written", entity_id: write.entity ?? `${SOURCE}:pl-payout-db` };
+      const write = args["write"] as { write: string; entity?: string; source?: string; folder?: string | null };
+      // Moved or made in a folder: one listing names no folders above it, so its path waits for a sync (#2596).
+      const path_unread = typeof write.folder === "string";
+      return { kind: "written", entity_id: write.entity ?? `${SOURCE}:pl-payout-db`, path_unread };
     },
     password_source_facts: () => {
       const codes = entries.filter((e) => e.totp).length;
