@@ -18,6 +18,7 @@
     reread,
     sync,
     noun,
+    looking = false,
   }: {
     detail: RefreshSubject | null;
     refresh: DetailRefresh;
@@ -27,8 +28,10 @@
     sync?: Snippet | undefined;
     /** What *Refresh* reads, named beside the view's *Sync now*, whose name is otherwise too near: *Refresh run*. */
     noun?: string | undefined;
+    /** Whether the detail says *Looking for changes…* while its item is read again after a write (#2615). */
+    looking?: boolean;
   } = $props();
 </script>
 
-{#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page noun={sync === undefined ? undefined : noun} />{/if}
+{#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page noun={sync === undefined ? undefined : noun} {looking} />{/if}
 {#if detail === null || refresh.offer(detail) !== "sync"}{@render sync?.()}{/if}

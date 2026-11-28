@@ -268,7 +268,7 @@
           {#if detail.web_url !== null}
             <a class="tf-btn tf-ghost" href={detail.web_url} title="Open in {detail.source.display_name} (O)" onclick={openLink} {@attach openKey(() => ({ url: detail?.web_url ?? null, source: detail?.source.id ?? null }))}><span class="tf-cut">Open in {detail.source.display_name}</span></a>
           {/if}
-          <TfDetailRefresh {detail} {refresh} {reread} page />
+          <TfDetailRefresh {detail} {refresh} {reread} page looking />
         </div>
       {/if}
     </header>

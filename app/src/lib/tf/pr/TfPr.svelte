@@ -992,7 +992,7 @@
             ><span class="tf-btn tf-ghost">Open in…<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"></svg></span></span
           >
         {/if}
-        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
+        {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page looking />{/if}
       </div>
     </header>
     {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}

@@ -5,6 +5,8 @@
   says *Refreshing…* meanwhile; *Sync now* runs the item's source, shared with
   every detail of it, and the detail is read again once that run ends. Neither
   is drawn for a turned-off source.
+  A page that asks (`looking`) says *Looking for changes…* before it while its
+  item is read again after a write (#2615, #2595), in room it always holds.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -12,6 +14,8 @@
   import { push } from "../shell/toasts.svelte";
   import { pageRefresh } from "./page-refresh.svelte";
   import { pageVisible } from "./kept-pages.svelte";
+  import { itemLooked, startLooking } from "./builds/looking.svelte";
+  import { windowListen } from "../ipc/shared-listen";
 
   let {
     detail,
@@ -23,6 +27,7 @@
     button = true,
     noun,
     name,
+    looking = false,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -51,7 +56,16 @@
      * The item's title unless the page names it shorter (a repository's name without its owner).
      */
     name?: string | undefined;
+    /**
+     * Whether the page says *Looking for changes…* while its item is read again after a write (#2615): the ticket, a
+     * Docs page, a pull request and an item's page. Its room is held while it says nothing, so nothing moves.
+     */
+    looking?: boolean;
   } = $props();
+
+  // What knobas looks at again (#2595): started once, by the first page that asks.
+  if (untrack(() => looking)) startLooking(windowListen);
+  const looked = $derived(looking && itemLooked(detail.row.entity_id));
   /** The words the toast names. */
   const named = $derived(name ?? (detail.row as { title?: string }).title);
   /** The button's word at rest. */
@@ -95,6 +109,10 @@
   });
 </script>
 
+{#if looking}
+  <!-- Drawn empty while nothing is looked at: a live region inserted with its words is often not announced (#2585). -->
+  <span class="tf-looking tf-keepw" data-keep="Looking for changes…" role="status"><span>{looked ? "Looking for changes…" : ""}</span></span>
+{/if}
 {#if !button}
   <!-- ⌘R's alone (#2401): registered above, nothing drawn. -->
 {:else if offer === "refresh"}
