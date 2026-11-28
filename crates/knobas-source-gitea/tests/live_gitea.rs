@@ -8285,7 +8285,8 @@ async fn the_archive_hands_over_every_blob_of_the_tree() {
 /// `compare:main...feature` section draw just those: not `main-3.txt` as deleted (a two-dot diff from
 /// main's tip, what Forgejo's web route serves), and not `main-2.txt` as
 /// added (a diff from where the branch was cut). The repository is removed
-/// afterwards, and first, in case a killed run left it.
+/// first, in case a killed run left it, and afterwards by [`ScratchRepo`],
+/// also when the test panics partway.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
@@ -8300,14 +8301,14 @@ async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
     let (admin, password) = TESTENV_ADMIN;
     let scratch = "knobas-live-merged-back";
     let full_name = format!("{}/{scratch}", env.owner);
-    let remove = async || {
-        let _ = http
-            .delete(format!("{api}/repos/{full_name}"))
-            .basic_auth(admin, Some(password))
-            .send()
-            .await;
+    drop(ScratchRepo {
+        api: api.clone(),
+        full_name: full_name.clone(),
+    });
+    let scratch_repo = ScratchRepo {
+        api: api.clone(),
+        full_name: full_name.clone(),
     };
-    remove().await;
     // Public: Forgejo serves its web diff to a token for a public
     // repository only (measured on 17.0.0).
     let created = http
@@ -8403,7 +8404,7 @@ async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
             view.map(|_| ()).map_err(|e| format!("{e:?}")),
         ));
     }
-    remove().await;
+    drop(scratch_repo);
 
     let own = Some(vec![
         (DiffChange::Added, "feature-1.txt".to_owned()),
@@ -8412,5 +8413,49 @@ async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
     for (section, files, read) in drawn {
         assert_eq!(read, Ok(()), "{section} is read");
         assert_eq!(files, own, "{section} draws the branch's own files only");
+    }
+}
+
+/// A scratch repository the test removes from `Drop`, so a run that panics
+/// partway leaves nothing behind (*The failure path is the success path*,
+/// above). The removal is read back: the repository must answer 404.
+struct ScratchRepo {
+    api: String,
+    full_name: String,
+}
+
+impl Drop for ScratchRepo {
+    fn drop(&mut self) {
+        let (api, full_name) = (self.api.clone(), self.full_name.clone());
+        knobas_live_cleanup::Cleanup::new(
+            "the live suite did not remove its scratch repository",
+            format!("{full_name} may still be standing; the test removes it first on its next run"),
+        )
+        .within(std::time::Duration::from_secs(60))
+        .run(move || async move {
+            let (admin, password) = TESTENV_ADMIN;
+            let http = reqwest::Client::builder()
+                .timeout(live_env::REQUEST_BUDGET)
+                .build()
+                .map_err(|error| format!("a client: {error}"))?;
+            let url = format!("{api}/repos/{full_name}");
+            let _ = http
+                .delete(&url)
+                .basic_auth(admin, Some(password))
+                .send()
+                .await;
+            let status = http
+                .get(&url)
+                .basic_auth(admin, Some(password))
+                .send()
+                .await
+                .map_err(|error| format!("GET {url}: {error}"))?
+                .status();
+            if status == reqwest::StatusCode::NOT_FOUND {
+                Ok(())
+            } else {
+                Err(format!("GET {url} answered {status} after its DELETE"))
+            }
+        });
     }
 }
