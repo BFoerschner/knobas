@@ -18,7 +18,9 @@
 //! `--timings <file>` (the instant-open pass, 2026-11-12) appends one JSON
 //! line a command: its name, when it arrived and left (ms since the epoch),
 //! the backend's time on it and the answer's bytes, so a page open splits
-//! into what the backend spent and what the page did.
+//! into what the backend spent and what the page did. `pool_idle` of
+//! `pool_size` is the app pool as the command arrived (#2612): a page's read
+//! that met no idle connection waited for one.
 //!
 //! One request is `POST /invoke` with `{"cmd": "...", "args": {...}}`, and
 //! the answer `{"ok": value}` or `{"err": value}`, the rejection as the
@@ -109,7 +111,7 @@ fn main() {
         let handle = handle.clone();
         let timings = timings.clone();
         std::thread::spawn(move || {
-            if let Ok(true) = serve(stream, &webview, timings.as_deref()) {
+            if let Ok(true) = serve(stream, &webview, &handle, timings.as_deref()) {
                 eprintln!("headless_ipc: stopping");
                 knobas_app::shutdown(&handle);
                 std::process::exit(0);
@@ -122,6 +124,7 @@ fn main() {
 fn serve(
     stream: TcpStream,
     webview: &tauri::WebviewWindow<MockRuntime>,
+    handle: &tauri::AppHandle<MockRuntime>,
     timings: Option<&std::sync::Mutex<std::fs::File>>,
 ) -> std::io::Result<bool> {
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -153,6 +156,10 @@ fn serve(
             .unwrap_or_default()
     };
     let arrived = since_epoch();
+    let pool = tauri::Manager::state::<knobas_app::Lifecycle>(handle)
+        .pool()
+        .map(|pool| (pool.size(), pool.num_idle()))
+        .unwrap_or_default();
     let clock = std::time::Instant::now();
     let answer = if method == "POST" && !quit {
         invoke(webview, &body)
@@ -171,6 +178,8 @@ fn serve(
             "left": since_epoch(),
             "ms": clock.elapsed().as_secs_f64() * 1000.0,
             "bytes": answer.len(),
+            "pool_size": pool.0,
+            "pool_idle": pool.1,
         });
         if let Ok(mut file) = file.lock() {
             let _ = writeln!(file, "{line}");

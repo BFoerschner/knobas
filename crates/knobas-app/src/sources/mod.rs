@@ -84,8 +84,12 @@ pub(crate) fn secret_store(
         tracing::warn!("{SECRET_STORE_ENV}=memory: credentials will not survive this process");
         return Arc::new(knobas_secrets::MemoryStore::new());
     }
-    #[cfg(debug_assertions)]
-    if uses_dev_secret_file(kind, profile.demo, cfg!(debug_assertions)) {
+    #[cfg(any(debug_assertions, feature = "test-util"))]
+    if uses_dev_secret_file(
+        kind,
+        profile.demo,
+        cfg!(any(debug_assertions, feature = "test-util")),
+    ) {
         let store = knobas_secrets::FileStore::new(dev_secret_file(profile));
         tracing::info!(
             path = %store.path().display(),
@@ -106,19 +110,22 @@ pub(crate) fn secret_store(
 /// than the keychain (#2384): a **debug build** on the **demo profile** that
 /// asked for the keychain. A release build and the user's own profile always
 /// get the keychain; the file store is not even compiled into a release build.
+/// A `test-util` build counts as a debug build here (#2612): the windowless
+/// backend the probes build in release, whose live sources sync with the
+/// demo profile's file; no shipped build has the feature.
 ///
 /// Why: a dev build's keychain items are partitioned by the writer's cdhash
 /// (the knobas-dev certificate has no team ID), so every rebuild prompted for
 /// the login password once per item. The demo profile holds testenv
 /// credentials only.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[cfg_attr(not(any(debug_assertions, feature = "test-util")), allow(dead_code))]
 fn uses_dev_secret_file(kind: SecretStoreKind, demo: bool, debug_build: bool) -> bool {
     debug_build && demo && kind == SecretStoreKind::Keychain
 }
 
 /// The demo profile's credential file, inside the profile so `--data-dir`
 /// moves it with the database.
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "test-util"))]
 fn dev_secret_file(profile: &crate::Profile) -> std::path::PathBuf {
     profile.dir.join("dev-secrets.json")
 }

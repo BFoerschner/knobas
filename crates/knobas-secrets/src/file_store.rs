@@ -9,8 +9,10 @@
 //! keeps them here instead and the keychain is never asked.
 //!
 //! **Compiled out of release builds**: this module exists only under
-//! `debug_assertions`, so a release binary cannot name the type, let alone
-//! write a credential to disk. `knobas_app::sources` decides when a debug build
+//! `debug_assertions`, or the `file-store` feature that `knobas-app`'s
+//! `test-util` turns on for the windowless backend the probes build in release
+//! (#2612), so a shipped binary cannot name the type, let alone write a
+//! credential to disk. `knobas_app::sources` decides when a debug build
 //! uses it (demo profile, keychain requested) and pins that decision by test.
 //!
 //! The file is one JSON object, account → the same envelope a keychain item

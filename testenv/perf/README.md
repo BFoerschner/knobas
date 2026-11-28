@@ -242,10 +242,31 @@ bring-up work (the fills, the picker's names, the sync engine's first runs) has 
 it answers and presses Recent as soon as the nav draws (`builds-recent-start`, at 1x unless `--throttle` says otherwise),
 so Recent's first read meets the start-up reads and whatever bring-up left running (#2569b).
 
+**A start with live sources syncing (`--live`, #2612).** The saved home syncs nothing by itself, so the place above
+never met a sync. `--live` adds two sources to the copy, `perf-gitea` (the seeded owner on the local Gitea) and
+`perf-teamcity` (the local TeamCity), from this checkout's `testenv/seed-state.json`, each at its adapter's shortest
+interval (60 s and 20 s), and waits for their first syncs before the rounds; their credentials go in the copy's
+`dev-secrets.json`, which a `test-util` backend reads as a debug build does. Each round's start then finds them due:
+the scheduler starts them 2 s after the backend comes up, and each round waits for them to end before it quits.
+`--after <s>` loads the page that long after the backend answers, so Recent's first read lands inside the runs.
+Each round prints Recent's first read as the backend saw it: when it arrived, its time there, how many of the app
+pool's five connections were idle as it arrived (the `--timings` line's `pool_idle`), and which runs were in flight.
+Bring the products up first (`just live-up teamcity` starts Gitea too; `just live-down teamcity` afterwards, which
+frees the JVM lock), and compare with the same rounds without `--live`:
+
+```sh
+cp -cR <saved home> "$TMPDIR/home-live"        # the secrets may stay: the saved sources never come due
+just open-cold --backend <release headless_ipc> --home "$TMPDIR/home-live" --live --after 2.5 --rounds 8
+just open-cold --backend <release headless_ipc> --home <another copy> --after 2.5 --rounds 8      # the idle start
+```
+
+The local products sync in moments (TeamCity about 0.1 s, the Gitea owner about 2 s when due), far less than a
+person's sources at Björn's scale. The first measurement with it (2026-11-28) is on #2612.
+
 `--timings` makes the windowless backend append one line a command (its name, its arguments, when it arrived and
 left, the backend's time on it, the answer's bytes), which splits an open into what the backend spent and what the
-page did. The places are the saved scale database's (`SCLENG`, a TeamCity pipeline); there is no fixture run. Two
-things differ from the app: a headless Chrome sends at most six requests to the backend at once, where Tauri's IPC
+page did, and how many of the app pool's connections were idle as the command arrived. The places are the saved
+scale database's (`SCLENG`, a TeamCity pipeline); there is no fixture run. Two things differ from the app: a headless Chrome sends at most six requests to the backend at once, where Tauri's IPC
 has no such limit, and the backend is the example's mock runtime, whose answers are the app's.
 
 A box held unseen in its room (`visibility: hidden`: a detail page's header and tabs waiting for their reads, Backup's
