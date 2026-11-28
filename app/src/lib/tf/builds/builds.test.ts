@@ -26,6 +26,9 @@ import {
   repoTreeOf,
   newestFirst,
   recentNewestFirst,
+  railOf,
+  railRuns,
+  RAIL_RUNS,
   asksAttention,
   failedRun,
   unreadRun,
@@ -248,6 +251,49 @@ test("the Builds list's latest run reads the recent runs newest first", () => {
   expect(row.recent.map((r) => r.entity_id)).toEqual(["newer", "older"]);
   expect(isFailing(row)).toBe(false);
   expect(railGlyph(row)).toEqual({ tone: "ok", word: "Passed" });
+});
+
+test("the rail's read draws what the strip drew: glyph, time, Failing, Running and the attention, over the same runs (#2571)", () => {
+  const at = (h: number, m = 0) => `2026-08-22T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00Z`;
+  const ran = (id: string, h: number, tone: "ok" | "err" | "warn", extra: Partial<RunRow> = {}) =>
+    run({ entity_id: id, started: at(h), finished: at(h, 30), updated_at: at(h, 30), state: { text: tone, tone }, ...extra });
+  const now = new Date(at(20));
+  const strips: RunRow[][] = [
+    [],
+    [ran("pass", 9, "ok")],
+    // A long failure that finished after a newer pass: the pass is the latest.
+    [ran("long", 6, "err", { finished: at(12), updated_at: at(12) }), ran("short", 10, "ok")],
+    // A run in flight under a newer pass, and one under a newer failure.
+    [ran("fresh", 11, "ok"), run({ entity_id: "stuck", started: at(5), finished: null, updated_at: at(5), state: { text: "running", tone: "info" } })],
+    [ran("broke", 11, "err"), run({ entity_id: "slow", started: at(8), finished: null, updated_at: at(8), state: { text: "running", tone: "info" } })],
+    // Queued after the rest started, and a warning beneath it.
+    [run({ entity_id: "waits", started: null, finished: null, updated_at: at(13), state: { text: "queued", tone: "info" } }), ran("warned", 12, "warn")],
+    // Fourteen alternating: twelve are read.
+    Array.from({ length: 14 }, (_, i) => ran(`n${i}`, 19 - i, i % 2 === 0 ? "err" : "ok")),
+  ];
+  for (const [i, recent] of strips.entries()) {
+    const full = recentNewestFirst(pipeline(`P${i}`, recent));
+    const rail = recentNewestFirst(railOf(pipeline(`P${i}`, recent)));
+    for (const read of [null, new Set<string>(), new Set(recent.map((r) => r.entity_id))]) {
+      expect([i, asksAttention(rail, read), railTime(rail, now, read)]).toEqual([i, asksAttention(full, read), railTime(full, now, read)]);
+    }
+    expect([i, railGlyph(rail), latestTime(rail, now), isFailing(rail), isRunning(rail)]).toEqual([i, railGlyph(full), latestTime(full, now), isFailing(full), isRunning(full)]);
+    expect(rail.recent.length).toBeLessThanOrEqual(1 + full.recent.filter((r) => r.started !== null && r.finished === null).length);
+  }
+  // The running one under a newer pass: the latest first, then the one in flight, nothing else of the strip.
+  expect(railOf(pipeline("P", strips[3]!)).recent.map((r) => r.entity_id)).toEqual(["fresh", "stuck"]);
+  expect(railOf(pipeline("P", strips[6]!)).recent.map((r) => r.entity_id)).toEqual(["n0"]);
+});
+
+test("the rail's read names the commits a pipeline's last twelve runs built, each once, newest first (#2571)", () => {
+  const built = (id: string, h: number, commit: string | null) =>
+    run({ entity_id: id, started: `2026-08-22T${String(h).padStart(2, "0")}:00:00Z`, commit_id: commit });
+  const runs = [built("a", 10, "c2"), built("b", 11, "c1"), built("c", 9, "c2"), built("d", 8, null)];
+  expect(railRuns(runs).commits).toEqual(["c1", "c2"]);
+  // The thirteenth run's commit is past what the read looks at.
+  const thirteen = [...Array.from({ length: RAIL_RUNS }, (_, i) => built(`r${i}`, 20 - i, "same")), built("old", 1, "older")];
+  expect(railRuns(thirteen).commits).toEqual(["same"]);
+  expect(railRuns([])).toEqual({ recent: [], commits: [] });
 });
 
 test("a folder's pipelines share the prefix they all start with, cut at a separator, never a whole name", () => {

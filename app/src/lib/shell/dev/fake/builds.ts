@@ -48,7 +48,7 @@ import { fakeRoleScope } from "./corpus";
 import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { recentOrder } from "../../../tf/builds/recent";
-import { runBubble } from "../../../tf/builds/builds";
+import { railOf, runBubble } from "../../../tf/builds/builds";
 import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -907,6 +907,11 @@ export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const bulk = bulkPipelines(Number(params.get("fake-pipelines") ?? 0) || 0);
   const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
+  // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
+  const listed = (): PipelineRow[] => {
+    const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+    return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk.map((p) => ({ ...p, unread: unreadOf(p.recent) }))];
+  };
   // `fake-scale` (`fake-scale.ts`): a history thousands of runs long.
   const depth = params.has("fake-scale") ? SCALE_HISTORY : OLDER_DEPTH;
   longPaths = params.has("fake-long-paths");
@@ -946,11 +951,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       presets.set(id, kept);
       return null;
     },
-    // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
-    pipelines: () => {
-      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
-      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk.map((p) => ({ ...p, unread: unreadOf(p.recent) }))];
-    },
+    pipelines: () => listed(),
+    // The rail's read (#2571): the same rows without their strips, as the server reduces them.
+    rail_pipelines: () => listed().map(railOf),
     // Mark builds as read (ux18, ADR-0063): the fixture's own sets, as `knobas.run_read` holds them.
     read_runs: (): RunMarks => ({ read: [...readRuns], while_running: [...whileRunningRuns] }),
     mark_runs_read: (args): RunMarks => {

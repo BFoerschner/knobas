@@ -70,6 +70,7 @@ export const READS: ReadonlySet<string> = new Set([
   "asset_tree",
   "depends_on_this",
   "pipelines",
+  "rail_pipelines",
   "pipeline_runs",
   "recent_runs",
   "repo_pipelines",
@@ -140,7 +141,7 @@ export const QUIET: ReadonlySet<string> = new Set([
   "refused_writes",
   // The runs' counts by bubble and the instant they count green from (#2568): read fresh on every run's move, so never
   // kept, and the instant is read by nothing kept. Unknown here, every top bar refresh, every entry to Builds and every
-  // leave dropped every kept answer, and a return to Builds read `pipelines` again (the open budget's `builds late`).
+  // leave dropped every kept answer, and a return to Builds read its pipelines again (the open budget's `builds late`).
   "run_counts",
   "builds_in_front",
   "move_seen",
@@ -247,6 +248,7 @@ export const VISIT_BLIND: ReadonlySet<string> = new Set([
   "code_facts",
   "entity_briefs",
   "pipelines",
+  "rail_pipelines",
   "pipeline_runs",
   "recent_runs",
   "repo_pipelines",
@@ -285,6 +287,7 @@ const SCOPE: Readonly<Record<string, readonly string[]>> = {
   docs_nodes: ["wiki"],
   docs_page: ["wiki"],
   pipelines: ["ci"],
+  rail_pipelines: ["ci"],
   pipeline_runs: ["ci"],
   recent_runs: ["ci"],
   // A repository's pipelines are the runs of its commits: a run or a new commit changes them.
@@ -331,7 +334,7 @@ const STORE_KEY = "knobas.answer-cache.recent";
  */
 const SEED: readonly { cmd: string; args: unknown }[] = [
   { cmd: "docs_outline", args: {} },
-  { cmd: "pipelines", args: {} },
+  { cmd: "rail_pipelines", args: {} },
   { cmd: "monitor_roster", args: {} },
   { cmd: "open_alerts", args: {} },
   { cmd: "ticket_views", args: {} },

@@ -6,7 +6,7 @@
  * flight* by its declared instants (started and not finished, or neither),
  * and a pipeline is named by its declared name (ADR-0022).
  */
-import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
+import type { JobPipeline, PipelineReason, PipelineRow, RailPipeline, RunRow } from "../../ipc/entity";
 import { clockLabel } from "../../time/format";
 import { originLabel } from "../job/job";
 import { stateWord } from "../state-word";
@@ -41,6 +41,27 @@ export function newestFirst(runs: readonly RunRow[]): RunRow[] {
 /** A pipeline with its recent runs {@link newestFirst}: its strip, its latest run's time and its tone read them. */
 export function recentNewestFirst<P extends Pick<PipelineRow, "recent">>(pipeline: P): P {
   return { ...pipeline, recent: newestFirst(pipeline.recent) };
+}
+
+/** How many of a pipeline's runs the rail's read looks at: the backend's `PIPELINE_RECENT`, the strip it no longer sends. */
+export const RAIL_RUNS = 12;
+
+/**
+ * A pipeline's runs as the rail reads them (#2571), the backend's `RailPipeline::from` over the same runs: of the first
+ * {@link RAIL_RUNS} (newest first as the mirror answers them), the latest by {@link runMade}, then every other one still in
+ * flight; and the mirrored commits they built, each once, newest first. What the glyph, the time, *Failing*, *Running*
+ * and *By repository* read, so a pipeline's runs read again lay into its row as the list's read laid it.
+ */
+export function railRuns(runs: readonly RunRow[]): Pick<RailPipeline, "recent" | "commits"> {
+  const [latest, ...rest] = newestFirst(runs.slice(0, RAIL_RUNS));
+  const commits = [...new Set([latest, ...rest].flatMap((run) => (run?.commit_id == null ? [] : [run.commit_id])))];
+  const recent = latest === undefined ? [] : [latest, ...rest.filter((run) => run.started !== null && run.finished === null)];
+  return { recent, commits };
+}
+
+/** A whole list row as the rail's read answers it: the dev fake's `rail_pipelines`. */
+export function railOf(row: PipelineRow): RailPipeline {
+  return { ...row, ...railRuns(row.recent) };
 }
 
 /** Whether the pipeline's latest run failed: a fact, read or not (the *Failing* chip, the red glyph). */
@@ -337,8 +358,9 @@ export function foldPipelines(f: Fold): PipelineRow[] {
 /**
  * The unread failed runs of `pipelines` over their whole history (#2543): what a right-click's *Mark N runs as read*
  * counts, and what its press, which marks by pipeline, draws read at once. Each pipeline's `unread` is what the backend
- * named as the list was read; `read`, the window's marks, keeps it fresh across every mark since, and a run of the rail's
- * last twelve counts by its own row, so a failure a sync brought counts before the list is read again. Newest first.
+ * named as the list was read; `read`, the window's marks, keeps it fresh across every mark since, and a run the rail
+ * reads (its latest, #2571) counts by its own row, so a failure a run's refresh brought counts before the list is read
+ * again. Newest first.
  */
 export function unreadRunsOf(pipelines: readonly Pick<PipelineRow, "recent" | "unread">[], read: ReadonlySet<string> | null): string[] {
   return pipelines.flatMap((p) => {
@@ -349,7 +371,7 @@ export function unreadRunsOf(pipelines: readonly Pick<PipelineRow, "recent" | "u
 }
 
 /**
- * Whether `pipelines` name every run in `ids`, among their last twelve or their unread failures: a run marked unread that
+ * Whether `pipelines` name every run in `ids`, among the runs the rail reads or their unread failures: a run marked unread that
  * none names was read when the list was read, so the list is read again to count it (#2543).
  */
 export function namesEvery(pipelines: readonly Pick<PipelineRow, "recent" | "unread">[], ids: Iterable<string>): boolean {
