@@ -133,7 +133,7 @@ function draw(overrides: Partial<RecentPorts> = {}, props: { job?: string | null
       get syncRevision() {
         return revision;
       },
-      ondrawn: props.ondrawn,
+      ...(props.ondrawn ? { ondrawn: props.ondrawn } : {}),
     },
   });
   return drawn;
