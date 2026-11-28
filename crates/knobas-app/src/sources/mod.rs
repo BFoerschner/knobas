@@ -578,13 +578,10 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 /// `registry` is the list the installed adapters load into: the process's
 /// ([`Registry::for_process`]) in the app, which a retried bring-up finds
 /// already holding them. `suggestions` is the process's one suggestion pass
-/// (#1485): the scheduler requests it after every OK run. `background` is the
-/// database handle's background pool (#2612), which what a run's end starts
-/// and the adapters' update check read on.
+/// (#1485): the scheduler requests it after every OK run.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     pool: &PgPool,
-    background: &PgPool,
     connector: &knobas_db::embedded::Connector,
     profile: &crate::Profile,
     registry: Registry,
@@ -600,7 +597,6 @@ pub async fn start<R: tauri::Runtime>(
         app,
         BringUp {
             pool: pool.clone(),
-            background: background.clone(),
             sync_pool,
             connections: connector.clone(),
             secrets: secret_store(profile, *app.state::<SecretStoreKind>()),
@@ -614,8 +610,7 @@ pub async fn start<R: tauri::Runtime>(
     // The update check at app start (#1209): it reads each installed
     // adapter's latest release and records what it found, which Settings
     // shows. It changes no install, and it waits for nothing.
-    // In the background (#2612): nothing waits for it.
-    let pool = background.clone();
+    let pool = state.pool.clone();
     tauri::async_runtime::spawn(async move {
         let endpoints = remote::Endpoints::default();
         if let Err(error) = installed::check_updates(&pool, &registry, &endpoints).await {
@@ -642,10 +637,6 @@ pub async fn start<R: tauri::Runtime>(
 pub struct BringUp {
     /// The application pool.
     pub pool: PgPool,
-    /// The background pool (#2612): what the end of a run starts -- the
-    /// clones' files, the launcher's names, the state words, the owed links
-    /// -- reads here, never on [`pool`](Self::pool), which the pages read on.
-    pub background: PgPool,
     /// The scheduler's own bookkeeping pool, on the same database.
     pub sync_pool: PgPool,
     /// Where each run takes its dedicated connection, on the same database.
@@ -704,7 +695,7 @@ pub async fn bring_up<R: tauri::Runtime>(
                         crate::suggestion_pass::SuggestOnSync::new(
                             write_queue::ArrivalLinks::new(
                                 TauriEvents::new(app.clone()),
-                                deps.background.clone(),
+                                deps.pool.clone(),
                                 Arc::clone(&registry),
                                 background.clone(),
                             ),
@@ -719,7 +710,7 @@ pub async fn bring_up<R: tauri::Runtime>(
                                 |lifecycle| lifecycle.seen_words().clone(),
                             )
                         },
-                        deps.background.clone(),
+                        deps.pool.clone(),
                     ),
                     // And the launcher's names read again after a run that wrote, a
                     // write that landed and an item's refresh (the fuzzy-search
@@ -732,7 +723,7 @@ pub async fn bring_up<R: tauri::Runtime>(
                                 lifecycle.picker().clone()
                             })
                     },
-                    deps.background.clone(),
+                    deps.pool.clone(),
                 ),
                 {
                     use tauri::Manager as _;
@@ -744,7 +735,7 @@ pub async fn bring_up<R: tauri::Runtime>(
                             // A blob from a checkout here before the forge (D3).
                             clones: Some(Arc::new(
                                 crate::checkout::files_from_clones::FromClones::new(
-                                    deps.background.clone(),
+                                    deps.pool.clone(),
                                 ),
                             )),
                         })

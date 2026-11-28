@@ -93,20 +93,6 @@ const SHARED_BUFFERS: &str = "256MB";
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
 
-/// The background pool's size ([`EmbeddedDb::background_pool`], #2612).
-///
-/// The work a start and a sync's end leave behind -- the fills, the launcher's
-/// names, the state words, the Docs tree read ahead, the adapters' update
-/// check, a sync's arrivals -- runs on two connections of its own, so a page's
-/// read never queues behind it for one of the five. Two: the fills run one
-/// after another and hold one, and the rest are short reads that may wait
-/// their turn behind each other, which nobody is looking at.
-const BACKGROUND_CONNECTIONS: u32 = 2;
-
-/// The `application_name` the background pool's connections carry, so
-/// `pg_stat_activity` tells them from the app pool's (#2612).
-pub const BACKGROUND_APPLICATION_NAME: &str = "knobas background";
-
 /// The `statement_timeout` every connection of the app's pool carries (#745).
 ///
 /// Defence in depth: a statement that holds a UI connection for longer than
@@ -283,9 +269,6 @@ impl DbError {
 /// server, adopted or started here: a live owner refuses a second one (B2).
 pub struct EmbeddedDb {
     pool: PgPool,
-    /// The background work's pool ([`background_pool`](Self::background_pool)),
-    /// on the same server, closed with the app's.
-    background: PgPool,
     /// How to reach the running server, for callers that need connections of
     /// their own rather than the shared pool's.
     ///
@@ -574,30 +557,12 @@ impl Connector {
     /// The app pool's settings, with no connection opened yet: the two
     /// callers above differ only in how long they wait for the first one.
     fn app_pool_unconnected(&self) -> PgPool {
-        self.app_settings_pool(MAX_CONNECTIONS, self.options.clone())
-    }
-
-    /// The pool the app's background work runs on (#2612): the app pool's
-    /// settings ([`app_session_settings`], kept connections) on
-    /// [`BACKGROUND_CONNECTIONS`] connections of its own, named
-    /// [`BACKGROUND_APPLICATION_NAME`]. Nothing is opened until the first
-    /// read asks: the work starts after the app pool has answered.
-    #[must_use]
-    pub fn background_pool(&self) -> PgPool {
-        self.app_settings_pool(
-            BACKGROUND_CONNECTIONS,
-            self.options
-                .clone()
-                .application_name(BACKGROUND_APPLICATION_NAME),
-        )
-    }
-
-    /// A pool of `max_connections` over `options` with the app pool's
-    /// session settings, timeout and lifetimes, nothing opened yet.
-    fn app_settings_pool(&self, max_connections: u32, options: PgConnectOptions) -> PgPool {
-        let options = options.options(app_session_settings(plans_as_windows()));
+        let options = self
+            .options
+            .clone()
+            .options(app_session_settings(plans_as_windows()));
         PgPoolOptions::new()
-            .max_connections(max_connections)
+            .max_connections(MAX_CONNECTIONS)
             // sqlx's default, spelled out: the statement limit above is
             // argued from it.
             .acquire_timeout(Duration::from_secs(30))
@@ -779,7 +744,6 @@ impl EmbeddedDb {
             report.reach(Step::Ready);
             return Ok(EmbeddedDb {
                 pool,
-                background: connector.background_pool(),
                 connector,
                 postgresql: None,
                 stop_settings: None,
@@ -831,16 +795,6 @@ impl EmbeddedDb {
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pool
-    }
-
-    /// The pool the app's background work runs on (#2612), beside
-    /// [`pool`](Self::pool) and closed with it: what a start and a sync's end
-    /// leave to do in the background takes its connections here, so the
-    /// pool the pages read on keeps all of its own. Its connections open when
-    /// the first read asks.
-    #[must_use]
-    pub fn background_pool(&self) -> &PgPool {
-        &self.background
     }
 
     /// How to reach this server, for a caller that needs connections of its
@@ -1029,7 +983,6 @@ impl EmbeddedDb {
         // its locks and this is standing in for one.
         let EmbeddedDb {
             pool,
-            background,
             connector,
             postgresql,
             stop_settings,
@@ -1043,7 +996,6 @@ impl EmbeddedDb {
         drop(connector);
         drop(stop_settings);
         std::mem::forget(pool);
-        std::mem::forget(background);
         std::mem::forget(postgresql);
     }
 
@@ -1064,10 +1016,7 @@ impl EmbeddedDb {
     ///
     /// Returns [`DbError::Embedded`] if `pg_ctl stop` fails.
     pub async fn stop(self) -> Result<(), DbError> {
-        tokio::join!(
-            close_pool_bounded(&self.pool),
-            close_pool_bounded(&self.background)
-        );
+        close_pool_bounded(&self.pool).await;
         if self.owner_lock.is_none() {
             tracing::info!("not this process's server to stop");
             return Ok(());
@@ -1145,10 +1094,7 @@ impl EmbeddedDb {
     /// server never adopts, its root being fresh at every start.
     #[cfg(feature = "test-util")]
     pub async fn discard(self) -> Result<(), DbError> {
-        tokio::join!(
-            close_pool_bounded(&self.pool),
-            close_pool_bounded(&self.background)
-        );
+        close_pool_bounded(&self.pool).await;
         if self.owner_lock.is_none() {
             tracing::info!("not this process's server to stop");
             return Ok(());
@@ -1635,7 +1581,6 @@ async fn start_managed(
 
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
-        background: connector.background_pool(),
         connector,
         postgresql: Some(postgresql),
         stop_settings: None,
@@ -1898,7 +1843,6 @@ async fn adopt(
     sweep_socket_folder(socket_dir, port);
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
-        background: connector.background_pool(),
         connector,
         postgresql,
         // `settings.port` was set to the recorded port above, and

@@ -337,7 +337,6 @@ async fn bring_up_archives_the_contexts_of_jobs_already_done_and_a_second_does_n
                 let deps = knobas_app::sources::BringUp {
                     suggestions: knobas_app::suggestion_pass::SuggestionPass::beside(&pool),
                     sync_pool: connector.pool(2).await.unwrap(),
-                    background: connector.background_pool(),
                     pool,
                     connections: connector,
                     secrets: std::sync::Arc::new(knobas_secrets::MemoryStore::new()),
