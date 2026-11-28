@@ -2084,11 +2084,8 @@ mod tests {
         .unwrap();
         assert_eq!(fixture["rail_runs"].as_i64(), Some(PIPELINE_RECENT));
         let at = |v: &serde_json::Value| {
-            v.as_str().map(|s| {
-                DateTime::parse_from_rfc3339(s)
-                    .unwrap()
-                    .with_timezone(&Utc)
-            })
+            v.as_str()
+                .map(|s| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc))
         };
         let strs = |v: &serde_json::Value| -> Vec<String> {
             v.as_array()
