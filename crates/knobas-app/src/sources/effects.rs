@@ -67,6 +67,28 @@ const LINKED_TICKETS: &str = "select distinct i.entity_id
       where (l.from_id = $1 or l.to_id = $1) and i.kind = $2
       order by i.entity_id";
 
+/// The live **saved views** that hold `$1` (`sync.saved_view_member`), and
+/// those that hold any item of `$1`'s project in its source
+/// (`sync.item_project`, the key its configured adapter declares): the boards
+/// and filters a ticket write may have moved it out of or into. A view
+/// holding no ticket of the project yet is not found; the next run of its
+/// source brings it.
+const SAVED_VIEWS: &str = "with project as (
+         select p.source_id, p.adapter_kind, p.key
+           from sync.item_project p
+           join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind
+          where p.entity_id = $1
+       )
+       select distinct m.view_id
+         from sync.saved_view_member m
+         join sync.live_item v on v.entity_id = m.view_id
+        where m.entity_id = $1
+           or exists (select 1 from sync.item_project q
+                        join project p on p.source_id = q.source_id
+                         and p.adapter_kind = q.adapter_kind and p.key = q.key
+                       where q.entity_id = m.entity_id)
+        order by m.view_id";
+
 /// What one effect's read answered: what the *say so* rule (ADR-0064 rule 3,
 /// #2596) names for an effect knobas could not read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,10 +141,14 @@ impl EffectAnswer {
 
 /// The items `effect` names for the write against `target`, from the mirror:
 /// also what [`super::look_again`] finds a moved branch's repository by.
+/// The saved views are the ones of `read_back`, the item the write made or
+/// touched: a ticket filed names its project as its target, which the mirror
+/// does not hold, and the new ticket as what is read back.
 pub(crate) async fn resolve(
     pool: &sqlx::PgPool,
     effect: Effect,
     target: &str,
+    read_back: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     match effect {
         Effect::Parent => {
@@ -135,6 +161,12 @@ pub(crate) async fn resolve(
             sqlx::query_scalar(LINKED_TICKETS)
                 .bind(target)
                 .bind(TICKET_KIND)
+                .fetch_all(pool)
+                .await
+        }
+        Effect::SavedViews => {
+            sqlx::query_scalar(SAVED_VIEWS)
+                .bind(read_back)
                 .fetch_all(pool)
                 .await
         }
@@ -154,10 +186,12 @@ async fn named(
         return Vec::new();
     }
     let deps = scheduler.deps();
-    // The declarations `sync.item_parent` is kept from are the registry's:
-    // the same call every search makes before it reads (#627). One read when
-    // they are stored already.
-    if effects.contains(&Effect::Parent)
+    // The declarations `sync.item_parent` and `sync.item_project` are kept
+    // from are the registry's: the same call every search makes before it
+    // reads (#627). One read when they are stored already.
+    if effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Parent | Effect::SavedViews))
         && let Err(error) =
             knobas_search::Searcher::declaring(deps.pool.clone(), deps.registry.descriptors()).await
     {
@@ -166,7 +200,7 @@ async fn named(
     let mut seen = std::collections::HashSet::from([read_back.to_owned()]);
     let mut named = Vec::new();
     for &effect in effects {
-        match resolve(&deps.pool, effect, &write.entity_id).await {
+        match resolve(&deps.pool, effect, &write.entity_id, read_back).await {
             Ok(entities) => named.extend(
                 entities
                     .into_iter()

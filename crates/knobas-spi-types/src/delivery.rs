@@ -127,6 +127,12 @@ pub enum Effect {
     /// The tickets the target is linked to (`knobas.confirmed_link`, either
     /// end), each refreshed at whichever source holds it.
     LinkedTickets,
+    /// The saved views (a ticket system's boards and filters,
+    /// `sync.saved_view`) that hold the item read back, and those that hold
+    /// any item of its project (`sync.item_project`), which may hold it after
+    /// the write: a ticket moved, assigned or filed can enter or leave each.
+    /// Each is read by its key at its source (#2593).
+    SavedViews,
 }
 
 #[cfg(test)]
