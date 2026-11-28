@@ -1161,6 +1161,19 @@ test("a repository's folder turns the rail to By repository and lists the pipeli
   expect(target.querySelector('.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("tidewater/payout-service");
 });
 
+test("a project's folder turns a rail grouped By repository back to By project, so its fold is the pill (#2566 review)", async () => {
+  // A run row's folders link the project folder: under By repository the rail had no fold for it, and showed no pill.
+  sessionValue("builds-group").value = "repository";
+  draw(["folder", "teamcity", "Payments", "Payout"], "builds", [], { pipelines: () => Promise.resolve(FOLDERED) });
+  await settle();
+  expect(target.querySelector('.tf-seg[aria-label="Group by"] [aria-pressed="true"]')?.textContent).toBe("By project");
+  expect(target.querySelector('.tf-pl-rows summary.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("Payments › Payout");
+  // Turned by hand there, the rail stays as it was turned.
+  [...target.querySelectorAll<HTMLButtonElement>('.tf-seg[aria-label="Group by"] button')].find((b) => b.textContent === "By repository")!.click();
+  await settle();
+  expect(target.querySelector('.tf-seg[aria-label="Group by"] [aria-pressed="true"]')?.textContent).toBe("By repository");
+});
+
 test("a folder reached by its address is revealed in the rail: the folds above it opened, its pill drawn, the rows shown (#2572)", async () => {
   const nested: RailPipeline[] = [
     { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },

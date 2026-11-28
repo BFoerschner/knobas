@@ -465,9 +465,14 @@
   /** A folder's place: a source's groups (*By project*) or a repository (*By repository*); `null` at no folder. */
   const folderPath = $derived(runScope?.kind === "folder" ? runScope.path : null);
   const repoFolder = $derived(folderPath?.[0] === REPO_FOLDER);
-  // A repository's folder is drawn by *By repository*: its address turns the rail to it, so the rail shows its pill.
+  const projectFolder = $derived(folderPath !== null && !repoFolder);
+  // A repository's folder is drawn by *By repository*: its address turns the rail to it, so the rail shows its pill. A
+  // project's folder (a run row's folders link one) turns it back to *By project*, whose folds hold it.
   $effect(() => {
     if (repoFolder && !untrack(() => byRepository)) grouping.value = "repository";
+  });
+  $effect(() => {
+    if (projectFolder && untrack(() => byRepository)) grouping.value = null;
   });
   /**
    * The folder's pipelines by id, read against every pipeline (the rail's tools narrow the rail, never the table, the
