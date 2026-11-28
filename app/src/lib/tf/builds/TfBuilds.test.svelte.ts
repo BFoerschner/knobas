@@ -526,13 +526,19 @@ test("the rail's keys are the docs tree's: Up and Down step, Home and End, Right
   expect(fold("Data").open).toBe(true);
   key(fold("Data").querySelector(":scope > summary")!, "ArrowRight");
   expect(focused()).toBe("Dbt_Test");
-  // Home and End go to the ends; a step past the first row is taken, so the list does not scroll.
+  // Home and End go to the ends, *All pipelines* the first (#2574); a step past the first row is taken, so the list does
+  // not scroll.
   key(document.activeElement!, "End");
   expect(focused()).toBe("Platform › Infra");
   key(document.activeElement!, "Home");
-  expect(focused()).toBe("Payout_Build");
+  expect(focused()).toBe("All pipelines");
   expect(key(document.activeElement!, "ArrowUp")).toBe(true);
+  expect(focused()).toBe("All pipelines");
+  // Down from it steps into the tree, past the rail's tools; Up comes back.
+  key(document.activeElement!, "ArrowDown");
   expect(focused()).toBe("Payout_Build");
+  key(document.activeElement!, "ArrowUp");
+  expect(focused()).toBe("All pipelines");
 });
 
 test("a closed fold draws nothing under it until the reader opens it, so a big CI draws only what is open (#2200's class)", async () => {

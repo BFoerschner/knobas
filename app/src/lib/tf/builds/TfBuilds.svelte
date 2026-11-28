@@ -606,16 +606,21 @@
     return Number(/\btf-d(\d)\b/.exec(row.className)?.[1] ?? 0);
   }
 
+  /** The rail's rows the keys step (#2574): *All pipelines* first, then the page the filter hides, then the tree. */
+  const RAIL_ROWS = ".tf-pl-home .tf-tr, .tf-pl-pin .tf-tr, .tf-pl-rows .tf-tr";
+
   /**
-   * The rail's keys, the docs tree's table (`docs/tree-keys.ts`, F-444) over the rows drawn: Up and Down step, Home and
-   * End go to the ends, Right opens a fold and then steps into it, Left shuts it, and from a pipeline goes to its fold.
-   * A fold opened or shut so is the reader's own toggle.
+   * The rail's keys, the docs tree's table (`docs/tree-keys.ts`, F-444) over the rows drawn, *All pipelines* the first
+   * (#2574): Up and Down step, Home and End go to the ends, Right opens a fold and then steps into it, Left shuts it,
+   * and from a pipeline goes to its fold. A fold opened or shut so is the reader's own toggle. The rail's tools between
+   * *All pipelines* and the tree are not rows: Tab reaches them.
    */
   function railKeys(event: KeyboardEvent) {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || list === undefined) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const rail = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     const row = event.target instanceof HTMLElement ? event.target : null;
-    if (row === null || !row.matches(".tf-pl-rows .tf-tr")) return;
-    const drawn = [...list.querySelectorAll<HTMLElement>(".tf-pl-rows .tf-tr")];
+    if (rail === null || row === null || !row.matches(RAIL_ROWS)) return;
+    const drawn = [...rail.querySelectorAll<HTMLElement>(RAIL_ROWS)];
     const at = drawn.indexOf(row);
     const fold = row.dataset["fold"];
     const open = fold !== undefined && (row.parentElement as HTMLDetailsElement | null)?.open === true;
