@@ -111,6 +111,12 @@ export function fakeMove(row: QueuedWrite): QueuedWrite {
         moved();
         // The refresh after a landed write (ADR-0031): the board reads again, and the echo settles.
         setTimeout(() => emit(EVENTS.itemRefreshed, { entity_id: row.entity_id, write_id: pending.id, ended: "refreshed" }), 150);
+        // `?fake-unread` (#2596): the boards past the cap on views one write reads are said, not read.
+        if (new URLSearchParams(location.search).has("fake-unread")) {
+          const key = keyOf(row.entity_id);
+          const unread = [{ entity_id: null, title: key, source_id: row.source_id, source_name: "Jira", by_hand: false, why: "left_out", next_run_at: null }];
+          setTimeout(() => emit(EVENTS.writeUnread, { write_id: pending.id, entity_id: row.entity_id, title: key, unread }), 200);
+        }
         return;
       }
       moved();

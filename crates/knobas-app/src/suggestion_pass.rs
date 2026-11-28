@@ -366,6 +366,9 @@ impl<E: SyncEvents> SyncEvents for SuggestOnSync<E> {
     fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
         self.inner.looking_again(looking);
     }
+    fn write_unread(&self, unread: &knobas_sync::scheduler::WriteUnread) {
+        self.inner.write_unread(unread);
+    }
     // The files pass's index and progress, passed on wherever this wrapper
     // sits in the stack (`tests/it/files_on_sync.rs`).
     fn files(&self) -> Option<knobas_sync::code_files::Files> {

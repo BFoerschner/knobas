@@ -117,6 +117,11 @@ export const EVENTS = {
    * sides stopped, or it ended. The repository's Builds tab says *Looking for new builds…* while `builds` is true.
    */
   lookingAgain: "looking:again",
+  /**
+   * `WriteUnread` — what a landed write moved that knobas could not read back (ADR-0064 rule 3, #2596), told once per
+   * landed write. The shell says it in one toast (`shell/unread-toast.ts`), which goes once it arrives.
+   */
+  writeUnread: "write:unread",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

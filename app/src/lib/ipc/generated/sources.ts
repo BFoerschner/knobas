@@ -1976,6 +1976,52 @@ value: string,
 trigger: Trigger, };
 
 /**
+ * One thing a landed write moved that knobas did not read back
+ * ([`WriteUnread`]).
+ */
+export type Unread = { 
+/**
+ * The item not read, or `None` for what else the write moved, unnamed:
+ * a source that syncs by hand, a source's own action, the saved views
+ * past the read's cap.
+ */
+entity_id: string | null, 
+/**
+ * The item's title, or its id where the mirror holds none; for the
+ * views past the cap, the item they would hold.
+ */
+title: string, 
+/**
+ * The source the next run of which brings it.
+ */
+source_id: string, 
+/**
+ * That source's name, as Settings shows it.
+ */
+source_name: string, 
+/**
+ * Whether that source syncs only by hand (ADR-0056): what brings it is
+ * a press of *Sync now*, not a run of its own.
+ */
+by_hand: boolean, 
+/**
+ * Why it was not read.
+ */
+why: UnreadWhy, 
+/**
+ * When the scheduler runs that source next, where that is what brings
+ * it: a scheduled source other than the write's. `None` for the
+ * write's own source, whose run follows the write at once (ADR-0031),
+ * and for one that syncs by hand, is turned off or runs now.
+ */
+next_run_at: string | null, };
+
+/**
+ * Why something a landed write moved was not read back ([`Unread`]).
+ */
+export type UnreadWhy = "not_offered" | "run_in_flight" | "turned_off" | "failed" | "left_out" | "by_hand" | "unknown";
+
+/**
  * What the last update check of an installed adapter found (#1209).
  *
  * - `current`: the installed release is the latest.
@@ -2501,3 +2547,29 @@ reviewers: Array<string>, } };
  * type's and a field's doc but not a variant's (#1325).
  */
 export type WriteState = "pending" | "held" | "refused" | "sent" | "discarded";
+
+/**
+ * The payload of the shell's `write:unread` event (ADR-0064 rule 3,
+ * #2596): what a landed write moved that knobas could not read back, said
+ * rather than waited on in silence. Told once per landed write, after its
+ * effects are read and before the run that follows it. A write whose item
+ * and effects were all read tells nothing.
+ */
+export type WriteUnread = { 
+/**
+ * The queued write that landed.
+ */
+write_id: number, 
+/**
+ * The item it was read back by: the one it made, or the one it was made
+ * against.
+ */
+entity_id: string, 
+/**
+ * That item's title, or its id where the mirror holds none.
+ */
+title: string, 
+/**
+ * What was not read, each item once, in the order found.
+ */
+unread: Array<Unread>, };

@@ -517,7 +517,14 @@ pub async fn password_source_facts<R: tauri::Runtime>(
 #[ts(export_to = "passwords.ts")]
 pub enum WriteAnswer {
     /// The source took it; the entry is `entity_id`.
-    Written { entity_id: String },
+    Written {
+        entity_id: String,
+        /// The entry sits in a folder whose path the mirror does not hold
+        /// yet: it was moved or made there, and the one listing it was read
+        /// back from names no ancestors, so its path shows after the next
+        /// sync (ADR-0064 rule 3, #2596).
+        path_unread: bool,
+    },
     /// The source did not answer: nothing was saved.
     Unreachable { message: String },
     /// It was sent and no answer came: Sync now shows whether it arrived.
@@ -586,21 +593,24 @@ pub async fn passwords_write<R: tauri::Runtime>(
         .item
         .as_ref()
         .map_or(target, |item| item.entity.to_string());
+    let mut path_unread = false;
     if let Some(mut item) = written.item {
+        let mut record: passwords::EntryRecord =
+            serde_json::from_value(item.payload.clone()).unwrap_or_default();
         // One listing does not hold the entry's ancestors: keep the path the
         // mirror has while the entry stays in its folder.
-        if let Ok(Some(old)) = reads::entry(&sources.pool, &entity_id).await {
-            let mut record: passwords::EntryRecord =
-                serde_json::from_value(item.payload.clone()).unwrap_or_default();
-            if record.path.is_empty() && record.folder == old.folder {
-                let path = reads::mirrored_path(&sources.pool, &entity_id)
-                    .await
-                    .ok()
-                    .flatten();
-                record.path = path.unwrap_or_default();
-                item.payload = serde_json::to_value(&record).unwrap_or(item.payload);
-            }
+        if record.path.is_empty()
+            && let Ok(Some(old)) = reads::entry(&sources.pool, &entity_id).await
+            && record.folder == old.folder
+        {
+            let path = reads::mirrored_path(&sources.pool, &entity_id)
+                .await
+                .ok()
+                .flatten();
+            record.path = path.unwrap_or_default();
+            item.payload = serde_json::to_value(&record).unwrap_or(item.payload);
         }
+        path_unread = record.path.is_empty() && record.folder.is_some();
         let deps = sources.scheduler.deps();
         crate::passwords::mirror_written(deps.connections.as_ref(), lent.source.as_ref(), item)
             .await
@@ -632,7 +642,10 @@ pub async fn passwords_write<R: tauri::Runtime>(
     {
         tracing::warn!(entity = %entity_id, %error, "the write's activity line was not kept");
     }
-    Ok(WriteAnswer::Written { entity_id })
+    Ok(WriteAnswer::Written {
+        entity_id,
+        path_unread,
+    })
 }
 
 /// What opening one attachment answered (step 9a).

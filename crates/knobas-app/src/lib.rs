@@ -133,6 +133,11 @@ pub mod events {
     /// what it still looks for. Broadcast: the repository's Builds tab says
     /// *Looking for new builds…* while its builds are looked for.
     pub const LOOKING_AGAIN: &str = "looking:again";
+    /// Payload: `knobas_sync::scheduler::WriteUnread` -- what a landed write
+    /// moved that knobas could not read back (ADR-0064 rule 3, #2596), told
+    /// once per landed write before the run that follows it. Broadcast: the
+    /// shell says it in one toast, which goes once it arrives.
+    pub const WRITE_UNREAD: &str = "write:unread";
     /// Payload: `sources::live::ViewFresh` -- a source view the shell was
     /// answered from memory was read again behind the answer, and the
     /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
@@ -2223,6 +2228,7 @@ mod tests {
             super::events::CLIPBOARD_STATE,
             super::events::LINK_HANDOFF_OPEN,
             super::events::LOOKING_AGAIN,
+            super::events::WRITE_UNREAD,
         ];
         names.sort_unstable();
         declared.sort_unstable();

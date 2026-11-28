@@ -370,6 +370,11 @@ pub trait SyncEvents: Send + Sync + 'static {
     /// `sources::look_again`. A wrapper passes it on; the default hears
     /// nothing.
     fn looking_again(&self, _looking: &LookingAgain) {}
+    /// `write:unread` (ADR-0064 rule 3, #2596): what a landed write moved
+    /// that knobas could not read back. Told by `knobas-app`'s
+    /// `sources::write_queue::after_landing`. A wrapper passes it on; the
+    /// default hears nothing.
+    fn write_unread(&self, _unread: &WriteUnread) {}
 }
 
 /// The payload of the shell's `item:refreshed` event: a refresh of one item
@@ -405,6 +410,77 @@ pub struct LookingAgain {
     /// write (#2595), by entity id: the one the write made or touched and
     /// those linked to it, so a page drawing one can say so.
     pub items: Vec<String>,
+}
+
+/// The payload of the shell's `write:unread` event (ADR-0064 rule 3,
+/// #2596): what a landed write moved that knobas could not read back, said
+/// rather than waited on in silence. Told once per landed write, after its
+/// effects are read and before the run that follows it. A write whose item
+/// and effects were all read tells nothing.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct WriteUnread {
+    /// The queued write that landed.
+    pub write_id: i64,
+    /// The item it was read back by: the one it made, or the one it was made
+    /// against.
+    pub entity_id: String,
+    /// That item's title, or its id where the mirror holds none.
+    pub title: String,
+    /// What was not read, each item once, in the order found.
+    pub unread: Vec<Unread>,
+}
+
+/// One thing a landed write moved that knobas did not read back
+/// ([`WriteUnread`]).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct Unread {
+    /// The item not read, or `None` for what else the write moved, unnamed:
+    /// a source that syncs by hand, a source's own action, the saved views
+    /// past the read's cap.
+    pub entity_id: Option<String>,
+    /// The item's title, or its id where the mirror holds none; for the
+    /// views past the cap, the item they would hold.
+    pub title: String,
+    /// The source the next run of which brings it.
+    pub source_id: String,
+    /// That source's name, as Settings shows it.
+    pub source_name: String,
+    /// Whether that source syncs only by hand (ADR-0056): what brings it is
+    /// a press of *Sync now*, not a run of its own.
+    pub by_hand: bool,
+    /// Why it was not read.
+    pub why: UnreadWhy,
+    /// When the scheduler runs that source next, where that is what brings
+    /// it: a scheduled source other than the write's. `None` for the
+    /// write's own source, whose run follows the write at once (ADR-0031),
+    /// and for one that syncs by hand, is turned off or runs now.
+    pub next_run_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Why something a landed write moved was not read back ([`Unread`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
+pub enum UnreadWhy {
+    /// Its adapter reads it neither by id nor as a parent.
+    NotOffered,
+    /// A run of its source held it past the effect's patience; that run, or
+    /// the next, brings it.
+    RunInFlight,
+    /// Its source is turned off.
+    TurnedOff,
+    /// Its read failed.
+    Failed,
+    /// It is past the cap on the saved views one write reads.
+    LeftOut,
+    /// Its source syncs only by hand (ADR-0056): no run follows the write,
+    /// so what else it moved waits for *Sync now*.
+    ByHand,
+    /// The write is a source's own action, whose other changes knobas cannot
+    /// know (`WriteOp::SourceAction`).
+    Unknown,
 }
 
 /// How a refresh ended. A refresh that was not offered, or refused because

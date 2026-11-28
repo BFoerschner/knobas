@@ -308,6 +308,9 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
         self.inner.looking_again(looking);
     }
+    fn write_unread(&self, unread: &knobas_sync::scheduler::WriteUnread) {
+        self.inner.write_unread(unread);
+    }
     // The files pass's index and progress, passed on wherever this wrapper
     // sits in the stack (`tests/it/files_on_sync.rs`).
     fn files(&self) -> Option<knobas_sync::code_files::Files> {
@@ -917,7 +920,7 @@ pub(crate) async fn after_landing(
         refreshed = &mut refresh => refreshed,
         () = stand_aside_once_waiting(scheduler, &write.source_id, write.id) => refresh.await,
     };
-    if let Err(error) = refreshed {
+    if let Err(error) = &refreshed {
         tracing::warn!(
             source = %write.source_id,
             write_id = write.id,
@@ -926,6 +929,7 @@ pub(crate) async fn after_landing(
             "a write landed but its item could not be refreshed"
         );
     }
+    let item = super::effects::EffectAnswer::of(refreshed);
     // A run it started (or any run in flight it was read back by) is read on
     // to its end, beside the run that follows the write (the TeamCity run
     // fix, 2026-11-25): that run catches the build where it stands then, and
@@ -935,9 +939,24 @@ pub(crate) async fn after_landing(
     // What else the write moved, as its op declares it, each read at its own
     // source before the run (ADR-0064): the run reads only the write's own
     // source, takes minutes at size, and stands aside for a later write.
-    let declared =
-        serde_json::from_value::<WriteOp>(write.payload.clone()).map_or(&[][..], |op| op.effects());
+    let op = serde_json::from_value::<WriteOp>(write.payload.clone()).ok();
+    let declared = op.as_ref().map_or(&[][..], WriteOp::effects);
     let effects = super::effects::read(scheduler, write, &entity, declared).await;
+    // What it could not read back is said, not waited on in silence, before
+    // the run that follows begins (ADR-0064 rule 3, #2596).
+    let pool = &scheduler.deps().pool;
+    let by_hand = knobas_sync::config::syncs_by_hand(pool, &write.source_id)
+        .await
+        .unwrap_or(false);
+    let said = super::effects::Said {
+        source: &write.source_id,
+        by_hand,
+        own_action: matches!(op, Some(WriteOp::SourceAction { .. })),
+    };
+    let unsaid = super::effects::unsaid(&entity, &item, &effects, said);
+    if let Some(unread) = super::effects::tell(pool, write, &entity, unsaid).await {
+        scheduler.deps().events.write_unread(&unread);
+    }
     // What the source does after the write (CI queues a build, the forge
     // finishes the merge, a bot comments, automation transitions a ticket) is
     // looked for on a short, bounded schedule, beside the run: the item and
@@ -1205,6 +1224,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     }
     fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
         self.inner.looking_again(looking);
+    }
+    fn write_unread(&self, unread: &knobas_sync::scheduler::WriteUnread) {
+        self.inner.write_unread(unread);
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)

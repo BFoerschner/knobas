@@ -15,6 +15,7 @@
   import type { Model, Node } from "./model";
   import { chainOf } from "./model";
   import { rememberComment, startingComment } from "./ports";
+  import { afterSync } from "../../shell/unread-toast";
 
   let {
     kind,
@@ -133,7 +134,9 @@
     try {
       const answer = await send(write());
       if (answer.kind === "written") {
-        ondone(answer.entity_id, kind === "change" ? "Changed the password" : kind === "new" ? "Added the entry" : "Saved the entry");
+        const done = kind === "change" ? "Changed the password" : kind === "new" ? "Added the entry" : "Saved the entry";
+        // Its read-back names no folders above it: said, not waited on (ADR-0064 rule 3, #2596).
+        ondone(answer.entity_id, answer.path_unread ? `${done}. Its path shows ${afterSync(source.name, source.by_hand)}` : done);
         onclose();
         return;
       }

@@ -320,7 +320,14 @@ listed_in: string | null, } | { "write": "request_access", entity: string, comme
 /**
  * What a direct write answered.
  */
-export type WriteAnswer = { "kind": "written", entity_id: string, } | { "kind": "unreachable", message: string, } | { "kind": "unconfirmed", message: string, };
+export type WriteAnswer = { "kind": "written", entity_id: string, 
+/**
+ * The entry sits in a folder whose path the mirror does not hold
+ * yet: it was moved or made there, and the one listing it was read
+ * back from names no ancestors, so its path shows after the next
+ * sync (ADR-0064 rule 3, #2596).
+ */
+path_unread: boolean, } | { "kind": "unreachable", message: string, } | { "kind": "unconfirmed", message: string, };
 
 /**
  * A direct write a source performs.

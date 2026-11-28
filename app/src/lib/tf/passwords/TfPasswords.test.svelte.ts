@@ -11,6 +11,7 @@ import { forgetComment, type PasswordPorts } from "./ports";
 import { resetClip } from "./clip.svelte";
 import { siteStore } from "../site/site.svelte";
 import { onMac } from "../../shell/platform";
+import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
 import type { SiteSetting } from "../../ipc/site";
 
 /** The password source's site, as Settings holds it (ux30): it opens inside and signs in with the source's credential. */
@@ -72,7 +73,7 @@ function ports(over: Partial<PasswordPorts> = {}, view: Held = held()): Password
     copyCode: vi.fn(async () => ({ kind: "code" as const, code: "482913", digits: 6, period: 30, left_ms: 12_000 })),
     copyPlain: vi.fn(async () => {}),
     openExternal: vi.fn(async () => {}),
-    write: vi.fn(async (): Promise<WriteAnswer> => ({ kind: "written", entity_id: "pw:graf" })),
+    write: vi.fn(async (): Promise<WriteAnswer> => ({ kind: "written", entity_id: "pw:graf", path_unread: false })),
     copySecret: vi.fn(async () => {}),
     attachment: vi.fn(async (): Promise<AttachmentAnswer> => ({ kind: "read", name: "wg-hub.conf", size: 21, data: btoa("[Interface]\nPort = 1"), text: "[Interface]\nPort = 1" })),
     saveAttachment: vi.fn(async () => "/home/mara/Downloads/wg-hub.conf"),
@@ -275,6 +276,25 @@ test("Edit sends only what changed, and no password", async () => {
   dialog.requestSubmit();
   await settle();
   expect(p.write).toHaveBeenCalledWith({ write: "edit_entry", entity: "pw:graf", comment: null, listed_in: "pw:plat", username: "grafana_admin" });
+});
+
+test("an entry moved to another folder says its path shows after the source's next sync, and one kept in place says nothing more (#2596)", async () => {
+  const moved = vi.fn(async (): Promise<WriteAnswer> => ({ kind: "written", entity_id: "pw:graf", path_unread: true }));
+  const p = ports({ entry: vi.fn(async (id: string) => record(id, { can_modify: true })), write: moved }, writable());
+  await open(p, ["entry", "pw:graf"]);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+  await settle();
+  target.ownerDocument.querySelector<HTMLFormElement>(".tf-pw-form")!.requestSubmit();
+  await settle();
+  // Team passwords syncs by hand, so what brings the path is Sync now.
+  expect(toasts.items.map((t) => t.text)).toContain("Saved the entry. Its path shows after Sync now on Team passwords.");
+  resetToasts();
+  moved.mockResolvedValueOnce({ kind: "written", entity_id: "pw:graf", path_unread: false });
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+  await settle();
+  target.ownerDocument.querySelector<HTMLFormElement>(".tf-pw-form")!.requestSubmit();
+  await settle();
+  expect(toasts.items.map((t) => t.text)).toEqual(["Saved the entry."]);
 });
 
 test("a write the source does not answer keeps the dialog and what was typed, and says nothing was saved", async () => {

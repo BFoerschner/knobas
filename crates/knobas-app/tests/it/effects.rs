@@ -41,7 +41,8 @@ use knobas_source::{
     WriteReceipt,
 };
 use knobas_sync::scheduler::{
-    AdapterRegistry, RunConnections, SchedulerDeps, SchedulerTiming, SyncEvents,
+    AdapterRegistry, RunConnections, SchedulerDeps, SchedulerTiming, SyncEvents, Unread, UnreadWhy,
+    WriteUnread,
 };
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
@@ -114,6 +115,8 @@ struct Shared {
     seen: Arc<Seen>,
     /// One permit per run the test lets through.
     door: Arc<Semaphore>,
+    /// Every `write:unread` told, in order.
+    unread: Arc<Mutex<Vec<WriteUnread>>>,
 }
 
 fn item(entity: &str, kind: &str, title: &str, payload: Value, deleted: bool) -> SyncItem {
@@ -547,12 +550,16 @@ impl RunConnections for Connections {
     }
 }
 
-struct Quiet;
+/// Hears every `write:unread`, and nothing else.
+struct Heard(Arc<Mutex<Vec<WriteUnread>>>);
 
-impl SyncEvents for Quiet {
+impl SyncEvents for Heard {
     fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
     fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
     fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    fn write_unread(&self, unread: &WriteUnread) {
+        self.0.lock().unwrap().push(unread.clone());
+    }
 }
 
 /// No tick for the whole test: only the seeding runs and a landed write's
@@ -599,6 +606,7 @@ async fn fixture(name: &str) -> (SourcesState, Shared) {
         world: Arc::default(),
         seen: Arc::default(),
         door: Arc::new(Semaphore::new(2)),
+        unread: Arc::default(),
     };
     let registry: Arc<dyn AdapterRegistry> = Arc::new(Registry(shared.clone()));
     let scheduler = knobas_app::sources::start_scheduler(
@@ -607,7 +615,7 @@ async fn fixture(name: &str) -> (SourcesState, Shared) {
             connections: Arc::new(Connections(connector)),
             registry: Arc::clone(&registry),
             secrets: secrets.clone(),
-            events: Arc::new(Quiet),
+            events: Arc::new(Heard(Arc::clone(&shared.unread))),
             timing: HELD_OFF,
             quit: knobas_sync::scheduler::Quit::default(),
         },
@@ -783,6 +791,12 @@ async fn a_merge_reads_back_its_repository_and_linked_ticket_without_a_run() {
     );
 
     the_run_still_follows(&state, &shared, FORGE, id).await;
+    // The run follows the telling, so by now it would have been told.
+    assert_eq!(
+        *shared.unread.lock().unwrap(),
+        [],
+        "a write whose effects were all read says nothing extra (#2596)"
+    );
     state.scheduler.shutdown().await;
 }
 
@@ -870,7 +884,82 @@ async fn an_effect_behind_a_run_that_does_not_stand_aside_holds_up_nothing() {
             .contains(&TICKET.to_owned()),
         "the ticket was not read while its source was held"
     );
+    // Said, not waited on (#2596): the ticket, its source, and why.
+    let told = shared.unread.lock().unwrap().clone();
+    assert_eq!(told.len(), 1, "one telling for the write: {told:?}");
+    assert_eq!((told[0].write_id, told[0].entity_id.as_str()), (id, PULL));
+    let [ticket] = told[0].unread.as_slice() else {
+        panic!("only the ticket is unread: {told:?}");
+    };
+    assert_eq!(
+        (
+            ticket.entity_id.as_deref(),
+            ticket.title.as_str(),
+            ticket.source_id.as_str(),
+            ticket.why,
+            ticket.by_hand
+        ),
+        (
+            Some(TICKET),
+            "Retry SEPA payouts",
+            TRACKER,
+            UnreadWhy::RunInFlight,
+            false
+        )
+    );
+    assert!(
+        ticket.next_run_at.is_some(),
+        "the tracker's next run is known: {ticket:?}"
+    );
     tracker_run.rollback().await.unwrap();
+    state.scheduler.shutdown().await;
+}
+
+/// **A write to a source that syncs by hand says what else it moved shows
+/// after *Sync now*** (ADR-0064 rule 3, ADR-0056, #2596): no run follows the
+/// write, so its effects read at once are all that arrives until the press.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_to_a_source_that_syncs_by_hand_says_the_rest_waits_for_sync_now() {
+    let (state, shared) = fixture("effects_by_hand").await;
+    sqlx::query("update knobas.source_config set sync_by_hand = true where id = $1")
+        .bind(FORGE)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let id = landed(
+        &state,
+        json!({ "UpdatePullRequestBranch": { "entity": PULL, "style": "merge" } }),
+    )
+    .await;
+
+    eventually("the write's telling", || async {
+        !shared.unread.lock().unwrap().is_empty()
+    })
+    .await;
+    let told = shared.unread.lock().unwrap().clone();
+    assert_eq!(
+        told,
+        [WriteUnread {
+            write_id: id,
+            entity_id: PULL.to_owned(),
+            title: "Retry SEPA payouts".to_owned(),
+            unread: vec![Unread {
+                entity_id: None,
+                title: "Retry SEPA payouts".to_owned(),
+                source_id: FORGE.to_owned(),
+                source_name: FORGE.to_owned(),
+                by_hand: true,
+                why: UnreadWhy::ByHand,
+                next_run_at: None,
+            }],
+        }]
+    );
+    assert_eq!(
+        runs_since(&state, FORGE, id).await,
+        (0, 0),
+        "no run follows"
+    );
     state.scheduler.shutdown().await;
 }
 

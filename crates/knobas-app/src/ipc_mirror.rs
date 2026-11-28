@@ -407,6 +407,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_sync::SyncReport::export_all(cfg)?;
     knobas_sync::scheduler::RefreshEnded::export_all(cfg)?;
     knobas_sync::scheduler::LookingAgain::export_all(cfg)?;
+    knobas_sync::scheduler::WriteUnread::export_all(cfg)?;
     knobas_sync::progress::SyncProgress::export_all(cfg)?;
     knobas_sync::run_log::SourceSyncStatus::export_all(cfg)?;
     knobas_sync::stats::DbStats::export_all(cfg)?;

@@ -44,6 +44,9 @@ impl<R: tauri::Runtime> SyncEvents for TauriEvents<R> {
     fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
         self.emit(crate::events::LOOKING_AGAIN, looking);
     }
+    fn write_unread(&self, unread: &knobas_sync::scheduler::WriteUnread) {
+        self.emit(crate::events::WRITE_UNREAD, unread);
+    }
 }
 
 impl<R: tauri::Runtime> crate::notify::NotificationEvents for TauriEvents<R> {
