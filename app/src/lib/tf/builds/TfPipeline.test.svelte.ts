@@ -1693,3 +1693,80 @@ test("the runs in flight are refreshed at the source once the page has drawn, th
   await settle();
   expect(asked).toHaveLength(5);
 });
+
+/** A read that answers when the test says so. */
+function later<T>(): { promise: Promise<T>; answer: (value: T) => void } {
+  let answer: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => (answer = resolve));
+  return { promise, answer };
+}
+
+test("the header draws Refresh pipeline in its first frame, before the pipeline's item is read, and its item landing adds and moves nothing (#2618)", async () => {
+  const item = later<ReturnType<typeof detailOf>>();
+  draw([PIPELINE.entity_id], null, { refresh: refreshProbe().ports, getEntity: () => item.promise }, undefined, viewSync);
+  flushSync();
+  expect(headerActs().slice(-2)).toEqual(["Refresh pipeline", "Sync now"]);
+  await settle();
+  const first = headerActs();
+  item.answer(detailOf(PIPELINE.entity_id, { refreshes: true }));
+  await settle();
+  expect(headerActs()).toEqual(first);
+});
+
+test("a pipeline of a source whose item answered Sync now draws Sync now in the first frame of the next pipeline of it (#2618)", async () => {
+  draw([PIPELINE.entity_id], null, { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, undefined, viewSync);
+  await settle();
+  expect(headerActs().filter((name) => name === "Sync now")).toHaveLength(1);
+  unmount(page!);
+  page = null;
+  draw([PIPELINE.entity_id], null, { refresh: refreshProbe().ports, getEntity: () => new Promise(() => {}) }, undefined, viewSync);
+  flushSync();
+  expect(headerActs().filter((name) => name.startsWith("Refresh"))).toEqual([]);
+  expect(headerActs().at(-1)).toBe("Sync now");
+});
+
+test("the header's line keeps the source's word from the last pipeline page, so the repository after it never moves (#2618)", async () => {
+  draw([PIPELINE.entity_id], null);
+  await settle();
+  const line = () => target.querySelector(".tf-bhead .tf-sub")?.textContent?.replace(/\s+/g, " ").trim();
+  const whole = line();
+  expect(whole).toContain("TeamCity build configuration, builds payout-service");
+  unmount(page!);
+  page = null;
+  // Back to a pipeline page: the sources and adapters read late, the settings at once.
+  draw([PIPELINE.entity_id], null, { adapters: () => new Promise(() => {}), sources: () => new Promise(() => {}) });
+  await settle();
+  expect(line()).toBe(whole);
+});
+
+test("on the first pipeline page the line's repository waits for the source's word, so it never moves right when the word lands (#2618)", async () => {
+  const adapters = later<SourceDescriptor[]>();
+  const sources = later<SourceSummary[]>();
+  draw([PIPELINE.entity_id], null, { adapters: () => adapters.promise, sources: () => sources.promise });
+  await settle();
+  // The settings are read; the word is not: nothing stands after the line's start yet.
+  expect(target.querySelector(".tf-bhead .tf-bsub-repo")).toBeNull();
+  adapters.answer([DESCRIPTOR as unknown as SourceDescriptor]);
+  sources.answer([SOURCE as unknown as SourceSummary]);
+  await settle();
+  expect(target.querySelector(".tf-bhead .tf-sub")?.textContent?.replace(/\s+/g, " ").trim()).toContain("TeamCity build configuration, builds payout-service");
+});
+
+test("Refresh pipeline pressed before the pipeline's item is read refreshes it, and a source that doesn't refresh one runs its sync instead (#2618)", async () => {
+  const probe = refreshProbe();
+  draw([PIPELINE.entity_id], null, { refresh: probe.ports, getEntity: () => new Promise(() => {}) }, undefined, viewSync);
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(probe.refreshed).toEqual([PIPELINE.entity_id]);
+  unmount(page!);
+  page = null;
+  const unoffered = refreshProbe({ answer: () => Promise.resolve({ outcome: "not_offered" }) });
+  draw([PIPELINE.entity_id], null, { refresh: unoffered.ports, getEntity: () => new Promise(() => {}) }, undefined, viewSync);
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(unoffered.refreshed).toEqual([PIPELINE.entity_id]);
+  expect(unoffered.synced).toEqual([PIPELINE.source_id]);
+  expect(headerActs().filter((name) => name.startsWith("Refresh"))).toEqual([]);
+});

@@ -79,6 +79,7 @@
   import { repositoryShortName } from "./chain";
   import TfChainSign from "./TfChainSign.svelte";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
+  import { expectedSubject, keepAdapters, keepRefreshes, keepSources, keptAdapters, keptSources } from "./pipeline-facts.svelte";
   import { fieldsOf, type RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
   import TfRunRow from "./TfRunRow.svelte";
@@ -165,8 +166,11 @@
   let jobBranches = $state<string[]>([]);
   /** The job `jobBranches` was read for, once its read answered (or failed); `null` while it is out. */
   let branchesFor = $state<string | null>(null);
-  let adapters = $state<SourceDescriptor[]>([]);
-  let sources = $state<SourceSummary[]>([]);
+  // What the last pipeline page read, so this one's first frame says the source's word (#2618).
+  let adapters = $state<SourceDescriptor[]>(keptAdapters() ?? []);
+  let sources = $state<SourceSummary[]>(keptSources() ?? []);
+  /** Whether both are read here or kept from a pipeline page before: what comes after the source's word waits for it (#2618). */
+  let factsRead = $state(keptAdapters() !== null && keptSources() !== null);
   let sync = $state<SourceSyncStatus[]>([]);
   /** Older history: `more` while the source may hold more, `end` once it said none. */
   let older = $state<"more" | "loading" | "end">("more");
@@ -252,11 +256,15 @@
     );
   }
 
-  /** The pipeline's item (#2137); a failed read keeps the last one, and none draws no *Refresh*. */
+  /**
+   * The pipeline's item (#2137); a failed read keeps the last one. Until one answers, the header's *Refresh* is drawn
+   * from `expectedSubject` (#2618).
+   */
   function readDetail(wanted: string, current: () => boolean): Promise<void> {
     return ports.getEntity(wanted).then(
       (answer) => {
         if (current()) detail = answer;
+        keepRefreshes(answer.source.id, answer.refreshes);
       },
       () => {},
     );
@@ -343,8 +351,11 @@
 
   // Facts about the sources, read once: the word, the warn line.
   onMount(() => {
-    void ports.adapters().then((rows) => (adapters = rows), () => {});
-    void ports.sources().then((rows) => (sources = rows), () => {});
+    const facts = [
+      ports.adapters().then((rows) => keepAdapters((adapters = rows))),
+      ports.sources().then((rows) => keepSources((sources = rows))),
+    ];
+    void Promise.allSettled(facts).then(() => (factsRead = true));
     void ports.syncStatus().then((rows) => (sync = rows), () => {});
   });
 
@@ -433,6 +444,11 @@
       .join("\n\n"),
   );
   const stale = $derived(staleLine(pipeline, sources, sync));
+  /**
+   * What the header's *Refresh* draws from: the pipeline's item once read, before that what its source's last item said
+   * (`expectedSubject`), so the button is there in the first frame and the item's landing moves nothing (#2618).
+   */
+  const refreshSubject = $derived(detail ?? expectedSubject(pipeline, sources));
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
   const fallback = $derived(defaultBranch(settings));
 
@@ -731,19 +747,19 @@
     <!-- One line, always (the build-header pass, 2026-11-20): what it is, the first repository by its own name and how
          many more, what triggers it and the chain's sign. What gives way when the line is short is the triggers, then
          the source's words, each whole in its title; the repository's name only when it alone is wider than the line;
-         the sign never does. -->
+         the sign never does. What follows the line's start waits for the source's word, read once a session (#2618). -->
     <div class="tf-sub tf-bsub">
       <span class="tf-bsub-kind" title={kindLine}>{kindLine}</span
-      >{#if built !== null}{" "}{#if built.entity_id !== null}<a
+      >{#if factsRead && built !== null}{" "}{#if built.entity_id !== null}<a
             class="tf-bsub-repo tf-mono"
             href={`#/repo/${encodeURIComponent(built.entity_id)}`}
             title={repositoriesTitle}>{repositoryShortName(built.name)}</a
           >{:else}<span class="tf-bsub-repo tf-mono" title={repositoriesTitle}>{repositoryShortName(built.name)}</span
           >{/if}{#if repositories.length > 1}{" "}<span class="tf-bsub-more" title={repositoriesTitle}
             >and {repositories.length - 1} more</span
-          >{/if}<span class="tf-bsub-sep">.</span>{/if}{#if triggers !== ""}{" "}<span class="tf-bsub-trig" title={triggers}
+          >{/if}<span class="tf-bsub-sep">.</span>{/if}{#if factsRead && triggers !== ""}{" "}<span class="tf-bsub-trig" title={triggers}
           >{triggers}</span
-        >{/if}{#if chainSteps.length > 1}{" "}<TfChainSign chain={chainSteps} pipelineId={pipeline.entity_id} />{/if}
+        >{/if}{#if factsRead && chainSteps.length > 1}{" "}<TfChainSign chain={chainSteps} pipelineId={pipeline.entity_id} />{/if}
     </div>
   </div>
   <div class="tf-acts">
@@ -778,7 +794,7 @@
     {#if pipeline.web_url !== null}
       <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={openInSource}><span class="tf-wide tf-cut">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
     {/if}
-    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
+    <TfHeaderRefresh detail={refreshSubject} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} {refresh} reread={refreshRead} />{/if}
