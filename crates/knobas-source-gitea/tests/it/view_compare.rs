@@ -387,7 +387,11 @@ async fn ranged(
     let Block::Diff { files, range, .. } = &view.sections[0].blocks[0] else {
         panic!("a diff");
     };
-    assert_eq!(paths_of(files), ["src/retry.rs"], "the diff is drawn either way");
+    assert_eq!(
+        paths_of(files),
+        ["src/retry.rs"],
+        "the diff is drawn either way"
+    );
     range.clone()
 }
 
