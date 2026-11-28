@@ -17,7 +17,6 @@ import {
   keptPipelines,
   latestTime,
   pipelineHash,
-  pipelineOf,
   runHash,
   runTone,
   sharedPrefix,
@@ -131,14 +130,8 @@ test("the chips keep the failing or the running ones, and both together keep wha
   expect(names(keptPipelines(list, ["Failing", "Running"]))).toEqual([]);
 });
 
-test("the address carries the entity id, and a bare #/builds selects the first failing pipeline", () => {
-  const list = [pipeline("A", [run()]), pipeline("B", [failed]), pipeline("C", [failed])];
+test("the address carries the entity id", () => {
   expect(pipelineHash("teamcity:buildType:B")).toBe("#/builds/teamcity%3AbuildType%3AB");
-  expect(pipelineOf(list, ["teamcity:buildType:C"])?.name).toBe("C");
-  expect(pipelineOf(list, [])?.name).toBe("B");
-  expect(pipelineOf([pipeline("A", [run()])], [])?.name).toBe("A");
-  expect(pipelineOf(list, ["teamcity:buildType:Gone"])).toBeNull();
-  expect(pipelineOf([], [])).toBeNull();
 });
 
 test("a run's address carries its pipeline's entity id and its own", () => {
@@ -177,6 +170,9 @@ test("a group holding only one subgroup is one row with it, as far as the chain 
   expect(tree!.folds.map((f) => f.name)).toEqual(["A › B › C"]);
   expect(tree!.folds[0]!.pipelines.map((p) => p.name)).toEqual(["Deep"]);
   expect(tree!.folds[0]!.folds.map((f) => f.name)).toEqual(["D"]);
+  // Its place is one segment a group, whatever the chain joined: the folder's address (#2570).
+  expect(tree!.folds[0]!.path).toEqual(["teamcity", "A", "B", "C"]);
+  expect(tree!.folds[0]!.folds[0]!.path).toEqual(["teamcity", "A", "B", "C", "D"]);
 });
 
 test("a pipeline with no declared chain sits under its group; one sources' tree each", () => {
@@ -213,13 +209,6 @@ test("a reason reads in prototype-6's words, each once", () => {
     { kind: "linked", step: "teamcity:buildType:X", origin: { kind: "own" } },
   ];
   expect(reasonsLine(reasons, "PAY-231")).toBe("your branch, PR check, Parent PAY-230, linked to PAY-231");
-});
-
-test("with This job on, a bare #/builds selects the job's failing pipeline, else its first", () => {
-  const list = [at("Elsewhere", [], true), at("Mine", []), at("MineBad", [], true)];
-  expect(pipelineOf(list, [], [list[1]!, list[2]!])?.name).toBe("MineBad");
-  expect(pipelineOf(list, [], [list[1]!])?.name).toBe("Mine");
-  expect(pipelineOf(list, [], [])?.name).toBe("Elsewhere");
 });
 
 test("the rail's time climbs the one ladder at every width (F-049): the clock today, yesterday, the weekday this past week, else the date", () => {
@@ -333,6 +322,8 @@ test("by repository: a fold for each repository a pipeline's runs built, by name
     ["tidewater/payout-service", ["Payout_Build", "Shared_Lint"], 1],
     ["No repository", ["Nightly"], 0],
   ]);
+  // A repository's place is its entity id; *No repository* has none (#2570).
+  expect(tree!.folds.map((f) => f.path)).toEqual([["~repo", "git:ledger"], ["~repo", "git:payout"], ["~repo"]]);
   // A pipeline in two folds is two rows, each with a key of its own.
   const rows = listRows([], [tree!], "all", () => true);
   const keys = rows.filter((r) => r.kind === "pipeline").map((r) => r.key);
@@ -405,13 +396,4 @@ test("a fold counts every failing pipeline and opens by itself only for one that
   expect(byRepo!.folds[0]!.asking).toBe(0);
 });
 
-test("a bare #/builds opens on the first failure that asks, else the first failing, else the first", () => {
-  const readRed = pipeline("A", [run({ entity_id: "teamcity:build:1", state: { text: "FAILURE", tone: "err" } })]);
-  const unreadRed = pipeline("B", [run({ entity_id: "teamcity:build:2", state: { text: "FAILURE", tone: "err" } })]);
-  const green = pipeline("C", [run({ entity_id: "teamcity:build:3" })]);
-  const marks = new Set(["teamcity:build:1"]);
-  expect(pipelineOf([green, readRed, unreadRed], [], [], marks)?.name).toBe("B");
-  expect(pipelineOf([green, readRed], [], [], marks)?.name).toBe("A");
-  expect(pipelineOf([green], [], [], marks)?.name).toBe("C");
-  expect(pipelineOf([green, readRed, unreadRed], [], [readRed, green], marks)?.name).toBe("A");
-});
+

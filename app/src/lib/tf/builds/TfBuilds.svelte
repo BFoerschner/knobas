@@ -24,10 +24,11 @@
     in view. The list is windowed (#2211) over its flattened rows
     (`listRows`): headings, pipelines and the summaries of folds, a fold's
     rows following its summary while it is open.
-  - **Right**, the selected pipeline's page (#851, `TfPipeline.svelte`):
-    header with *Pin* and, last, the view's *Sync now* (#2287; a bare
-    *Builds* header holds it while no pipeline is drawn), history chart, and the Runs, Parameters and Triggers
-    tabs.
+  - **Right**, whose runs the rail has selected (one page, #2570, `mockups/builds-recent/`): *All pipelines* (the
+    rail's first row, above its tools) and a folder list their runs in one table (`TfRecent.svelte`), its header
+    naming the scope with *Sync now*; a pipeline keeps its page (#851, `TfPipeline.svelte`): header with *Pin* and,
+    last, the view's *Sync now* (#2287), history chart, and the Runs, Parameters and Triggers tabs. The crumbs and the
+    header stand where they stand at every scope. The rail's tools narrow the rail, never the table.
 
   **Read and unread** (ux18, `docs/decisions/2026-11-17-mark-builds-as-read.md`): a pipeline's name and time are err
   only while its newest failure is unread (`asksAttention`, the window's `runsRead`); read, its glyph stays red. A
@@ -38,8 +39,10 @@
   (`withQueued`), and a row whose run moved at the source (the write queue reads a run it started to its end) reads
   that pipeline's runs again, at most once in 5 s.
 
-  `#/builds` selects the first failing pipeline that asks, else the first failing, else the first;
-  `#/builds/<entity id>` selects that one. `#/build/<pipeline>/<run>` is the
+  `#/builds` draws the last place stood on this session, *All pipelines* the first time (Björn's answer 4 on #2554);
+  `#/builds/recent` is *All pipelines*; `#/builds/folder/<source id>/<group>/…` a folder by project, and
+  `#/builds/folder/~repo/<repository id>` one by repository (`~repo` alone: *No repository*), which turns the rail to
+  *By repository*; `#/builds/<entity id>` selects that pipeline. `#/build/<pipeline>/<run>` is the
   run page (#853, `TfRun.svelte`) with its pipeline selected on the left;
   `#/build/<run>` finds the run's pipeline and moves to that address.
 -->
@@ -111,8 +114,8 @@
   import TfRun from "./TfRun.svelte";
   import TfRunGlyph from "./TfRunGlyph.svelte";
   import TfRecent from "./TfRecent.svelte";
-  import { RECENT_HASH, isRecent } from "./recent";
-  import { buildsView } from "./builds-view.svelte";
+  import { RECENT_HASH, REPO_FOLDER, folderPipelines, runScopeHash, runScopeOf, type RunScope } from "./recent";
+  import { parseTfHash } from "../route";
   import { pipelineOfRun } from "./run";
   import { runsRead } from "./runs-read.svelte";
   import { RUN_BRIDGE } from "./pipeline-ports";
@@ -137,7 +140,6 @@
     latestTime,
     listRows,
     pipelineHash,
-    pipelineOf,
     pinnedOf,
     railGlyph,
     railTime,
@@ -194,18 +196,23 @@
   let failed = $state<string | null>(null);
 
   /**
-   * *Recent* (2026-11-25): `#/builds/recent`, and a bare `#/builds` once the reader chose it (Fable's ruling 2), which
-   * takes that address. It draws from its own read, with no rail.
+   * Where Builds was last stood this session (#2570): *All pipelines*, a folder or a pipeline, as its address. A bare
+   * `#/builds` draws that place, and *All pipelines* the first time (Björn's answer 4 on #2554), at its own address: it
+   * stays the section's top page, which `Esc` leaves alone, as it drew the last pipeline before.
    */
-  const recent = $derived(head === "builds" && (isRecent(rest) || (rest.length === 0 && buildsView.value === "recent")));
-  $effect(() => {
-    if (head === "builds" && rest.length === 0 && buildsView.value === "recent") replaceAddress(RECENT_HASH);
-  });
-  /** *Recent*'s first page has drawn: the list is read behind it, not beside it. */
+  const lastPlace = sessionValue("builds-place");
+  /** The address under `#/builds` the page draws: a bare one's is the last place's. */
+  const here = $derived(head === "builds" && rest.length === 0 ? (parseTfHash(lastPlace.value ?? RECENT_HASH) as { rest?: string[] }).rest ?? [] : rest);
+  /**
+   * Whose runs the one table lists (#2570, the mockup's rule 1): *All pipelines* (`#/builds/recent`) or a folder
+   * (`#/builds/folder/<place>`); `null` on a pipeline's page or a run's, which keep their own.
+   */
+  const runScope = $derived<RunScope | null>(head === "builds" ? runScopeOf(here) : null);
+  /** *All pipelines*' first page has drawn: the list is read behind it, not beside it. */
   let recentDrawn = $state(false);
 
   $effect(() => {
-    if (!ready || all !== null || (recent && !recentDrawn)) return;
+    if (!ready || all !== null || (runScope?.kind === "all" && !recentDrawn)) return;
     ports.pipelines().then(
       (rows) => (all = rows.map(recentNewestFirst)),
       (error: unknown) => (failed = message(error)),
@@ -351,29 +358,17 @@
   );
   /** The pipeline on the right: the one the list picks, or on a run's address the run's own. */
   function selectedOf(list: PipelineRow[]): PipelineRow | null {
-    if (head !== "builds") return list.find((p) => p.entity_id === rest[0]) ?? null;
-    // A bare `#/builds` is the pipeline you were on: going back to Builds never changes the page under you.
-    const had = rest.length === 0 && lastPipeline.value !== null && list.find((p) => p.entity_id === lastPipeline.value);
-    // The pipeline a bare `#/builds` drew stays while it is listed: picked as the first failing, it stopped failing
-    // when a sync brought a passing run, and the page swapped to another under the pointer (the still-rows pass).
-    const drew = rest.length === 0 && bareDrew !== null && list.find((p) => p.entity_id === bareDrew);
-    return had || drew || pipelineOf(list, rest, jobsOwn, read);
+    return list.find((p) => p.entity_id === (head === "builds" ? here : rest)[0]) ?? null;
   }
-  /** What a bare `#/builds` drew, for as long as the page lives. */
-  let bareDrew = $state<string | null>(null);
-  /**
-   * A bare `#/builds` with a job and nothing remembered opens the job's first pipeline, which only its reasons know: until
-   * they are read the page draws no pipeline, so it never draws one pipeline's runs and swaps to another's under the
-   * pointer (the still-rows pass, 2026-11-11).
-   */
-  const deciding = $derived(
-    all !== null && head === "builds" && rest.length === 0 && job !== null && reasons === null &&
-      !(lastPipeline.value !== null && all.some((p) => p.entity_id === lastPipeline.value)),
-  );
-  const selected = $derived(all === null || deciding || recent ? null : selectedOf(all));
+  const selected = $derived(all === null || runScope !== null ? null : selectedOf(all));
   $effect(() => {
     if (selected !== null && (rest.length > 0 || head !== "builds")) lastPipeline.value = selected.entity_id;
-    if (selected !== null && rest.length === 0 && head === "builds" && bareDrew !== selected.entity_id) bareDrew = selected.entity_id;
+  });
+  // The place a bare `#/builds` comes back to: a scope or a pipeline stood on, never a run (its scope stays the place).
+  $effect(() => {
+    if (head !== "builds" || rest.length === 0) return;
+    if (runScope !== null) lastPlace.value = runScopeHash(runScope);
+    else if (selected !== null) lastPlace.value = pipelineHash(selected.entity_id);
   });
   /** The page you are on where the rail's filter leaves it out; `null` while the job's reasons are still being read. */
   const outside = $derived(
@@ -451,6 +446,42 @@
     return [...seen.values()];
   }
   const trees = $derived(byRepository ? (commitRepos === null ? [] : repoTreeOf(kept, reposOf, read)) : treeOf(kept, read));
+
+  // ---- a folder's scope (#2570) ----
+  /** A folder's place: a source's groups (*By project*) or a repository (*By repository*); `null` at no folder. */
+  const folderPath = $derived(runScope?.kind === "folder" ? runScope.path : null);
+  const repoFolder = $derived(folderPath?.[0] === REPO_FOLDER);
+  // A repository's folder is drawn by *By repository*: its address turns the rail to it, so the rail shows its pill.
+  $effect(() => {
+    if (repoFolder && !untrack(() => byRepository)) grouping.value = "repository";
+  });
+  /**
+   * The folder's pipelines by id, read against every pipeline (the rail's tools narrow the rail, never the table, the
+   * mockup's rule 2); `null` while the pipelines, or a repository's commits, are still being read.
+   */
+  const folderIds = $derived(
+    folderPath === null || all === null || (repoFolder && commitRepos === null) ? null : folderPipelines(all, folderPath, reposOf),
+  );
+  /** What the header and the last crumb call the folder: its last group, or its repository's name. */
+  const folderName = $derived.by(() => {
+    if (folderPath === null) return "";
+    if (!repoFolder) return folderPath.at(-1) ?? "";
+    const id = folderPath[1];
+    if (id === undefined) return "No repository";
+    for (const repos of commitRepos?.values() ?? []) for (const repo of repos) if (repo.id === id) return repo.title;
+    return "";
+  });
+  /** The group above the folder, as a pipeline's crumbs name its group. */
+  const folderAbove = $derived(folderPath !== null && !repoFolder && folderPath.length > 2 ? folderPath.at(-2)! : null);
+  /** Whether `f` is the folder the table lists: drawn as the rail's pill. */
+  function isScope(f: Fold): boolean {
+    return folderPath !== null && f.path.length === folderPath.length && f.path.every((part, at) => part === folderPath[at]);
+  }
+  /** Select a folder: its table, and the fold opened as the reader's own toggle (the mockup's *Interactions*). */
+  function selectFold(f: Fold): void {
+    remembered.set(f.key, true);
+    location.hash = runScopeHash({ kind: "folder", path: f.path });
+  }
 
   /**
    * *Mark all as read* (ux18): every failed run of the pipelines the rail lists now, its filter applied, so unfiltered
@@ -545,6 +576,13 @@
     for (const tree of [...trees, ...treeOf(all ?? [])]) walk(tree.folds);
   }
 
+  /** The drawn tree's folds by key. */
+  function foldsByKey(): Map<string, Fold> {
+    const map = new Map<string, Fold>();
+    for (const row of rows) if (row.kind === "fold") map.set(row.fold.key, row.fold);
+    return map;
+  }
+
   /** A drawn row's depth, read off its indent class. */
   function depthOf(row: HTMLElement): number {
     return Number(/\btf-d(\d)\b/.exec(row.className)?.[1] ?? 0);
@@ -581,6 +619,13 @@
         if (fold !== undefined && !open) remembered.set(fold, true);
         else if (open && drawn[at + 1] !== undefined && depthOf(drawn[at + 1]!) > depthOf(row)) next = drawn[at + 1];
         break;
+      case "Enter": {
+        // A fold's Enter selects it (the mockup's *Interactions*); Right and Left open and shut it. A pipeline's link goes.
+        const f = fold === undefined ? undefined : foldsByKey().get(fold);
+        if (f === undefined) return;
+        selectFold(f);
+        break;
+      }
       case "ArrowLeft":
         if (fold !== undefined && open) remembered.set(fold, false);
         else next = drawn.slice(0, at).reverse().find((above) => above.dataset["fold"] !== undefined && depthOf(above) < depthOf(row));
@@ -608,20 +653,20 @@
   // (`afterLayout`), not in the task that mounts the page: there its reads laid out the whole new page, a run's with it,
   // and the run's own reads waited behind them (the ux30 end gate, Windows). The frame still paints the rail scrolled.
   /**
-   * A rail that mounts with a pipeline selected, a run opened from *Recent* (2026-11-25), holds its rows unseen in their
-   * room until the scroll below has put that pipeline in view: drawn, they stood at the rail's top for a frame and then
-   * moved (the nothing-moves check).
+   * A run opened from a scope's table (#2570; *Recent* before, 2026-11-25) holds the rail's rows unseen in their room
+   * until the scroll below has put its pipeline in view: drawn, they stood where the scope left them for a frame, then
+   * moved (`just moves`, `recent-run` and `run`). Only that step: a pipeline pressed in the rail is in view already.
    */
   let railUnseen = $state(false);
-  let wasRecent = untrack(() => recent);
+  let wasScope = untrack(() => runScope !== null);
   $effect.pre(() => {
-    const now = recent;
-    if (wasRecent && !now) railUnseen = true;
-    wasRecent = now;
+    const now = runScope !== null;
+    if (wasScope && !now && head === "build") railUnseen = true;
+    wasScope = now;
   });
   $effect(() => {
     if (selected === null || list === undefined) {
-      if (list !== undefined) railUnseen = false;
+      if (list !== undefined && all !== null) railUnseen = false;
       return;
     }
     const id = selected.entity_id;
@@ -645,17 +690,6 @@
   });
 
 
-  /** *Pipelines / Recent*: a press is the reader's choice, kept (Fable's ruling 2). *Pipelines* goes to the last pipeline. */
-  function toRecent() {
-    buildsView.choose("recent");
-    if (!(head === "builds" && isRecent(rest))) location.hash = RECENT_HASH;
-  }
-  function toPipelines() {
-    const was = recent;
-    buildsView.choose("pipelines");
-    if (was) location.hash = lastPipeline.value !== null ? pipelineHash(lastPipeline.value) : "#/builds";
-  }
-
   /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
   let railOpen = $state(false);
 </script>
@@ -665,15 +699,9 @@
   <TfBareHeader title="Builds" {sync} />
 {/snippet}
 
-{#snippet viewSwitch()}
-  <div class="tf-seg tf-bview" role="group" aria-label="Builds view">
-    <button type="button" aria-pressed={!recent} onclick={toPipelines}>Pipelines</button>
-    <button type="button" aria-pressed={recent} onclick={toRecent}>Recent</button>
-  </div>
-{/snippet}
-
-{#snippet recentCrumbs()}
-  <TfCrumbs parts={[{ name: "Builds" }, { name: "Recent" }]} {back} />
+<!-- A run scope's crumbs (#2570): *All pipelines*, or a folder under the group above it, as a pipeline's name its group. -->
+{#snippet scopeCrumbs()}
+  <TfCrumbs parts={[{ name: "Builds" }, ...(runScope?.kind === "folder" ? [...(folderAbove !== null ? [{ name: folderAbove }] : []), { name: folderName }] : [{ name: "All pipelines" }])]} {back} />
 {/snippet}
 
 {#snippet crumbs(parts: Crumb[])}
@@ -713,7 +741,16 @@
   <!-- The summary alone: a fold's rows follow it while it is open, and a closed one has none (#2200's class, #2211). -->
   <details class="tf-pl-fold" {open} ontoggle={(event) => rememberFold(f, event)} {@attach win.row(key)}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key} onclick={(event) => altFold(f, open, event)}
+    <!-- Its name selects it and opens it; a press beside the name folds it (#2570, the mockup's *Interactions*). -->
+    <summary class={`tf-tr tf-tfold ${indent(depth)}`} data-fold={f.key} aria-current={isScope(f)} title={`${f.path[0] === REPO_FOLDER ? f.name : f.path.slice(1).join(" › ")}\n${f.count === 1 ? "1 pipeline" : `${f.count} pipelines`}`}
+      onclick={(event) => {
+        if (!isAltClick(event) && (event.target as Element).closest(".tf-fold-nm")) {
+          event.preventDefault();
+          selectFold(f);
+          return;
+        }
+        altFold(f, open, event);
+      }}
       {@attach menuThing(() => {
         const under = foldPipelines(f);
         return { kind: "pipeline-folder", name: f.name, unread: unreadRunsOf(under, read), pipelines: under.map((p) => p.entity_id) };
@@ -727,10 +764,9 @@
   </details>
 {/snippet}
 
-<div class="tf-bv" class:tf-rail-shut={!railOpen} class:tf-bv-recent={recent} {@attach sideWidth("builds")}>
-  {#if !recent}
+<div class="tf-bv" class:tf-rail-shut={!railOpen} {@attach sideWidth("builds")}>
   <TfSideEdge side="builds" />
-  <TfRailBar label="Pipeline" value={selected?.name ?? "All"} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
+  <TfRailBar label="Pipeline" value={selected?.name ?? (runScope?.kind === "folder" ? folderName : "All pipelines")} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <nav
     id="tf-pipelines-rail"
@@ -741,8 +777,17 @@
     }}
     onkeydown={railKeys}
   >
+    <!-- *All pipelines* (#2570, Björn's answer 9): the rail's first row, above its tools, which never narrow it. -->
+    <div class="tf-pl-home">
+      <a class="tf-tr tf-pi tf-d0 tf-pl-root" href={RECENT_HASH} aria-current={runScope?.kind === "all"} title="Every pipeline's runs, newest first"
+        ><svg class="tf-pl-rooticon" viewBox="0 0 16 16" aria-hidden="true"
+          ><path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg
+        ><span class="tf-pi-nm">All pipelines</span><span class="tf-fold-n" class:tf-unseen={all === null}
+          >{all?.length ?? 0}<span class="tf-sr">{all?.length === 1 ? " pipeline" : " pipelines"}</span></span
+        ></a
+      >
+    </div>
     <div class="tf-pl-top">
-      {@render viewSwitch()}
       <div class="tf-pl-group">
         {#if job !== null}
           <TfScope
@@ -827,16 +872,21 @@
       </div>
     </div>
   </nav>
-  {/if}
   <TfScroller class="tf-bmain">
-    {#if recent}
+    {#if runScope !== null && folderIds !== null && folderIds.length === 0}
+      {@render scopeCrumbs()}
+      {@render bare()}
+      <TfNothingHere message="knobas does not hold this folder. Its pipelines may not have synced yet." href={RECENT_HASH} action="All pipelines" />
+    {:else if runScope !== null}
+      <!-- One table at every run scope (#2570): its rows, header and bar stand where they stand at the next scope. -->
       <TfRecent
         {ready}
         ports={ports.recent}
         {job}
-        crumbs={recentCrumbs}
+        crumbs={scopeCrumbs}
         {sync}
-        switcher={viewSwitch}
+        title={runScope.kind === "all" ? "All pipelines" : folderName}
+        pipelines={runScope.kind === "all" ? [] : folderIds}
         {syncRevision}
         ondrawn={() => (recentDrawn = true)}
       />
@@ -848,9 +898,6 @@
       {#if all !== null && (rest.length !== 1 || lost === rest[0])}
         <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href="#/builds" action="All pipelines" />
       {/if}
-    {:else if deciding}
-      {@render crumbs([{ name: "Builds" }])}
-      {@render bare()}
     {:else if selected !== null}
       <!-- One crumb at both of a pipeline's addresses: `#/builds` draws this page already, so nothing above it links. -->
       {@render crumbs([{ name: "Builds" }, ...(selected.group !== null ? [{ name: selected.group }] : []), { name: selected.name }])}

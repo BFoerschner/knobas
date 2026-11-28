@@ -4,9 +4,10 @@
  * when each started or, not started, was queued ({@link runMade}), with no folds: each row names its pipeline and the
  * folders it sits in as quiet text. The rules are pure functions here, so each is a test on plain data.
  */
-import type { RecentFilter, RecentPipeline, RecentRun, RunRow } from "../../ipc/entity";
+import type { PipelineRow, RecentFilter, RecentPipeline, RecentRun, RunRow } from "../../ipc/entity";
 import { joined, type Joined } from "../filter/filter";
-import { groupsOf, runMade } from "./builds";
+import { parseTfHash } from "../route";
+import { REPO_FOLDER, groupsOf, runMade } from "./builds";
 import { RESULTS, runMarks, runText, type RunMarks } from "./pipeline";
 
 /** The word `#/builds/<word>` takes for *Recent*: no pipeline's entity id is one word with no `:`. */
@@ -31,6 +32,57 @@ export const RECENT_HOLD = 2_000;
 /** Whether an address under `#/builds` is *Recent*. */
 export function isRecent(rest: readonly string[]): boolean {
   return rest[0] === RECENT && rest.length === 1;
+}
+
+/**
+ * The word `#/builds/<word>/…` takes for a folder (#2570): as {@link RECENT}, no pipeline's entity id is one word with no
+ * `:`. What follows is the folder's place, one segment a level: its source's id and its groups (*By project*), or
+ * {@link REPO_FOLDER} and the repository's entity id (*By repository*; none for *No repository*).
+ */
+export const FOLDER = "folder";
+
+export { REPO_FOLDER };
+
+/**
+ * Whose runs the one table lists (#2570, the mockup's rule 1): every pipeline's (*All pipelines*, `#/builds/recent`),
+ * or a folder's. A pipeline keeps its own page.
+ */
+export type RunScope = { kind: "all" } | { kind: "folder"; path: readonly string[] };
+
+/** The run scope an address under `#/builds` names, or `null` for a pipeline's or none. */
+export function runScopeOf(rest: readonly string[]): RunScope | null {
+  if (isRecent(rest)) return { kind: "all" };
+  if (rest[0] === FOLDER && rest.length > 1) return { kind: "folder", path: rest.slice(1) };
+  return null;
+}
+
+/** Whether an address is a run scope's: *All pipelines* or a folder, not a pipeline, a run or a bare `#/builds`. */
+export function isRunScopeHash(hash: string): boolean {
+  const route = parseTfHash(hash);
+  return route.view === "full" && route.head === "builds" && runScopeOf(route.rest) !== null;
+}
+
+/** A run scope's address, each segment of a folder's place encoded. */
+export function runScopeHash(scope: RunScope): string {
+  return scope.kind === "all" ? RECENT_HASH : `#/builds/${FOLDER}/${scope.path.map(encodeURIComponent).join("/")}`;
+}
+
+/**
+ * The pipelines a folder lists, by id, in `list`'s order: by project, those whose source is the place's first segment
+ * and whose groups start with the rest; by repository, those whose runs built that repository, or built none mirrored.
+ * Read against every pipeline: the rail's tools narrow the rail, never the table (the mockup's rule 2).
+ */
+export function folderPipelines<P extends Pick<PipelineRow, "entity_id" | "source_id" | "path" | "group">>(
+  list: readonly P[],
+  path: readonly string[],
+  reposOf: (pipeline: P) => readonly { id: string }[],
+): string[] {
+  const [head, ...groups] = path;
+  const keeps =
+    head === REPO_FOLDER
+      ? (p: P) => (groups[0] === undefined ? reposOf(p).length === 0 : reposOf(p).some((repo) => repo.id === groups[0]))
+      : (p: P) => p.source_id === head && groups.every((group, at) => groupsOf(p)[at] === group);
+  return list.filter(keeps).map((p) => p.entity_id);
 }
 
 /**
@@ -77,15 +129,17 @@ export interface RecentChoice {
 }
 
 /**
- * What the backend is asked (Fable's ruling 5): the scope, the results and the source narrow the read itself, so
+ * What the backend is asked (Fable's ruling 5): the scope, the results, the source and a folder's pipelines narrow the read itself, so
  * *Failed* answers the newest failures wherever they lie. *This job* with its branches not read yet asks for none.
  */
-export function recentFilterOf(choice: RecentChoice, jobBranches: readonly string[] | null): RecentFilter {
+export function recentFilterOf(choice: RecentChoice, jobBranches: readonly string[] | null, pipelines: readonly string[] = []): RecentFilter {
   return {
     sources: choice.source === null ? [] : [choice.source],
     results: choice.results.filter((result) => (RESULTS as readonly string[]).includes(result)),
     mine: choice.scope === "mine",
     branches: choice.scope === "job" ? [...(jobBranches ?? [])] : null,
+    // A folder's scope (#2570), sorted so the same folder asks the same read however its pipelines were listed.
+    pipelines: [...pipelines].sort(),
   };
 }
 

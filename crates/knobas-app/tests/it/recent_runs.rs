@@ -366,6 +366,104 @@ async fn filters_narrow_the_read() {
     );
 }
 
+/// **A scope** (#2570): `pipelines` keeps the runs of those pipelines alone, by
+/// entity id, across sources, in the same order and pages as the whole read,
+/// and with the other filters on top. An id no drawn pipeline has keeps
+/// nothing; none keeps every run.
+#[tokio::test]
+async fn a_pipeline_set_scopes_the_read() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let other = source(&pool).await;
+    let (it, lint, [long, short, feature, running, queued]) = estate(&pool, &tc).await;
+    let other_build = configuration(&pool, &other, "Other_Build", "Other").await;
+    let elsewhere = build(
+        &pool,
+        &other,
+        9,
+        "Other_Build",
+        "main",
+        Some("20260822T112000+0000"),
+        None,
+        "2026-08-22T11:20:00Z",
+    )
+    .await;
+    let scoped = |pipelines: Vec<&String>| RecentFilter {
+        sources: vec![tc.clone(), other.clone()],
+        pipelines: pipelines.into_iter().cloned().collect(),
+        ..RecentFilter::default()
+    };
+
+    let lint_only = recent(&pool, scoped(vec![&lint]), None, None).await;
+    assert_eq!(ids(&lint_only), [&queued, &feature, &short]);
+    assert!(lint_only.pipelines.iter().all(|p| p.entity_id == lint));
+
+    let across = recent(&pool, scoped(vec![&it, &other_build]), None, None).await;
+    assert_eq!(ids(&across), [&elsewhere, &running, &long]);
+
+    // Pages of a scope follow on from their cursor as the whole read's do.
+    let first = recent(&pool, scoped(vec![&lint, &it]), None, Some(2)).await;
+    assert_eq!(ids(&first), [&queued, &running]);
+    let second = recent(
+        &pool,
+        scoped(vec![&lint, &it]),
+        first.next.as_ref(),
+        Some(2),
+    )
+    .await;
+    assert_eq!(ids(&second), [&feature, &short]);
+    let third = recent(
+        &pool,
+        scoped(vec![&lint, &it]),
+        second.next.as_ref(),
+        Some(2),
+    )
+    .await;
+    assert_eq!(ids(&third), [&long]);
+    assert!(third.next.is_none());
+
+    // The bar's filters narrow a scope too.
+    let failed = recent(
+        &pool,
+        RecentFilter {
+            results: vec!["Failed".into()],
+            ..scoped(vec![&lint])
+        },
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(ids(&failed), [&feature]);
+    let one_source = recent(
+        &pool,
+        RecentFilter {
+            sources: vec![other.clone()],
+            ..scoped(vec![&lint, &other_build])
+        },
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(ids(&one_source), [&elsewhere]);
+
+    let gone = recent(
+        &pool,
+        scoped(vec![&format!("{tc}:buildType:Gone")]),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        gone.runs.is_empty(),
+        "a pipeline the mirror does not draw keeps nothing"
+    );
+    let every = recent(&pool, scoped(vec![]), None, None).await;
+    assert_eq!(
+        ids(&every),
+        [&queued, &elsewhere, &running, &feature, &short, &long]
+    );
+}
+
 /// **The stored instant follows the run**: a queued run that starts moves to
 /// when it started, a run whose time moves moves with it, and a deleted run
 /// leaves the read.

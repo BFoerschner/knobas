@@ -99,12 +99,23 @@ interface Drawn {
   next: RecentRuns | Error;
   started: string[];
   revision: (n: number) => void;
+  /** The scope Builds hands it (#2570): its name and its pipelines, `[]` for every one, `null` while still read. */
+  scope: (title: string, pipelines: readonly string[] | null) => void;
 }
 
-function draw(overrides: Partial<RecentPorts> = {}, props: { job?: string | null; first?: RecentRuns; ondrawn?: () => void } = {}): Drawn {
-  const drawn: Drawn = { asked: [], next: props.first ?? PAGE, started: [], revision: () => {} };
+function draw(
+  overrides: Partial<RecentPorts> = {},
+  props: { job?: string | null; first?: RecentRuns; title?: string; pipelines?: readonly string[] | null; ondrawn?: () => void } = {},
+): Drawn {
+  const drawn: Drawn = { asked: [], next: props.first ?? PAGE, started: [], revision: () => {}, scope: () => {} };
   let revision = $state(0);
+  let title = $state(props.title ?? "All pipelines");
+  let pipelines = $state.raw<readonly string[] | null>(props.pipelines === undefined ? [] : props.pipelines);
   drawn.revision = (n) => (revision = n);
+  drawn.scope = (name, ids) => {
+    title = name;
+    pipelines = ids;
+  };
   const ports: RecentPorts = {
     recent: (filter, before, limit) => {
       drawn.asked.push({ filter, before, limit });
@@ -129,9 +140,14 @@ function draw(overrides: Partial<RecentPorts> = {}, props: { job?: string | null
       job: props.job ?? null,
       ports,
       crumbs: createRawSnippet(() => ({ render: () => "<nav>Builds › Recent</nav>" })),
-      switcher: createRawSnippet(() => ({ render: () => '<div class="tf-seg">Pipelines Recent</div>' })),
       get syncRevision() {
         return revision;
+      },
+      get title() {
+        return title;
+      },
+      get pipelines() {
+        return pipelines;
       },
       ...(props.ondrawn ? { ondrawn: props.ondrawn } : {}),
     },
@@ -145,7 +161,7 @@ const numbers = () => rows().map((row) => row.querySelector(".tf-run-pno")?.text
 test("the newest runs of every pipeline, newest first, each naming its pipeline, number and folders", async () => {
   const drawn = draw();
   await settle();
-  expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null }, before: null, limit: 60 }]);
+  expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null, pipelines: [] }, before: null, limit: 60 }]);
   expect(numbers()).toEqual(["#12", "#11", "#10"]);
   const first = rows()[0]!;
   expect(first.querySelector(".tf-run-pname")?.textContent).toBe("Deploy");
@@ -154,7 +170,9 @@ test("the newest runs of every pipeline, newest first, each naming its pipeline,
   expect(first.querySelector(".tf-run-pno")?.getAttribute("href")).toBe("#/build/tc%3AbuildType%3ADeploy/tc%3Abuild%3A12");
   // No folds: no fold's summary, no tree.
   expect(target.querySelector("details, .tf-tfold")).toBeNull();
-  expect(target.querySelector("h1")?.textContent).toBe("Recent runs 3");
+  // The header names the scope and holds no count (#2570); no switch heads the bar.
+  expect(target.querySelector("h1")?.textContent).toBe("All pipelines");
+  expect(target.querySelector("[aria-label='Builds view']")).toBeNull();
   // The unread failure keeps its dot.
   expect(rows()[1]!.querySelector(".tf-unread")).not.toBeNull();
   expect(rows()[0]!.querySelector(".tf-unread")).toBeNull();
@@ -439,4 +457,69 @@ test("Mark all as read with nothing narrowing asks for every run, so a press bef
   await settle();
   expect(scopes).toEqual([{ everything: true, pipelines: [], runs: ["tc:build:11"] }]);
   expect(runsRead.read?.has("tc:build:3"), "and what the backend wrote past the page").toBe(true);
+});
+
+test("a folder's scope waits for its pipelines, asks for them alone, and its header names the folder (#2570)", async () => {
+  const drawn = draw({}, { title: "Payout", pipelines: null });
+  await settle();
+  expect(drawn.asked, "nothing read while the folder's pipelines are read").toEqual([]);
+  expect(target.querySelector("h1")?.textContent).toBe("Payout");
+  expect(target.querySelector(".tf-runs .tf-dim")?.textContent).toBe("Reading runs…");
+  drawn.next = { ...PAGE, runs: PAGE.runs.filter((one) => one.pipeline_id === LINT.entity_id), pipelines: [LINT] };
+  drawn.scope("Payout", [LINT.entity_id]);
+  await settle();
+  expect(drawn.asked[0]).toEqual({ filter: { sources: [], results: [], mine: false, branches: null, pipelines: [LINT.entity_id] }, before: null, limit: 60 });
+  expect(numbers()).toEqual(["#11", "#10"]);
+});
+
+test("another scope draws its own runs from the top, never laid over the last scope's (#2570)", async () => {
+  const drawn = draw();
+  await settle();
+  expect(numbers()).toEqual(["#12", "#11", "#10"]);
+  drawn.next = { ...PAGE, runs: [at(DEPLOY, run(12, "ok", today(0, 40)))], pipelines: [DEPLOY] };
+  drawn.scope("Ops", [DEPLOY.entity_id]);
+  await settle();
+  expect(drawn.asked.at(-1)?.filter.pipelines).toEqual([DEPLOY.entity_id]);
+  expect(drawn.asked.at(-1)?.limit, "a scope with nothing held reads its first rows first").toBe(60);
+  expect(numbers()).toEqual(["#12"]);
+  expect(target.querySelector("h1")?.textContent).toBe("Ops");
+});
+
+test("Mark all as read at a folder with nothing narrowing marks its pipelines (#2570)", async () => {
+  const scopes: unknown[] = [];
+  runsRead.ports = {
+    ...runsRead.ports,
+    read: async () => ({ read: [], while_running: [] }),
+    mark: async (scope) => (scopes.push(scope), { read: ["tc:build:11"], while_running: [] }),
+    unmark: async (runs) => runs,
+    open: async () => false,
+  };
+  await runsRead.load();
+  draw({}, { title: "Payout", pipelines: [LINT.entity_id] });
+  await settle();
+  const button = target.querySelector<HTMLButtonElement>("button[aria-label='Mark all as read']")!;
+  expect(button.title).toBe("Mark all as read: every failed run of the pipelines in Payout");
+  button.click();
+  await settle();
+  expect(scopes).toEqual([{ everything: false, pipelines: [LINT.entity_id], runs: ["tc:build:11"] }]);
+});
+
+test("a result chip draws the runs its read answers, never the rows the last filter held (the rows held under a new filter)", async () => {
+  const drawn = draw();
+  await settle();
+  drawn.next = { ...PAGE, runs: [at(LINT, run(11, "err", today(0, 30)))], pipelines: [LINT] };
+  const failed = [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Failed")!;
+  failed.click();
+  await settle();
+  expect(numbers()).toEqual(["#11"]);
+});
+
+test("Builds hears the first rows drew once they have painted, so the pipeline list it then reads lands in a later frame (#2570)", async () => {
+  let drawnAt = 0;
+  draw({}, { ondrawn: () => (drawnAt += 1) });
+  await turns();
+  expect(numbers(), "the first rows laid").toEqual(["#12", "#11", "#10"]);
+  expect(drawnAt, "not before their frame").toBe(0);
+  await settle();
+  expect(drawnAt).toBe(1);
 });

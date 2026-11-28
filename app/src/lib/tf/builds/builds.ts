@@ -205,26 +205,6 @@ export function pipelineHash(entityId: string): string {
   return `#/builds/${encodeURIComponent(entityId)}`;
 }
 
-/**
- * The pipeline an address selects. A bare `#/builds` selects the first
- * failing one that asks for attention (ux18: its failure unread), else the
- * first failing, else the first, as prototype-6 opens on a failure; with the
- * job's pipelines given (*This job*, #850), the same among the job's. An id
- * nothing carries selects none.
- */
-export function pipelineOf(
-  list: readonly PipelineRow[],
-  rest: readonly string[],
-  onJob: readonly PipelineRow[] = [],
-  read: ReadonlySet<string> | null = null,
-): PipelineRow | null {
-  const id = rest[0];
-  if (id !== undefined && id !== "") return list.find((pipeline) => pipeline.entity_id === id) ?? null;
-  // With *This job* on, the job's own failure first, else its first (#850).
-  const among = onJob.length > 0 ? onJob : list;
-  return among.find((pipeline) => asksAttention(pipeline, read)) ?? among.find(isFailing) ?? among[0] ?? null;
-}
-
 // ---------------------------------------------------------------------------
 // The project tree and pins (#849, R-9.3) and *This job* (#850, R-9.1, R-9.2)
 // ---------------------------------------------------------------------------
@@ -247,6 +227,11 @@ export interface Fold {
   name: string;
   /** Unique in the tree, for remembering whether it is open. */
   key: string;
+  /**
+   * Its place, the folder's address (#2570, `runScopeHash`): its source's id and one segment a group down to its own,
+   * whatever chain the tree joined; {@link REPO_FOLDER} and the repository's id by repository.
+   */
+  path: readonly string[];
   /** Its own pipelines, in the list's order, drawn before its subgroups. */
   pipelines: PipelineRow[];
   /** Its subgroups by name. */
@@ -281,22 +266,25 @@ function byName(a: { name: string }, b: { name: string }): number {
   return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 }
 
-function fold(node: Draft, parentKey: string, read: ReadonlySet<string> | null): Fold {
+function fold(node: Draft, parentKey: string, parentPath: readonly string[], read: ReadonlySet<string> | null): Fold {
   // A group holding nothing but one subgroup is drawn as one row with it
   // ("Payments › Payouts"), as deep as the chain of single children goes.
   let name = node.name;
   let at = node;
+  const path = [...parentPath, node.name];
   while (at.pipelines.length === 0 && at.kids.size === 1) {
     at = [...at.kids.values()][0]!;
     name += ` › ${at.name}`;
+    path.push(at.name);
   }
   const key = `${parentKey}/${name}`;
   const folds = [...at.kids.values()]
     .sort(byName)
-    .map((kid) => fold(kid, key, read));
+    .map((kid) => fold(kid, key, path, read));
   return {
     name,
     key,
+    path,
     pipelines: at.pipelines,
     folds,
     count: at.pipelines.length + folds.reduce((sum, f) => sum + f.count, 0),
@@ -337,7 +325,7 @@ export function treeOf(list: readonly PipelineRow[], read: ReadonlySet<string> |
     pipelines: root.pipelines,
     folds: [...root.kids.values()]
       .sort(byName)
-      .map((kid) => fold(kid, sourceId, read)),
+      .map((kid) => fold(kid, sourceId, [sourceId], read)),
   }));
 }
 
@@ -470,6 +458,9 @@ function minorityTags(pipelines: readonly PipelineRow[]): Map<string, string> {
 /** The id of {@link repoTreeOf}'s one tree, which no source carries. */
 const REPOS = "repos";
 
+/** The first segment of a *By repository* folder's place (#2570): a source's id is lowercase letters, digits and hyphens. */
+export const REPO_FOLDER = "~repo";
+
 /**
  * The pipelines by the repositories their runs built (*By repository*, the repo-builds pass): one tree, a fold for
  * each repository by its name, a pipeline under each it built (`reposOf`), then *No repository* for the pipelines that
@@ -493,6 +484,7 @@ export function repoTreeOf(
   const fold = (key: string, name: string, pipelines: PipelineRow[]): Fold => ({
     name,
     key: `repos/${key}`,
+    path: key === "" ? [REPO_FOLDER] : [REPO_FOLDER, key],
     pipelines,
     folds: [],
     count: pipelines.length,

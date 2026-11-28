@@ -108,14 +108,16 @@ const PLACES = [
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
-  // Builds' *Recent* (2026-11-25): every pipeline's runs newest first, by its address from Time, and a run opened from it.
-  // The probe reaches *Recent* by its address and never presses the switch, so *Recent* is not the kept view: the late
-  // and synced rounds' second press of Builds lands on the run's pipeline (the shell's rule), and opens a run there.
+  // Builds' *All pipelines* (*Recent* until #2570): every pipeline's runs newest first, by its address from Time, and a run
+  // opened from it. A bare `#/builds` draws it too (the `builds` place) until another place of Builds was stood on.
   { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
   // *Recent* opened the moment the app has drawn its nav, the shell's start-up reads still out and the throttle on from
   // the press (#2569, `docs/decisions/2026-11-27-builds-first-open.md`): a person who starts knobas to look at the runs. Its
   // first read is the window's rows; `drawn` is the line to read at 4x and 6x, where a frame's timestamp predates it.
   { name: "builds-recent-start", rounds: ["first"], start: "#/time", soon: { drawn: ".tf-nav", ms: 0 }, go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5 },
+  // A folder's runs (#2570): the scale estate's *Scale test › Payments*, twelve of its 91 pipelines, by its address from
+  // Time. Its table waits for the pipeline list, which names the folder's pipelines.
+  { name: "builds-folder", start: "#/time", go: "#/builds/folder/live-teamcity/Scale%20test/Payments", hash: "#/builds/folder/", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
   { name: "recent-run", parent: "builds", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno, ${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   // A run pressed on a repository's Builds tab (Björn, 2026-11-16: "click on the run … and open the build itself immediately"):
   // its cell is a link to the run on Builds, and `Esc` is back on the tab. A repository three pipelines built.

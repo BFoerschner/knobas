@@ -4,7 +4,6 @@
  * mounted with stand-ins for every store and read.
  */
 import { createRawSnippet, flushSync, mount, tick, unmount, type Snippet } from "svelte";
-import { buildsView } from "./builds/builds-view.svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sources";
@@ -581,7 +580,8 @@ test("a launcher jump says where it came from, to a detail and to a top page, an
   await at("#/builds");
   goLaunched("#/tickets");
   await settle();
-  expect(escHint()).toBe("Back to Builds Esc");
+  // Bare Builds draws All pipelines, which names the page (#2570).
+  expect(escHint()).toBe("Back to All pipelines Esc");
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/builds");
@@ -649,7 +649,7 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
   press("[", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/build/pipe-1/run-4811");
-  expect(escHint()).toBe("Back to Builds Esc");
+  expect(escHint()).toBe("Back to All pipelines Esc");
   press("]", { metaKey: true });
   await settle();
   press("]", { metaKey: true });
@@ -1042,21 +1042,26 @@ test.each([
   last.value = null;
 });
 
-test("Builds' entry comes back to Recent, and from a run opened there, pressed again, goes to Recent while it is the kept view (2026-11-25)", async () => {
+test("Builds' entry comes back to All pipelines or a folder, and from a run opened there, pressed again, goes to that scope (#2570)", async () => {
   start({ nav: windowNav });
   const last = sessionValue("builds-last-pipeline");
+  const place = sessionValue("builds-place");
   last.value = "pipe:a";
-  buildsView.choose("recent");
   await at("#/builds/recent");
   await at("#/inbox");
-  expect(navEntry("Builds").getAttribute("href"), "Recent is a place of Builds").toBe("#/builds/recent");
-  await at("#/builds/recent");
+  expect(navEntry("Builds").getAttribute("href"), "All pipelines is a place of Builds").toBe("#/builds/recent");
+  await at("#/builds/folder/tc/Payments");
+  await at("#/inbox");
+  expect(navEntry("Builds").getAttribute("href"), "so is a folder").toBe("#/builds/folder/tc/Payments");
+  // TfBuilds writes the place it stood on; the shell is drawn here without it.
+  place.value = "#/builds/folder/tc/Payments";
   await at("#/build/pipe%3Aa/run-1");
-  expect(navEntry("Builds").getAttribute("href"), "on a run, the section's page is the kept view").toBe("#/builds/recent");
-  buildsView.choose("pipelines");
+  expect(navEntry("Builds").getAttribute("href"), "on a run, the section's page is the scope it was opened from").toBe("#/builds/folder/tc/Payments");
+  place.value = "#/builds/pipe%3Aa";
   await at("#/build/pipe%3Aa/run-2");
-  expect(navEntry("Builds").getAttribute("href"), "with Pipelines kept, the run's pipeline").toBe("#/builds/pipe%3Aa");
+  expect(navEntry("Builds").getAttribute("href"), "opened from a pipeline, the run's pipeline").toBe("#/builds/pipe%3Aa");
   last.value = null;
+  place.value = null;
 });
 
 test("the cog from another section comes back to a source's page left; on it, to Sources (2026-11-13)", async () => {

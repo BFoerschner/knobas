@@ -911,6 +911,7 @@ async fn assert_reads_plan_without_estimates(
                 .bind(results.clone())
                 .bind(none.clone())
                 .bind(None::<Vec<String>>)
+                .bind(none.clone())
         })
         .await;
         let name = format!("recent runs, {limit} {results:?}");
@@ -923,6 +924,38 @@ async fn assert_reads_plan_without_estimates(
                 .into_iter()
                 // Each run's stored row a probe of its key, never all of them hashed.
                 .chain(whole_reads(&plan[0]["Plan"], "item_run"))
+                .map(|f| format!("{name}: {f}")),
+        );
+    }
+
+    // A folder's scope (#2570): its pipelines' runs are their ranges of
+    // `item_pipeline_runs_idx` and a key probe of each run's instant, never a
+    // walk of every run of the mirror filtered to the set, nor a whole read.
+    for count in [1_usize, 10] {
+        let set: Vec<String> = (0..count)
+            .map(|n| format!("ci:buildType:Cfg_{n}"))
+            .collect();
+        let plan = explain(&pool, knobas_core::builds::planned_recent_runs(), |q| {
+            q.bind(declared.clone())
+                .bind(60_i64)
+                .bind(fillers.clone())
+                .bind(none.clone())
+                .bind(None::<String>)
+                .bind(None::<String>)
+                .bind(none.clone())
+                .bind(none.clone())
+                .bind(None::<Vec<String>>)
+                .bind(set.clone())
+        })
+        .await;
+        let name = format!("recent runs of {count} pipelines");
+        wrong.extend(corpus_shapes(&name, &plan));
+        wrong.extend(
+            whole_reads(&plan[0]["Plan"], "run_made")
+                .into_iter()
+                .chain(whole_reads(&plan[0]["Plan"], "item_pipeline"))
+                .chain(whole_reads(&plan[0]["Plan"], "item_run"))
+                .chain(index_reads(&plan[0]["Plan"], "run_made", "run_made_idx"))
                 .map(|f| format!("{name}: {f}")),
         );
     }
@@ -1027,6 +1060,19 @@ fn whole_reads(node: &serde_json::Value, relation: &str) -> Vec<String> {
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(whole_reads(child, relation));
+    }
+    found
+}
+
+/// Every read of `relation` through `index` (#2570): a scope's runs are
+/// probed by key, never found by walking every run in `index`'s order.
+fn index_reads(node: &serde_json::Value, relation: &str, index: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    if node["Relation Name"] == relation && node["Index Name"] == index {
+        found.push(format!("walks {relation} by {index}"));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(index_reads(child, relation, index));
     }
     found
 }

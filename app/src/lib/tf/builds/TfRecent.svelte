@@ -1,11 +1,13 @@
 <!--
-  Builds' *Recent* (2026-11-25, `docs/decisions/2026-11-25-recent-runs.md`). Björn: "I want a view in builds that puts
-  the most recent builds at the top, hiding all the folders".
+  Builds' run table at *All pipelines* and a folder (one page since #2570, `mockups/builds-recent/`; *Recent* from
+  2026-11-25, `docs/decisions/2026-11-25-recent-runs.md`, Björn: "I want a view in builds that puts the most recent
+  builds at the top, hiding all the folders").
 
-  The newest runs across every pipeline, newest first by when each started or, not started, was queued, read from the
-  mirror a page at a time (`recent_runs`, 200 a page, at most 2,000 held), with no folds: each row is a pipeline's run
-  row (`TfRunRow`) with a cell naming its pipeline, the run's number after it and the folders it sits in as quiet text.
-  Day groups with clock times, as a pipeline's runs.
+  The newest runs of every pipeline, or of a folder's pipelines (`pipelines`, by id, asked of the backend), newest first
+  by when each started or, not started, was queued, read from the mirror a page at a time (`recent_runs`, 60 first, then
+  200 a page, at most 2,000 held), with no folds: each row is a pipeline's run row (`TfRunRow`) with a cell naming its
+  pipeline, the run's number after it and the folders it sits in as quiet text. Day groups with clock times, as a
+  pipeline's runs. Its header names the scope (`title`) beside *Sync now*; `TfBuilds` owns the rail and the scope.
 
   - **Filter**: the bar's scope (*This job* with a job, *Mine*, *All*), *Result* and, with two or more CI sources
     listed, *Source* narrow the read itself; the typed words narrow the runs held.
@@ -15,7 +17,7 @@
     once its last ended a minute ago. New runs wait behind *Show N new runs* while the pointer rests on the list
     (`HeldOrder`), and are lit once as they draw.
   - **Back**: what it held, its scroll and the run you opened are kept for the session, so `Esc` from a run lands on the
-    same rows with that run's number focused.
+    same rows with that run's number focused, at the scope it was opened from.
   - **Keys**: Up and Down step the runs, Enter opens one, `m` marks a failure read or unread.
 -->
 <script lang="ts" module>
@@ -106,7 +108,8 @@
     ports = BRIDGE,
     crumbs,
     sync,
-    switcher,
+    title,
+    pipelines: scoped = [],
     syncRevision = 0,
     ondrawn,
   }: {
@@ -117,8 +120,13 @@
     crumbs: Snippet;
     /** The view's *Sync now* (#2106). */
     sync?: Snippet | undefined;
-    /** *Pipelines / Recent*, heading the bar where the rail would be. */
-    switcher: Snippet;
+    /** What the header names: *All pipelines*, or the folder's name (#2570). */
+    title: string;
+    /**
+     * Whose runs it lists (#2570): `[]` every pipeline's, else a folder's pipelines by id; `null` while the folder's
+     * pipelines are still being read, when it reads nothing.
+     */
+    pipelines?: readonly string[] | null;
     /** Moves when a sync ended: the head is read again. */
     syncRevision?: number;
     /** Its first page has drawn: the Builds list is read behind it, so a run opens at once. */
@@ -146,10 +154,10 @@
   });
   const scope = $derived(job !== null || filter.scope !== "job" ? filter.scope : "all");
   const asked = $derived<RecentFilter>(
-    recentFilterOf({ scope, results: filter.chips["result"] ?? [], source: filter.dropdowns["source"] ?? null }, scope === "job" ? jobBranches : null),
+    recentFilterOf({ scope, results: filter.chips["result"] ?? [], source: filter.dropdowns["source"] ?? null }, scope === "job" ? jobBranches : null, scoped ?? []),
   );
-  /** Waiting for the job's branches: *This job* reads nothing until they are known. */
-  const waiting = $derived(scope === "job" && jobBranches === null);
+  /** Waiting for the job's branches, or a folder's pipelines: nothing is read until they are known. */
+  const waiting = $derived((scope === "job" && jobBranches === null) || scoped === null);
   const basis = $derived(JSON.stringify(asked));
 
   // -- the reads ---------------------------------------------------------------
@@ -196,49 +204,41 @@
       heldFor = wanted;
       failed = null;
       inFlightSoon();
-      // Once the first rows have painted, and only if no other head read came in between (that one does it): the rest
-      // of the first page (asked at once, its answer came back inside the first rows' render on the scale database at
-      // 6x, and the frame then drew all 200 in two passes; merger's review of #2569), then the Builds list (571 KB at
-      // Björn's scale) and the sources' first ask, whose reads went out beside the render as well (#2569b).
-      afterPaint(() => {
-        if (at !== reads) return;
-        if (first && next !== null) void more(RECENT_PAGE - RECENT_FIRST);
-        untrack(() => ondrawn)?.();
-        // Shown: the sources asked once, then each minute (Fable's ruling 7).
-        if (!askedOnce) {
-          askedOnce = true;
-          void askSources();
-        }
-      });
+      // Builds reads its pipeline list once the first rows have painted (#2570): heard at once, the list's answer (571 KB
+      // at Björn's scale) and the rail it now draws at every scope could land inside the first rows' frame.
+      if (first) afterPaint(() => untrack(() => ondrawn)?.());
+      else untrack(() => ondrawn)?.();
+      // The rest once the first rows have painted: asked at once, its answer came back inside the first rows' render on
+      // the scale database at 6x, and the frame then drew all 200 in two passes (merger's review of #2569).
+      if (first && next !== null) afterPaint(() => at === reads && void more(RECENT_PAGE - RECENT_FIRST));
+      // Shown: the sources asked once, then each minute (Fable's ruling 7). The first ask once the first rows have
+      // painted too: its two reads went out beside their render (#2569b).
+      if (!askedOnce) {
+        askedOnce = true;
+        afterPaint(() => void askSources());
+      }
     } catch (cause) {
       if (at === reads) failed = ipcErrorMessage(cause);
       untrack(() => ondrawn)?.();
     }
   }
 
-  /** The frame, then the task, {@link afterPaint} waits on: given back when *Recent* goes. */
-  let painting: { frame: number; task?: ReturnType<typeof setTimeout> } | null = null;
-  /**
-   * `run` once the page has painted (as `TfDocs`' `afterPaint`); at once where there are no frames. One at a time: a
-   * later call takes an earlier one's place, whose head read was replaced anyway.
-   */
+  /** The frame and the task `afterPaint` waits on, cancelled when the page goes. */
+  let paintFrame: number | undefined;
+  let paintTask: ReturnType<typeof setTimeout> | undefined;
+  const painted: (() => void)[] = [];
+  /** `run` once the page has painted (as `TfDocs`' `afterPaint`); at once where there are no frames. */
   function afterPaint(run: () => void): void {
     if (typeof requestAnimationFrame !== "function") return run();
-    stopPainting();
-    const now = { frame: 0 } as { frame: number; task?: ReturnType<typeof setTimeout> };
-    now.frame = requestAnimationFrame(() => {
-      now.task = setTimeout(() => {
-        if (painting === now) painting = null;
-        run();
+    painted.push(run);
+    if (paintFrame !== undefined || paintTask !== undefined) return;
+    paintFrame = requestAnimationFrame(() => {
+      paintFrame = undefined;
+      paintTask = setTimeout(() => {
+        paintTask = undefined;
+        for (const one of painted.splice(0)) one();
       }, 0);
     });
-    painting = now;
-  }
-  function stopPainting(): void {
-    if (painting === null) return;
-    cancelAnimationFrame(painting.frame);
-    clearTimeout(painting.task);
-    painting = null;
   }
 
   /** An older page of `limit` runs, after what is held. */
@@ -385,7 +385,9 @@
   const byId = $derived(new Map((held ?? []).map((one) => [one.run.entity_id, one])));
   const runHold = new HeldOrder<RecentRun>((one) => one.run.entity_id);
   const holdBasis = $derived(JSON.stringify([basis, filter.text, runOrder.settled(filter.text, runs)]));
-  const placed = $derived(held === null ? { rows: [] as RecentRun[], waiting: 0, stale: false } : runHold.place(typed, holdBasis));
+  // Only rows read for the filter now: a new filter's basis is here a turn before the effect that drops the last rows, and
+  // placed then they were held under it, kept as "left" once its page landed, and drawn with no run behind them.
+  const placed = $derived(held === null || heldFor !== basis ? { rows: [] as RecentRun[], waiting: 0, stale: false } : runHold.place(typed, holdBasis));
   const heldBar = $derived({ waiting: placed.waiting, stale: placed.stale, show: () => runHold.release() });
 
   let pointerOn = $state(false);
@@ -458,11 +460,19 @@
   $effect(() => runsRead.hold("recent", (held ?? []).filter((one) => failedRun(one.run)).map((one) => one.run.entity_id)));
   const narrowed = $derived(filter.text.trim() !== "" || asked.mine || asked.branches !== null || asked.results.length > 0 || asked.sources.length > 0);
   const unreadListed = $derived(placed.rows.filter((one) => unreadRun(one.run, runsRead.read)).length);
+  /** A folder's scope (#2570): its pipelines, or none at *All pipelines*. */
+  const folder = $derived(scoped !== null && scoped.length > 0 ? scoped : null);
   const markSaid = $derived(
-    narrowed ? `Mark all as read: the ${counted(unreadListed, "unread failed run", "unread failed runs")} listed` : "Mark all as read: every failed run of every pipeline",
+    narrowed
+      ? `Mark all as read: the ${counted(unreadListed, "unread failed run", "unread failed runs")} listed`
+      : folder !== null
+        ? `Mark all as read: every failed run of the pipelines in ${title}`
+        : "Mark all as read: every failed run of every pipeline",
   );
   function markAllRead() {
-    if (narrowed) void runsRead.markAll({ runs: placed.rows.filter((one) => failedRun(one.run)).map((one) => one.run.entity_id), pipelines: [] });
+    const listed = placed.rows.filter((one) => failedRun(one.run)).map((one) => one.run.entity_id);
+    if (narrowed) void runsRead.markAll({ runs: listed, pipelines: [] });
+    else if (folder !== null) void runsRead.markAll({ runs: listed, pipelines: [...folder] });
     else void runsRead.markAll({ runs: [], pipelines: [], everything: true });
   }
 
@@ -537,7 +547,9 @@
   });
 
   onDestroy(() => {
-    stopPainting();
+    painted.length = 0;
+    if (paintFrame !== undefined && typeof cancelAnimationFrame === "function") cancelAnimationFrame(paintFrame);
+    clearTimeout(paintTask);
     clearTimeout(headSoon);
     clearTimeout(inFlightTimer);
     reads += 1;
@@ -555,14 +567,13 @@
 {/snippet}
 
 {@render crumbs()}
+<!-- The scope's name (#2570), no count: the header stands as a pipeline's does, so nothing above the bar moves between scopes. -->
 <header class="tf-fhead tf-bhead">
-  <!-- The count holds its room from the first frame, unseen until read: it arriving grows nothing (nothing-moves). -->
-  <div><h1>Recent runs <span class="tf-count tf-recent-count" class:tf-unseen={held === null}>{held?.length ?? 0}</span></h1></div>
+  <div><h1>{title}</h1></div>
   {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
 
 <div class="tf-runbar tf-recentbar">
-  {@render switcher()}
   <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} held={heldBar} {after} />
 </div>
 
