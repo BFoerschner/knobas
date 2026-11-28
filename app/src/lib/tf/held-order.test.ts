@@ -170,3 +170,22 @@ test("settle: the waiting rows take their place where they sort and the rows tha
   // Settled once: a later read keeps that order as any drawn order is kept.
   expect(ids(hold.place([row("b"), row("new"), row("a"), row("c")], "x").rows)).toEqual(["new", "a", "b", "c"]);
 });
+
+test("settle is for the list as it is: a new basis or a release before the next read drops it, and it lets in no later row (#2574)", () => {
+  const hold = new HeldOrder<Row>((r) => r.id);
+  hold.place([row("a"), row("b")], "x");
+  hold.settle();
+  // The person changed the filter before the next read: that sorts, and the settle is spent with it.
+  hold.place([row("a"), row("b")], "y");
+  expect(hold.place([row("new"), row("a"), row("b")], "y")).toMatchObject({ waiting: 1 });
+  hold.settle();
+  hold.release();
+  hold.place([row("a"), row("b")], "y");
+  expect(hold.place([row("new2"), row("a"), row("b")], "y")).toMatchObject({ waiting: 1 });
+  // A row a settle let in at the end, which leaves and comes back while the pointer rests, waits like any other.
+  hold.settle();
+  hold.place([row("a"), row("b"), row("c")], "y");
+  hold.settle();
+  hold.place([row("a"), row("b")], "y");
+  expect(hold.place([row("c"), row("a"), row("b")], "y")).toMatchObject({ waiting: 1 });
+});

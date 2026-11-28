@@ -82,6 +82,7 @@ export class HeldOrder<T> {
     if (this.#held === null || this.#basis !== basis) {
       this.#basis = basis;
       this.#held = null;
+      this.#settling = false;
       if (fresh.length === 0) return { rows: [], waiting: 0, stale: false };
       this.#held = new Map();
       this.#next = 0;
@@ -90,9 +91,10 @@ export class HeldOrder<T> {
     }
     const held = this.#held;
     const keys = fresh.map((row) => this.#key(row));
-    if (this.#settling) {
-      this.#settling = false;
-      for (const key of keys) if (!held.has(key)) this.#admitted.add(key);
+    // Spent by this read: every row it holds that waits comes in, and every row that left goes.
+    const settling = this.#settling;
+    this.#settling = false;
+    if (settling) {
       const present = new Set(keys);
       for (const key of [...held.keys()]) if (!present.has(key)) held.delete(key);
     }
@@ -126,7 +128,7 @@ export class HeldOrder<T> {
       } else if (joinsEnd(row, at)) {
         // Where it sorts is after every drawn row: it joins the end and moves nothing.
         held.set(key, { rank: this.#next++, row, tag: this.#tag(row) });
-      } else if (this.#admitted.has(key)) {
+      } else if (settling || this.#admitted.has(key)) {
         // The person brought it: between the drawn rows it sorts between. In a read whose drawn rows sort otherwise than
         // they stand (a queued run that started), above every drawn row it sorts above.
         const ranks = (part: readonly string[]) => part.filter((other) => held.has(other)).map((other) => held.get(other)!.rank);
