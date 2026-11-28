@@ -18,6 +18,7 @@
   import { targetReading } from "../shell/timer";
   import { keyHint } from "../shell/platform";
   import { buildsBubble, type Badges } from "./badges.svelte";
+  import { BUBBLE_TONE } from "./builds/builds";
   import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
   import { updates as sharedUpdates, type Updates } from "./update.svelte";
   import { cogTitle, marked } from "./settings/updates";
@@ -73,8 +74,6 @@
     return { n, err: section === "monitors" };
   }
 
-  /** Each state's colour class, as the theme's tones name them; grey is the plain count's. */
-  const TONE = { red: "tf-err", yellow: "tf-warn", green: "tf-ok", grey: "", blue: "tf-info" } as const;
 
   const bubble = $derived(buildsBubble(badges.builds));
   /** The counts in words, most critical first: the hidden text and the title. */
@@ -118,10 +117,10 @@
           <span class="tf-count {count.err ? 'tf-err' : ''}">{count.n}</span>
         {:else if section === "builds" && bubble !== null}
           <span class="tf-bubble" title="Unread runs: {bubbleWords}" data-tone={bubble.tone} data-testid="builds-bubble">
-            <span class="tf-count {TONE[bubble.tone]}" aria-hidden="true">{bubble.total}</span>
+            <span class="tf-count {BUBBLE_TONE[bubble.tone]}" aria-hidden="true">{bubble.total}</span>
             <span class="tf-bubble-more" aria-hidden="true">
               {#each bubble.parts as part (part.bubble)}
-                <span class="tf-count {TONE[part.bubble]}" data-bubble={part.bubble}>{part.n}</span>
+                <span class="tf-count {BUBBLE_TONE[part.bubble]}" data-bubble={part.bubble}>{part.n}</span>
               {/each}
             </span>
             <span class="tf-sr">, unread runs: {bubbleWords}</span>

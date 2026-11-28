@@ -82,17 +82,24 @@ export function isFailing(pipeline: PipelineRow): boolean {
   return pipeline.recent[0]?.state?.tone === "err";
 }
 
-/** Whether `run` finished failed: the only kind of run that can be unread (ux18). */
+/** Whether `run` finished failed, `runBubble`'s red: the only kind of run that can be unread (ux18). */
 export function failedRun(run: Pick<RunRow, "finished" | "state">): boolean {
-  return run.finished !== null && run.state?.tone === "err";
+  return run.finished !== null && endBubble(run.state) === "red";
+}
+
+/** Whether `run` started and has not finished, `runBubble`'s blue whatever its marks. Queued is not running. */
+export function runningRun(run: Pick<RunRow, "started" | "finished">): boolean {
+  return run.started !== null && run.finished === null;
 }
 
 /**
  * Whether `m` and the row's *Mark as read* have anything to do on `run` (#2574): a finished failure (read or unread) or a
- * run running (in the blue or out of it). A passed, cancelled or queued run has nothing to mark.
+ * run running (in the blue or out of it), `runBubble`'s red and blue. A passed, cancelled or queued run has nothing to
+ * mark.
  */
 export function markableRun(run: Pick<RunRow, "started" | "finished" | "state">): boolean {
-  return failedRun(run) || (run.started !== null && run.finished === null);
+  const bubble = runBubble(run);
+  return bubble === "red" || bubble === "blue";
 }
 
 /** The five bubbles a run can count in (ADR-0063, #2567's ruling), most critical first after blue. */
@@ -103,12 +110,18 @@ export type Bubble = "blue" | "green" | "yellow" | "red" | "grey";
  * `warn` yellow, `err` red, any other tone or none grey. Started and not finished: blue. Neither (queued): none.
  */
 export function runBubble(run: Pick<RunRow, "started" | "finished" | "state">): Bubble | null {
-  if (run.finished !== null) {
-    const tone = run.state?.tone;
-    return tone === "ok" ? "green" : tone === "warn" ? "yellow" : tone === "err" ? "red" : "grey";
-  }
-  return run.started !== null ? "blue" : null;
+  if (run.finished !== null) return endBubble(run.state);
+  return runningRun(run) ? "blue" : null;
 }
+
+/** A finished run's bubble by its state's tone: the one place a tone becomes a colour (ADR-0063). */
+function endBubble(state: RunRow["state"]): Bubble {
+  const tone = state?.tone;
+  return tone === "ok" ? "green" : tone === "warn" ? "yellow" : tone === "err" ? "red" : "grey";
+}
+
+/** Each bubble's tone class, as the theme's tones name them (`.tf-count.tf-err`, chrome.css); grey is the plain count. */
+export const BUBBLE_TONE: Readonly<Record<Bubble, string>> = { red: "tf-err", yellow: "tf-warn", green: "tf-ok", grey: "", blue: "tf-info" };
 
 /**
  * Whether `run` asks for attention (ux18): finished failed and not among the runs marked read. Before the marks are

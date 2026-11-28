@@ -47,7 +47,7 @@ import { fakeRoleScope } from "./corpus";
 import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { recentOrder } from "../../../tf/builds/recent";
-import { noCounts, plusCounts, railOf, runBubble } from "../../../tf/builds/builds";
+import { failedRun, noCounts, plusCounts, railOf, runBubble } from "../../../tf/builds/builds";
 import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -223,10 +223,6 @@ function fakeBuildsInFront(front: boolean): boolean {
 }
 
 /** Whether a fixture run is a finished failure, the only kind that can be unread. */
-function failedFake(run: RunRow): boolean {
-  return run.finished !== null && run.state?.tone === "err";
-}
-
 /**
  * prototype-6's `realCfg[...].job`: the configurations each job's pull
  * requests are checked by (#850), and the job's branches, from its `code`.
@@ -516,7 +512,7 @@ function buildHistory(now: Date): Map<string, RunRow[]> {
 
 /** The unread failures among `runs`: what a pipeline row's `unread` names. */
 function unreadOf(runs: readonly RunRow[]): string[] {
-  return runs.filter((run) => failedFake(run) && !readRuns.has(run.entity_id)).map((run) => run.entity_id);
+  return runs.filter((run) => failedRun(run) && !readRuns.has(run.entity_id)).map((run) => run.entity_id);
 }
 
 /** `pipelines`: every configuration by name, each with its last twelve runs and its unread failures (#2543). */
@@ -1029,7 +1025,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const every = [...all.values()].flat().concat(bulk.flatMap((p) => p.recent));
       const runsOf = (id: string) => [...(all.get(configOf(id)) ?? []), ...(bulkById.get(id)?.recent ?? [])];
       const inScope = scope.everything === true ? every : (scope.pipelines ?? []).flatMap(runsOf);
-      const scoped = inScope.filter((run) => failedFake(run) || (run.started !== null && run.finished === null));
+      const scoped = inScope.filter((run) => failedRun(run) || (run.started !== null && run.finished === null));
       const known = new Map(every.map((run) => [run.entity_id, run]));
       const wrote: RunMarks = { read: [], while_running: [] };
       const named = (scope.runs ?? []).map((id) => known.get(id) ?? { entity_id: id, finished: "", started: null });

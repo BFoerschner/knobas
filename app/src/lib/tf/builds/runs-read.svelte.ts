@@ -46,7 +46,7 @@ import {
 import { coalesce } from "../../shell/coalesce";
 import { push, undoable } from "../../shell/toasts.svelte";
 import { counted } from "../counted";
-import { markableRun, noCounts, plusCounts, runBubble, unreadRun, type Bubble } from "./builds";
+import { markableRun, noCounts, plusCounts, runBubble, runningRun, unreadRun, type Bubble } from "./builds";
 
 /** What the marks are read and written by. */
 export interface RunsReadPorts {
@@ -186,7 +186,7 @@ export class RunsRead {
 
   /** Whether `run` is in the blue: started, not finished, and no mark of any kind. Queued is not blue. */
   inBlue(run: Pick<RunRow, "entity_id" | "started" | "finished">): boolean {
-    return run.started !== null && run.finished === null && !(this.#read?.has(run.entity_id) ?? false) && !this.#whileRunning.has(run.entity_id);
+    return runningRun(run) && !(this.#read?.has(run.entity_id) ?? false) && !this.#whileRunning.has(run.entity_id);
   }
 
   /** Every pipeline's unread runs by bubble, `null` until read. */
