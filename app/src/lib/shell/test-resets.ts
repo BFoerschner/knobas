@@ -38,6 +38,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // What knobas looks at again after a branch moved (#2585): each test starts with nothing looked at, and listens anew.
   "tf/builds/looking.svelte.ts#held": async () => (await import("../tf/builds/looking.svelte")).forgetLooking(),
   "tf/builds/looking.svelte.ts#started": async () => (await import("../tf/builds/looking.svelte")).forgetLooking(),
+  // What a pipeline page's header drew from before its reads answered (#2618): each test starts with nothing kept.
+  "tf/builds/pipeline-facts.svelte.ts#refreshes": async () => (await import("../tf/builds/pipeline-facts.svelte")).forgetPipelineFacts(),
   // The windowed lists waiting to read where they sit (the Windows pass, 2026-11-14): a test's are read, or let go once unmounted.
   // A launcher row's hand-over to the page it opens (the everything-search decisions, D12): forgotten between tests.
   "tf/arrival.svelte.ts#held": async () => (await import("../tf/arrival.svelte")).arrival.clear(),
