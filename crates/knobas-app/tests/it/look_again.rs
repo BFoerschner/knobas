@@ -457,14 +457,38 @@ async fn fixture(name: &str) -> (SourcesState, Shared, Arc<HandClock>) {
     (state, shared, clock)
 }
 
+/// Start a run of `id` that begins now, and answer its id. `trigger` joins a
+/// run in flight, and a run's claim is still held for a moment after its row
+/// reads ended, so a trigger right after one can answer that ended run: it is
+/// asked again until it answers a newer one.
+async fn new_run(state: &SourcesState, id: &str) -> i64 {
+    let before: i64 =
+        sqlx::query_scalar("select coalesce(max(id), 0) from knobas.sync_run where source_id = $1")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    tokio::time::timeout(PATIENCE, async {
+        loop {
+            let run = state
+                .scheduler
+                .trigger(id, knobas_sync::SyncTrigger::Manual, None)
+                .await
+                .expect("a run starts");
+            if run > before {
+                return run;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("never: a new run of {id} starts"))
+}
+
 /// Start a run of `id` and wait for it to end `ok` (its door must let it
 /// through).
 async fn run_to_its_end(state: &SourcesState, id: &str) {
-    let run = state
-        .scheduler
-        .trigger(id, knobas_sync::SyncTrigger::Manual, None)
-        .await
-        .expect("a run starts");
+    let run = new_run(state, id).await;
     eventually(&format!("the run of {id} ends"), || async {
         sqlx::query_scalar::<_, bool>(
             "select finished_at is not null and outcome = 'ok' from knobas.sync_run where id = $1",
@@ -672,11 +696,7 @@ async fn a_run_that_moves_no_branch_starts_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_ci_run_in_flight_skips_the_walk_and_its_build_still_counts() {
     let (state, shared, clock) = fixture("look_again_lock").await;
-    let run = state
-        .scheduler
-        .trigger(CI, knobas_sync::SyncTrigger::Manual, None)
-        .await
-        .expect("a CI run starts");
+    let run = new_run(&state, CI).await;
     eventually("the CI run waits at its door", || async {
         shared.seen.ci_runs.load(Ordering::SeqCst) == 2
     })
