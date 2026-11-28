@@ -404,9 +404,21 @@ async fn a_pipeline_set_scopes_the_read() {
     // Pages of a scope follow on from their cursor as the whole read's do.
     let first = recent(&pool, scoped(vec![&lint, &it]), None, Some(2)).await;
     assert_eq!(ids(&first), [&queued, &running]);
-    let second = recent(&pool, scoped(vec![&lint, &it]), first.next.as_ref(), Some(2)).await;
+    let second = recent(
+        &pool,
+        scoped(vec![&lint, &it]),
+        first.next.as_ref(),
+        Some(2),
+    )
+    .await;
     assert_eq!(ids(&second), [&feature, &short]);
-    let third = recent(&pool, scoped(vec![&lint, &it]), second.next.as_ref(), Some(2)).await;
+    let third = recent(
+        &pool,
+        scoped(vec![&lint, &it]),
+        second.next.as_ref(),
+        Some(2),
+    )
+    .await;
     assert_eq!(ids(&third), [&long]);
     assert!(third.next.is_none());
 
@@ -434,8 +446,17 @@ async fn a_pipeline_set_scopes_the_read() {
     .await;
     assert_eq!(ids(&one_source), [&elsewhere]);
 
-    let gone = recent(&pool, scoped(vec![&format!("{tc}:buildType:Gone")]), None, None).await;
-    assert!(gone.runs.is_empty(), "a pipeline the mirror does not draw keeps nothing");
+    let gone = recent(
+        &pool,
+        scoped(vec![&format!("{tc}:buildType:Gone")]),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        gone.runs.is_empty(),
+        "a pipeline the mirror does not draw keeps nothing"
+    );
     let every = recent(&pool, scoped(vec![]), None, None).await;
     assert_eq!(
         ids(&every),

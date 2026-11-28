@@ -932,7 +932,9 @@ async fn assert_reads_plan_without_estimates(
     // `item_pipeline_runs_idx` and a key probe of each run's instant, never a
     // walk of every run of the mirror filtered to the set, nor a whole read.
     for count in [1_usize, 10] {
-        let set: Vec<String> = (0..count).map(|n| format!("ci:buildType:Cfg_{n}")).collect();
+        let set: Vec<String> = (0..count)
+            .map(|n| format!("ci:buildType:Cfg_{n}"))
+            .collect();
         let plan = explain(&pool, knobas_core::builds::planned_recent_runs(), |q| {
             q.bind(declared.clone())
                 .bind(60_i64)
