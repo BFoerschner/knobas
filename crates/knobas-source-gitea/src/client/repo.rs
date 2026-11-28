@@ -264,9 +264,10 @@ impl GiteaClient {
         // Its web route diffs `base...head` from `base`'s tip, not from the
         // merge base (measured on 17.0.0, #2540): everything `base` gained
         // since the branch was cut would be drawn as deleted. Where the
-        // compare's commits settle the merge base, the diff is read from it
-        // to the head's tip, which is `git diff base...head`; otherwise as
-        // asked.
+        // compare's commits settle the merge base (asking which meeting point
+        // is the latest where the branch merged its base back in, #2608), the
+        // diff is read from it to the head's tip, which is
+        // `git diff base...head`; otherwise as asked.
         let meeting = serde_json::from_value::<crate::view::compare::Listing>(compare)
             .ok()
             .and_then(|listing| crate::view::compare::meeting(&listing, base, head));
@@ -327,7 +328,7 @@ impl GiteaClient {
     /// two (where a branch was cut, and the base commit it merged back in).
     /// `None` when none is (a criss-cross merge has no single merge base),
     /// when there are more than [`MEETS_ASKED`], or when a compare fails.
-    async fn latest_of(&self, owner: &str, repo: &str, commits: &[String]) -> Option<String> {
+    pub(crate) async fn latest_of(&self, owner: &str, repo: &str, commits: &[String]) -> Option<String> {
         #[derive(serde::Deserialize)]
         struct Ahead {
             total_commits: Option<u64>,

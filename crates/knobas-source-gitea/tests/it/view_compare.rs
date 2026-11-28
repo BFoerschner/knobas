@@ -290,3 +290,55 @@ async fn a_compare_from_the_default_branch_lists_its_commits_in_its_range() {
         range.commits[0].meta
     );
 }
+
+/// A compare whose head merged its base back in (#2608) meets the base's
+/// history twice: where the head was cut (`FORK`) and the commit it merged
+/// (`MERGED`). The range starts at the merge base, the one the other is an
+/// ancestor of, which a compare between the two tells (`total_commits` 0).
+#[tokio::test]
+async fn a_head_that_merged_its_base_back_ranges_from_the_merged_commit() {
+    const FORK: &str = "2222222222222222222222222222222222222222";
+    const MERGED: &str = "3333333333333333333333333333333333333333";
+    const MERGE: &str = "4444444444444444444444444444444444444444";
+    const FIRST: &str = "5555555555555555555555555555555555555555";
+    let server = MockServer::builder().start().await;
+    let wire = format!("{REPO}/compare/main...feature");
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("output", "diff"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(&wire))
+        .and(query_param("files", "false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 3,
+            "commits": [
+                { "sha": HEAD, "parents": [{ "sha": MERGE }] },
+                { "sha": MERGE, "parents": [{ "sha": FIRST }, { "sha": MERGED }] },
+                { "sha": FIRST, "parents": [{ "sha": FORK }] }
+            ]
+        })))
+        .mount(&server)
+        .await;
+    for (from, to, total) in [(MERGED, FORK, 0), (FORK, MERGED, 1)] {
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO}/compare/{from}...{to}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "total_commits": total, "commits": [], "files": [] }),
+            ))
+            .mount(&server)
+            .await;
+    }
+    let view = source(&server)
+        .view(ENTITY, Some("compare:main...feature"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { range, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff");
+    };
+    let range = range.as_ref().expect("the merge base is asked, not missed");
+    assert_eq!((range.base.as_str(), range.head.as_str()), (MERGED, HEAD));
+}

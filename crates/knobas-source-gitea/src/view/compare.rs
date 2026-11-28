@@ -72,15 +72,22 @@ pub(super) async fn read(
             .client
             .compare_commits::<Listing>(owner, repo, base, head),
     );
-    let range = listing.ok().and_then(|listing| {
-        between(&listing, base, head).map(|(base, head)| DiffRange {
-            repository: entity.to_owned(),
-            base,
-            head,
-            commits: carried(&source.id, owner, repo, &listing),
-            reviewed: None,
-        })
-    });
+    let range = match listing.ok().and_then(|listing| {
+        meeting(&listing, base, head).map(|(meets, tip)| (listing, meets, tip))
+    }) {
+        Some((listing, meets, tip)) => source
+            .client
+            .latest_of(owner, repo, &meets)
+            .await
+            .map(|merge_base| DiffRange {
+                repository: entity.to_owned(),
+                base: merge_base,
+                head: tip,
+                commits: carried(&source.id, owner, repo, &listing),
+                reviewed: None,
+            }),
+        None => None,
+    };
     let text = match text {
         Ok(text) => text,
         Err(error) if error.status() == Some(404) => {
@@ -179,33 +186,20 @@ struct Parent {
     sha: String,
 }
 
-/// The whole shas of the two commits the diff of `base...head` is between,
-/// from the compare's `listing`: the merge base of the two ends, and the
-/// head. `None` where the listing does not settle them: no commits (nothing
-/// to expand), a listing Gitea cut short, or a merge base the listing cannot
-/// tell apart.
+/// Where the range `base...head` meets `base`'s history, from the compare's
+/// `listing`, and the head's whole sha. `None` where the listing does not
+/// settle them: no commits (nothing to expand), a listing Gitea cut short, or
+/// a tip that is not `head`.
 ///
 /// The listing is every commit `head` has that `base` lacks; the parents of
 /// those outside it are where the range meets `base`'s history. The asked
 /// base -- a whole sha, or `<sha>^` for a listed commit's first parent -- is
-/// the merge base when it is one of them (it is then an ancestor of `head`);
-/// otherwise a range that meets that history at one commit only meets it at
-/// its merge base. A branch name settles only that second way.
-pub(crate) fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)> {
-    let (meets, tip) = meeting(listing, base, head)?;
-    match meets.as_slice() {
-        [merge_base] => Some((merge_base.clone(), tip)),
-        _ => None,
-    }
-}
-
-/// Where the range `base...head` meets `base`'s history, from the compare's
-/// `listing`, and the head's whole sha: the merge base alone where
-/// [`between`] settles it, otherwise every parent outside the listing, in the
-/// order the listing names them. Two or more is a branch that merged its base
-/// back in (#2608): the merge base is the one every other is an ancestor of,
-/// which the listing cannot say. `None` where it does not settle the head:
-/// no commits, a listing cut short, or a tip that is not `head`.
+/// the merge base when it is one of them (it is then an ancestor of `head`),
+/// and is then the only one named. Otherwise every parent outside the
+/// listing is, in the order the listing names them: one is the merge base;
+/// two or more is a head that merged its base back in (#2608), whose merge
+/// base is the one every other is an ancestor of, which the listing cannot
+/// say (`GiteaClient::latest_of` asks).
 pub(crate) fn meeting(listing: &Listing, base: &str, head: &str) -> Option<(Vec<String>, String)> {
     let commits = &listing.commits;
     if commits.is_empty() || listing.total_commits.is_some_and(|t| t != commits.len()) {
@@ -259,6 +253,15 @@ pub(crate) fn meeting(listing: &Listing, base: &str, head: &str) -> Option<(Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The merge base and the head where the listing alone settles them.
+    fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)> {
+        let (meets, tip) = meeting(listing, base, head)?;
+        match meets.as_slice() {
+            [merge_base] => Some((merge_base.clone(), tip)),
+            _ => None,
+        }
+    }
 
     fn sha(c: char) -> String {
         std::iter::repeat_n(c, 40).collect()
