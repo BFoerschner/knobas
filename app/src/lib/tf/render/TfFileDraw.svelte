@@ -16,7 +16,6 @@
 <script lang="ts">
   import type { CommandPort } from "../../render/command";
   import type { DiagramEngine } from "../../render/diagram";
-  import { isDelimited } from "../../render/json-sniff";
   import type { RenderPort } from "../../render/port";
   import type { Renderer } from "../../render/registry";
   import TfLines from "../code/TfLines.svelte";
@@ -28,7 +27,7 @@
   import TfHtmlPage from "./TfHtmlPage.svelte";
   import TfPdf from "./TfPdf.svelte";
   import { docViewModule } from "./doc/doc-module";
-  import { routeOf, type FileDrawRepo } from "./file-draw";
+  import { docKindOf, routeOf, type FileDrawRepo } from "./file-draw";
   import { explorerModule } from "./oas-module";
   import type { SpecOpener } from "./oas-open.svelte";
   import { xsdModule } from "./xsd/xsd-module";
@@ -174,7 +173,7 @@
     <TfDocView
       text={doc.text}
       path={doc.path}
-      kind={json ? (isDelimited(doc.path) ? "jsonl" : "json") : "xml"}
+      kind={docKindOf(renderer, doc.path)}
       jq={!json || r === null ? null : { open: () => r.query(doc) }}
       onpipeline={!json || r === null || !r.asRead(doc) ? null : (filter) => r.pipeline(doc.path, filter)}
       repo={r?.id ?? ""}

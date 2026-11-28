@@ -8,7 +8,7 @@ import { join, relative } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { allRenderers, type Renderer } from "../../render/registry";
-import { FILE_ROUTES, routeOf, type FileRoute } from "./file-draw";
+import { docKindOf, FILE_ROUTES, routeOf, type FileRoute } from "./file-draw";
 
 const text = { binary: false };
 const binary = { binary: true };
@@ -69,6 +69,14 @@ describe("routeOf", () => {
     expect(routeOf(byId("markdown"), null, false, "read")).toBe("binary");
     expect(routeOf(null, null, false, "outside")).toBe("binary");
   });
+});
+
+test("a .jsonl or .ndjson file drawn as JSON is read as JSON Lines, on both pages (#2588's drift)", () => {
+  expect(docKindOf(byId("json"), "events/2026-11.jsonl")).toBe("jsonl");
+  expect(docKindOf(byId("json"), "events.ndjson")).toBe("jsonl");
+  expect(docKindOf(byId("json"), "orders.json")).toBe("json");
+  expect(docKindOf(byId("xml"), "orders.xml")).toBe("xml");
+  expect(docKindOf(byId("xml"), "odd.jsonl")).toBe("xml");
 });
 
 /**

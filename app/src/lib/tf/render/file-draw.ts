@@ -8,6 +8,8 @@
 import type { ComponentProps } from "svelte";
 
 import { commandIdOf } from "../../render/command";
+import type { DocKind } from "../../render/doc-model";
+import { isDelimited } from "../../render/json-sniff";
 import type { Renderer } from "../../render/registry";
 import type { Elsewhere } from "../../render/xsd-locate";
 import type TfDocView from "./doc/TfDocView.svelte";
@@ -44,6 +46,15 @@ export function routeOf(renderer: Renderer | null, drawn: { binary: boolean } | 
   if (as === "mermaid" || as === "d2" || as === "graphviz") return "diagram";
   if (renderer !== null && commandIdOf(renderer) !== null) return "command";
   return "lines";
+}
+
+/**
+ * What the XML view reads a file drawn on the `doc` route as: JSON Lines for a `.jsonl` or `.ndjson` file drawn as JSON
+ * (#2588's merger found *Try it on* drawing one as one JSON document), else JSON or XML as the renderer says.
+ */
+export function docKindOf(renderer: Renderer | null, path: string): DocKind {
+  if (renderer?.id !== "json") return "xml";
+  return isDelimited(path) ? "jsonl" : "json";
 }
 
 /**
