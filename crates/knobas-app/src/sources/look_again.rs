@@ -586,8 +586,7 @@ pub(crate) async fn after_write(
     }
     let pool = &scheduler.deps().pool;
     let target = write.entity_id.as_str();
-    let mut repositories = match super::effects::parents(pool, target).await
-    {
+    let mut repositories = match super::effects::parents(pool, target).await {
         Ok(parents) => parents,
         Err(error) => {
             tracing::warn!(write_id = write.id, %error, "a landed write's repository could not be found");
