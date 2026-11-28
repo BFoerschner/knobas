@@ -37,6 +37,7 @@ import {
   unreadRunsOf,
   foldSums,
   railCells,
+  railTitle,
 } from "./builds";
 import twin from "./rail-twin.json";
 
@@ -362,6 +363,19 @@ test("a rail row shows a time only where it says something: when it failed, when
   // Only the latest run counts: an older failure under a newer pass says nothing.
   const recovered = pipeline("C", [run({ started: t(11, 0) }), run({ started: t(10, 0), state: { text: "FAILURE", tone: "err" } })]);
   expect(railTime(recovered, now)).toBeNull();
+});
+
+test("a rail row's title says the time the row shows, so the time can give way at 1240 px (#2573)", () => {
+  const now = new Date(2026, 7, 22, 14, 32);
+  const t = (h: number, m: number) => new Date(2026, 7, 22, h, m).toISOString();
+  const latest = (extra: Partial<RunRow>) => pipeline("A", [run({ started: t(10, 5), finished: t(10, 9), updated_at: t(10, 9), ...extra })]);
+  // A failure's row says when it failed: so does its title, not when it started.
+  expect(railTitle(latest({ state: { text: "FAILURE", tone: "err" } }), now)).toBe("Failed 10:09");
+  expect(railTitle(latest({ state: { text: "running", tone: "info" }, finished: null }), now)).toBe("Running 10:05");
+  expect(railTitle(latest({ state: { text: "queued", tone: "info" }, started: null, finished: null }), now)).toBe("Queued 10:09");
+  // A quiet row's title has its latest run's time, as before.
+  expect(railTitle(latest({}), now)).toBe("Passed 10:05");
+  expect(railTitle(pipeline("B", []), now)).toBe("No runs");
 });
 
 test("a folder's bubbles are the sums of its pipelines' at any depth, and a pipeline with none adds nothing (#2573)", () => {

@@ -140,7 +140,6 @@
     foldPipelines,
     foldSums,
     keptPipelines,
-    latestTime,
     listRows,
     pipelineHash,
     pinnedOf,
@@ -148,6 +147,7 @@
     BUBBLE_WORDS,
     railGlyph,
     railTime,
+    railTitle,
     foldChain,
     reasonsById,
     reasonsLine,
@@ -793,14 +793,13 @@
   {@const drawn = withQueued(pipeline, echoesOn(pipeline.entity_id, QUEUED_RUN))}
   {@const glyph = railGlyph(drawn)}
   {@const time = railTime(drawn, undefined, read)}
-  {@const latest = latestTime(pipeline)}
   {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
   <a
     class={`tf-tr tf-pi ${indent(depth)}`}
     href={pipelineHash(pipeline.entity_id)}
     aria-current={pipeline.entity_id === selected?.entity_id}
     {@attach menuThing(() => ({ kind: "pipeline", id: pipeline.entity_id, hash: pipelineHash(pipeline.entity_id), unread: unreadRunsOf([pipeline], read) }))}
-    title={`${[...groupsOf(pipeline), pipeline.name].join(" › ")}\n${glyph.word}${latest !== "" ? ` ${latest}` : ""}`}
+    title={`${[...groupsOf(pipeline), pipeline.name].join(" › ")}\n${railTitle(drawn, undefined, read)}`}
     {@attach win.row(key)}
   >
     <TfRunGlyph {...glyph} />

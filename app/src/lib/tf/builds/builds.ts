@@ -212,6 +212,17 @@ export function railTime(
   return null;
 }
 
+/**
+ * A rail row's second title line: its latest run's word and the time the row shows ({@link railTime}), else its
+ * latest run's time. So the time can give way at the rail's narrow width and the title still says it (#2573).
+ */
+export function railTitle(pipeline: PipelineRow, now: Date = new Date(), read: ReadonlySet<string> | null = null): string {
+  const { tone, word } = railGlyph(pipeline);
+  const time = railTime(pipeline, now, read);
+  const at = time !== null && tone !== "q" ? time.text : latestTime(pipeline, now);
+  return at === "" ? word : `${word} ${at}`;
+}
+
 /** An instant as a row writes it, on the one ladder: *11:45* today, *yesterday 16:20*, *Wed 14:32*, then *3 Nov*. */
 export function shortTime(iso: string, now: Date = new Date()): string {
   return clockLabel(iso, now, true);

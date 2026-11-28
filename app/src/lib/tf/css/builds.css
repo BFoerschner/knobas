@@ -438,7 +438,10 @@
 .tf-bv .tf-pi-rest { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* At the rail's narrow width, a window of 1240 px or less, a row's time gives way to the columns: the table beside it
    says every time, and the row's title still has it. Stacked under 900 px the rail is the window's width again. */
-@media (min-width: 901px) and (max-width: 1240px) { .tf-bv .tf-pi-when { display: none; } }
+@media (min-width: 901px) and (max-width: 1240px) {
+  .tf-bv .tf-pi-when { display: none; }
+  .tf-bv .tf-pi-when + .tf-pl-ub { margin-left: auto; }
+}
 /* The rail's rows held in their room while a run opened from a scope scrolls its pipeline into view (#2570). */
 .tf-pl-rows.tf-unseen { visibility: hidden; }
 /* One band, as a pipeline's runs bar is (`.tf-rbar.tf-rpickbar`'s shape): the filter bar, with *Mark all as read* after
