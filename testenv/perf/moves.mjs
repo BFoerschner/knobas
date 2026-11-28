@@ -61,6 +61,8 @@ const CMD_K = { key: "k", code: "KeyK", modifiers: process.platform === "darwin"
 /** A repository with a checkout and pipelines on each corpus. */
 const REPO = real ? "live-gitea%3Ascale-data%2Fbi-dashboards" : "mock%3Atidewater%2Fpayout-service";
 const SPACE = real ? "SCLENG" : "ENG";
+/** A pipeline whose page lists runs: the scale estate's Terraform build, the fixture's Payout build. */
+const PIPE = real ? "live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build" : "teamcity%3AbuildType%3APayout_Build";
 const SETTINGS = ["sources", "checkouts", "time", "notifications", "standup", "monitoring", "docs", "search", "notes", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "updates"];
 
 /**
@@ -253,6 +255,8 @@ const PLACES = [
   { name: "builds", start: "#/time", nav: "builds", hash: "#/builds", away: "time", tabs: true },
   { name: "pipeline", start: "#/builds", press: `${shown} .tf-rail a[href^="#/builds/"], ${shown} a[href^="#/builds/"]`, hash: "#/builds/", away: "Escape" },
   { name: "run", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", away: "Escape", tabs: true },
+  // A run pressed on a pipeline's page (#2571), the path `run` took before #2570.
+  { name: "pipeline-run", start: `#/builds/${PIPE}`, press: `${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", away: "Escape" },
   // Builds' *Recent* (2026-11-25): every pipeline's runs in one table, by its address; a run opened from it and Esc back.
   { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", away: "#/time" },
   { name: "recent-run", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno`, hash: "#/build/", away: "Escape" },

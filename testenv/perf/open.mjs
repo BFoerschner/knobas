@@ -108,6 +108,9 @@ const PLACES = [
   { name: "builds", start: "#/time", press: nav("builds"), hash: "#/builds", useful: ".tf-row", min: 5, away: "time" },
   { name: "pipeline", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/builds/live-teamcity%3AbuildType%3AScale"]`, hash: "#/builds/", useful: ".tf-row", min: 5, back: "Escape" },
   { name: "run", parent: "builds", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
+  // A run pressed on a pipeline's page (#2571): the path `run` measured before #2570 made a bare `#/builds` *All pipelines*.
+  // The run page waits for its pipeline's row of the rail's read, already read for the pipeline's page.
+  { name: "pipeline-run", parent: "builds", start: "#/builds/live-teamcity%3AbuildType%3AScale_Platform_Terraform_Build", press: `${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", useful: ".tf-bhead, .tf-runbody", min: 2, back: "Escape" },
   // Builds' *All pipelines* (*Recent* until #2570): every pipeline's runs newest first, by its address from Time, and a run
   // opened from it. A bare `#/builds` draws it too (the `builds` place) until another place of Builds was stood on.
   { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", useful: ".tf-recent tr.tf-row", min: 5, away: "time" },
