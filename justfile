@@ -1412,7 +1412,8 @@ open-budget *args:
 
 # Recent's first open on a cold start (#2569b, `testenv/perf/README.md`, *Opening a page*): the windowless backend started
 # afresh each round, the page loaded the moment it answers and Recent pressed as soon as the nav draws, against
-# `builds-recent-start`'s lines: `just open-cold --backend <headless_ipc> --home <a copy of the saved home>`.
+# `builds-recent-start`'s lines: `just open-cold --backend <headless_ipc> --home <a copy of the saved home>`. `--live`
+# makes it a start with live sources syncing (the local Gitea and TeamCity, #2612), `--after <s>` loads the page later.
 open-cold *args:
     testenv/perf/open-cold.sh {{args}}
 

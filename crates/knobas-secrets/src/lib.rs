@@ -81,14 +81,16 @@
 //! keychain.
 
 // Debug builds only (#2384): the demo profile's credentials in a 0600 file.
-#[cfg(debug_assertions)]
+// And the `file-store` feature, which `knobas-app`'s `test-util` alone turns
+// on for the windowless backend (#2612).
+#[cfg(any(debug_assertions, feature = "file-store"))]
 pub mod file_store;
 pub mod keyring_store;
 pub mod memory;
 pub mod otp;
 pub mod spawn;
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "file-store"))]
 pub use file_store::FileStore;
 pub use keyring_store::KeyringStore;
 pub use memory::MemoryStore;

@@ -686,6 +686,15 @@ The sources go in on stdin, never in argv.
 - `--data-dir <dir>` on `testenv/live-sources.sh` puts the profile in a scratch
   directory, and the credential file with it.
 
+**A cold start with live sources syncing, timed** (#2612): `just open-cold
+--live` (`testenv/perf/README.md`, *Opening a page*) adds `perf-gitea` and
+`perf-teamcity` to a copy of the saved scale home, on the local Gitea and
+TeamCity this checkout seeded, at their shortest intervals, so every start of
+the windowless backend finds them due; Recent is then opened on each fresh
+start and its first read reported with the runs in flight and the app pool it
+met. It needs `KNOBAS_LIVE_TARGET=local` and `just live-up teamcity` (Gitea
+comes up with it); `just live-down teamcity` after, which frees the JVM lock.
+
 ## The live recipes
 
 Every live suite has a `just` recipe, and the recipe is how it is run — a suite
