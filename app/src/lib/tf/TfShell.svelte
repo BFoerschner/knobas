@@ -108,7 +108,7 @@
   import { installExternalLinks } from "../shell/external-links";
   import { installPressGuard } from "./press-guard";
   import { PressHold } from "./press-hold.svelte";
-  import { isTopPage, itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
+  import { itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -399,10 +399,10 @@
   function stampFor(how: Exclude<Told, "replace" | "land"> | null, now: string): Opened {
     if (how === "unopened") return { ...NOT_OPENED, prev: hash };
     if (how === "back") return { ...(here.opener?.from ?? NOT_OPENED), prev: hash };
-    if (how === "launched") return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip: null, visit: isTopPage(parseTfHash(now)), prev: hash };
+    if (how === "launched") return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip: null, prev: hash };
     const trip = tripAt(now);
-    if (how === null && samePage(hash, now)) return { opener: here.opener, trip, visit: here.visit, prev: hash };
-    return { opener: openerOf(hash, leftName() ?? openerName(route, shownPage.name), here), trip, visit: how === "visit", prev: hash };
+    if (how === null && samePage(hash, now)) return { opener: here.opener, trip, prev: hash };
+    return { opener: openerOf(hash, leftName() ?? openerName(route, shownPage.name), here), trip, prev: hash };
   }
 
   /** What a press to `now` keeps narrowed: Sub-tasks is the bare list's, so a saved view ends it, as *All tickets* does. */
@@ -581,16 +581,15 @@
   });
 
   /**
-   * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
-   * the ladder's own rungs, so the hint names what the key does.
-   */
-  const visiting = $derived(here.visit || (scopedTicket.section !== null && scopedTicket.section === sectionOf(route) && route.view !== "ticket" && route.view !== "job"));
-  /**
    * On a site's page, the page knobas holds for where the site stands, when it is not the one it was opened at
    * (`TfSite.svelte`, Fable's ruling, 2026-11-25): `Esc` twice and *Back to* land there.
    */
   const siteLanding = $derived(route.view === "site" ? (siteStore.landing.get(route.source) ?? null) : null);
-  const back = $derived(escTarget(route, here.opener, visiting, shownPage.parent, siteLanding));
+  /**
+   * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228): the ladder's own rungs, so the hint names
+   * what the key does. The page's parent in its own section, never the opener's (#2559).
+   */
+  const back = $derived(escTarget(route, here.opener, shownPage.parent, siteLanding));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -942,7 +941,6 @@
             },
       route,
       opener: here.opener,
-      visiting,
       parent: shownPage.parent,
       armed: route.view === "site" && siteStore.armed.has(route.source),
       landing: siteLanding,
@@ -1226,6 +1224,7 @@
         job: chosen?.key ?? null,
         jobAt: chosen?.entityId ?? null,
         back,
+        came: here.opener === null ? null : { hash: here.opener.hash, name: here.opener.name, opened: true },
         timedTicket,
         defaultJob,
         timer,

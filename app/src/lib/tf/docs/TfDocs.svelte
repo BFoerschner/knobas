@@ -226,7 +226,7 @@
     foldsHolding,
   } from "./docs";
   import { arrivalAt, replaceAddress } from "../opener";
-  import { namePage } from "../page-name.svelte";
+  import { namePage, parentPage } from "../page-name.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { linkedOn } from "../job/connections";
   import type { EscTarget } from "../escape";
@@ -356,6 +356,17 @@
   // What *Back to <name>* calls Docs once it is left: the page's title, the space's name or the search, as the crumb
   // says (spec #2227). One name, here, because a read answering after the crumb drew would otherwise clear the crumb's.
   namePage(() => page?.title ?? frame?.title ?? spaceHere?.name ?? spaceHere?.key ?? (place.kind === "search" ? "Search" : null));
+  // A page sits under its space, as its crumb names it (#2559): `Esc` and *Back to* go there, whatever opened the page.
+  parentPage(() => {
+    if (place.kind !== "page" || tree === null) return null;
+    const p = page;
+    if (p?.space) {
+      const own = treeSpace(tree.spaces, p.source_id, p.space.key);
+      return { hash: spaceHash(tree.spaces, { source_id: p.source_id, key: p.space.key }), name: own ? spaceTitle(own, tree.spaces) : spaceName(p.space) };
+    }
+    const f = p === null ? frame : null;
+    return f?.space ? { hash: spaceHash(tree.spaces, f.space), name: spaceTitle(f.space, tree.spaces) } : null;
+  });
   let pageError = $state<string | null>(null);
   /** The reader's own accounts, as the last page read names them; until a page is read, as the sources' settings do, so a hit's line says *you* from the start (F-428). */
   let me = $state<string[]>([]);

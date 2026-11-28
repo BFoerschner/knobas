@@ -557,7 +557,9 @@ async fn every_read(pool: &PgPool, sources: &[String], ids: &[String]) -> Vec<St
 /// the fill brings the cards back to the same answer.
 #[tokio::test]
 async fn the_reads_answer_the_same_with_every_card_some_or_none() {
-    let pool = pool().await;
+    // Its own database: the fill writes every ticket's card and marks every
+    // source whole, the cards another test took away on purpose included.
+    let pool = scratch("item-card-every-some-none").await;
     let jira = source(&pool, "jira").await;
     let gitea = source(&pool, "gitea").await;
     upsert(&pool, &jira, &jira_tickets()).await;
@@ -1075,7 +1077,10 @@ async fn is_whole(pool: &PgPool, source: &str, declared: &sqlx::types::Json<Valu
 /// fill makes it whole again.
 #[tokio::test]
 async fn the_board_off_the_cards_alone_is_the_board_joined() {
-    let pool = pool().await;
+    // Its own database: another test's fill would give back the card this
+    // one takes away, and mark its source whole, before it reads the board
+    // (#2548); and its own fill reaches every other test's cards.
+    let pool = scratch("item-card-board-joined").await;
     let jira = source(&pool, "jira").await;
     let gitea = source(&pool, "gitea").await;
     upsert(&pool, &jira, &jira_tickets()).await;
@@ -1165,8 +1170,7 @@ async fn the_board_off_the_cards_alone_is_the_board_joined() {
             }
         }
     }
-    // A project room, within its source; one source alone. (Not every
-    // source of the database: other tests' are not whole.)
+    // A project room, within its source; one source alone.
     shapes.push((
         knobas_core::mini_board::planned_statement_unlaned(),
         knobas_core::mini_board::planned_statement_unlaned_carded(),

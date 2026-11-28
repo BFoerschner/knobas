@@ -18,7 +18,7 @@ Yours is the ticket's only review. Start as soon as the PR opens, even as a draf
 2. `mattpocock-skills:code-review`, both axes: Standards (repo standards) and Spec (criteria, out-of-scope list). Add a deep pass against the ADRs and `docs/contract.md`, with the PR's **Frozen surface** section held to the diff, when the diff touches a frozen surface: §10.8's list, the write queue, concurrency or locking.
 3. Verify claims. Check that the mutation proof is present when the implementer brief says it is owed; add a mutant only for a claim you find untested. Ask whether the fixture can witness the claim and which direction is unwitnessed. A finding about a ticket you haven't read is a hypothesis: read it first.
 4. Don't open screenshot PNGs; they are for Björn. Review the code.
-5. Fix on the branch yourself (`git status --short`, named paths) per *Fix it in place first*; what fails its fit test you file and report with the finding quoted. Cap: 3 rounds, then stop and report.
+5. Fix on the branch yourself (`git status --short`, named paths) per *Fix it in place first*; what fails its fit test but is small goes in a small PR of its own (*Small is fixed, not filed*, Björn, 2026-11-27), and only what isn't small you file, saying why, and report with the finding quoted. Cap: 3 rounds, then stop and report.
 6. Re-run a live suite only if your fixes or the rebase touched what it exercises (`docs/agents/working-model.md`, *Live runs*). A diff that changes what the search answers owes the runs the implementer brief's *Live suites* names, whichever of you touched it: a PR body without them is a finding.
 
 ## The gate

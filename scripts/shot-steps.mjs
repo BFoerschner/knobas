@@ -1,6 +1,9 @@
 // One screenshot after steps, driven over the Chrome DevTools protocol (used by
 // scripts/shot.sh when a route carries steps; issue #989).
 // Usage: node scripts/shot-steps.mjs <port> <debug port> <profile> <size w,h> <theme> <file> <spec>
+//   debug port `0`: Chrome takes a free one and names it in <profile>/DevToolsActivePort, which is read. A port picked
+//   free beforehand and closed can be taken by another process before Chrome binds it; Chrome then runs on with no
+//   endpoint until the start guard runs out (#2589).
 //   spec: `#/job/PAY-231 > #/builds + click:Some button`
 //     ` > ` separates routes opened in turn inside one page (in-memory state
 //     survives, so a job opened first scopes the next route);
@@ -14,7 +17,8 @@
 //     `type:<text>` inserts <text> into the focused element (Input.insertText, so a
 //       binding sees an input event). The text cannot hold ` + ` or ` > `.
 //     `key:<combo>` presses one key: `key:Meta+k`, `key:Escape`, `key:Enter`, `key:j`,
-//       `key:Shift+Tab`. Modifiers Meta, Control, Alt, Shift; a bare character also types.
+//       `key:Shift+Tab`, `key:Shift+F10` or `key:ContextMenu` (the right-click menu from the keys).
+//       Modifiers Meta, Control, Alt, Shift; a bare character also types.
 //     `select:<name>=<option>` picks the option whose text (or value) is <option> in the first
 //       enabled select whose aria-label or label text is <name>; `select:testid=<id>=<option>`.
 //       Headless Chrome on macOS will not change a select from a key press.
@@ -24,7 +28,8 @@
 //       is <name> (a row's key cell). Waits as click does; a miss exits 1 naming the step.
 //     `dblclick:<name>` double-clicks there with the pointer (a row or card that opens on it).
 //     `back:<name>` / `forward:<name>` press mouse button 3 / 4 there (#693's navigation).
-//       These four go through Input.dispatchMouseEvent, so the page sees real pointer events;
+//     `context:<name>` presses the right button there: the page's right-click menu (#2544).
+//       These five go through Input.dispatchMouseEvent, so the page sees real pointer events;
 //       click: stays a DOM click.
 //     `see:<text>` waits as click does for the page's visible text to hold <text>, and a miss
 //       exits 1 naming the step. What a route alone cannot say: an address with nothing behind
@@ -56,7 +61,8 @@
 //   it through.
 import { spawn } from "node:child_process";
 import { chromePath as findChrome } from "./chrome-path.mjs";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
 const [width, height] = size.split(",").map(Number);
@@ -135,6 +141,8 @@ const NAMED_KEYS = {
   End: ["End", "End", 35],
   PageUp: ["PageUp", "PageUp", 33],
   PageDown: ["PageDown", "PageDown", 34],
+  F10: ["F10", "F10", 121],
+  ContextMenu: ["ContextMenu", "ContextMenu", 93],
 };
 // One printable character's physical key, for those that are not a letter or a digit.
 const PUNCTUATION = {
@@ -144,7 +152,7 @@ const PUNCTUATION = {
 };
 const MODIFIERS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
 // The steps that move the pointer, over CDP mouse events rather than a DOM click (#1483).
-const POINTER = new Set(["hover", "dblclick", "back", "forward"]);
+const POINTER = new Set(["hover", "dblclick", "back", "forward", "context"]);
 // `Meta+k` as the parameters of a CDP key event (the type is added by the caller), or
 // null for a key this table does not know. A key with no modifier but Shift carries its
 // text, so a bare `key:j` types into a focused field as well as reaching a key handler.
@@ -207,16 +215,27 @@ process.on("exit", closeChrome);
 try {
   // What the DevTools endpoint last answered, for the failure when none is a page.
   let seen;
+  // The port Chrome took, once it has written it, for a debug port of `0`.
+  let at = debug === "0" ? null : debug;
   const page = await poll(
     START_WAIT_S,
     async () => {
-      seen = `:${debug} has not answered`;
+      if (at === null) {
+        try {
+          at = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0].trim() || null;
+        } catch {}
+        if (at === null) {
+          seen = "no DevToolsActivePort written";
+          return null;
+        }
+      }
+      seen = `:${at} has not answered`;
       try {
-        const targets = await (await fetch(`http://localhost:${debug}/json`, { signal: AbortSignal.timeout(10000) })).json();
-        seen = `:${debug} listed ${targets.length} target(s)${targets.length ? `: ${targets.map((t) => t.type).join(", ")}` : ""}`;
+        const targets = await (await fetch(`http://localhost:${at}/json`, { signal: AbortSignal.timeout(10000) })).json();
+        seen = `:${at} listed ${targets.length} target(s)${targets.length ? `: ${targets.map((t) => t.type).join(", ")}` : ""}`;
         return targets.find((t) => t.type === "page");
       } catch (e) {
-        seen = `:${debug} did not answer (${e.cause?.code ?? e.message})`;
+        seen = `:${at} did not answer (${e.cause?.code ?? e.message})`;
       }
     },
     () => chromeGone,
@@ -310,11 +329,11 @@ try {
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     })()`;
   // CDP's mouse buttons and the `buttons` bit each holds down.
-  const BUTTONS = { left: 1, back: 8, forward: 16 };
+  const BUTTONS = { left: 1, right: 2, back: 8, forward: 16 };
   const pointer = async (verb, { x, y }) => {
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     if (verb === "hover") return;
-    const button = verb === "dblclick" ? "left" : verb;
+    const button = verb === "dblclick" ? "left" : verb === "context" ? "right" : verb;
     for (let clickCount = 1; clickCount <= (verb === "dblclick" ? 2 : 1); clickCount++) {
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button, buttons: BUTTONS[button], clickCount });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button, buttons: 0, clickCount });
@@ -423,7 +442,7 @@ try {
       } else if (verb === "scroll" && (/^-?\d+$/.test(arg) || arg.startsWith("testid="))) {
         if (!(await evaluate(scrollJs(arg)))) done(1, `shot: step '${step}' found nothing to scroll on #/${path}`);
       } else {
-        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, see:<text>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
+        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, context:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, see:<text>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
       }
       await sleep(500);
     }

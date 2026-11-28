@@ -22,6 +22,10 @@
   "revisions": {
     "revision": []
   },
+  "snapshot-dependencies": {
+    "build": [],
+    "count": 0
+  },
   "startDate": "20260822T101000+0000",
   "state": "finished",
   "status": "FAILURE",

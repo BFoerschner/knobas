@@ -289,6 +289,23 @@ pub async fn open_folder(
     .await
 }
 
+/// Try saved application `application` on pasted text, a chosen file or a
+/// chosen folder (#2562), from its settings page: it opens there as on a
+/// checkout. Answers the argument vector it started.
+///
+/// # Errors
+///
+/// As [`crate::checkout::open::open_try`].
+#[tauri::command]
+pub async fn open_try(
+    lifecycle: State<'_, Lifecycle>,
+    application: String,
+    on: crate::try_on::TryOn,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::open::open_try(&pool, &application, on).await
+}
+
 /// The page a code object of this entity's repository has at its source
 /// (#2274): what *Open in › Browser* hands the opener. Built from the
 /// source's typed base URL and the pages its adapter declares, never from a

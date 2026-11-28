@@ -134,6 +134,7 @@
 .tf-ftree .tf-pdir { color: var(--ink-2); }
 .tf-ftree a[aria-current="true"] .tf-pdir { color: inherit; opacity: .75; }
 .tf-gonote { margin: 6px 10px; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
+.tf-gonote code { --fs: var(--size-code); font-family: var(--mono); font-variant-ligatures: var(--mono-ligatures); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink); }
 /* The tree's keys (#2311, mockups/code-area `.tree > footer`), drawn once they work. */
 .tf-ftree-keys { padding: 6px 10px; border-top: 1px solid var(--rule-2); font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); display: flex; gap: 10px; flex-wrap: wrap; }
 .tf-ftree-keys span { display: inline-flex; gap: 3px; align-items: center; }

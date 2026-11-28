@@ -19,7 +19,11 @@
 //! - as a person's read for the first 30 s, then in the background lane
 //!   (`knobas_http::behind`, ADR-0042);
 //! - a run of the source holding its lock skips the tick (`RunInFlight`): its
-//!   own in-flight poll reads the build;
+//!   own in-flight poll reads the build. The lock also turns a read away
+//!   while another follow's read of the source holds it, for that one read:
+//!   so a read turned away tries again [`BUSY`] on, up to [`BUSY_RETRIES`]
+//!   times, before it skips the tick (#2594: a chain's runs keep one clock
+//!   and are read at once together);
 //! - a tick whose item arrived as the mirror holds it tells nothing
 //!   (`RefreshOutcome::Unchanged`), so a build waiting for an agent costs the
 //!   window nothing.
@@ -31,10 +35,27 @@
 //! flight. At most [`PER_SOURCE`] runs of one source are followed; a newer one
 //! stops the oldest.
 //!
+//! **A started run brings its chain** (#2594, ADR-0064's *build chain*). A
+//! run waits on others before it starts (its kind's `waits_on`: TeamCity's
+//! snapshot dependencies), and those are queued by the same press. On every
+//! read of a followed run, each run it waits on that the mirror does not hold
+//! as finished is followed too, the same way: read by id at once (it may not
+//! be mirrored yet), then on the cadence, to the same ends, and each brings
+//! its own. They keep the clock of the run that brought them, so a chain's
+//! 30 s as a person and its 2 h end where the started run's do. A chain
+//! counts against [`PER_SOURCE`] run by run, but **only a write's own run
+//! makes room**: a run of a chain joins only where a slot is free and stops
+//! nobody, and one left out joins on a later read of the run that waits on
+//! it, once a slot frees. So the started run is never stopped by its own
+//! chain, and a source has at most [`PER_SOURCE`] reads in flight however
+//! long the chain.
+//! A run of a chain read as gone (deleted, or outside a scoped source, so
+//! never mirrored) is not brought again.
+//!
 //! Not polling for somebody else's change: the press started a process, and
 //! reading it to its end is that write's read-back.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -57,6 +78,28 @@ const FAILURES: u32 = 5;
 /// How long the wait between two reads looks up to see the quit or a stop.
 const NAP: Duration = Duration::from_millis(250);
 
+/// How soon a read the source's lock turned away tries again: another
+/// follow's read holds it for one read, a run for the whole run.
+const BUSY: Duration = Duration::from_millis(500);
+
+/// How many times in a row a turned-away read tries again [`BUSY`] on
+/// before it waits the cadence.
+const BUSY_RETRIES: u32 = 3;
+
+/// The wait before a follow's next read, `cadence` being [`next_wait`]'s:
+/// none for a run of a chain's first read (`first`), [`BUSY`] after the
+/// lock turned `busy` reads in a row away, up to [`BUSY_RETRIES`], else the
+/// cadence.
+fn wait_before(cadence: Duration, first: bool, busy: u32) -> Duration {
+    if first {
+        Duration::ZERO
+    } else if (1..=BUSY_RETRIES).contains(&busy) {
+        BUSY.min(cadence)
+    } else {
+        cadence
+    }
+}
+
 /// The wait before the next read, `elapsed` after the read-back: 2 s for the
 /// first 30 s, 5 s up to 5 min, 15 s after that, `None` past [`AT_MOST`].
 #[must_use]
@@ -74,7 +117,21 @@ pub fn next_wait(elapsed: Duration) -> Option<Duration> {
 
 /// The runs being followed, by source, oldest first, each with its stop.
 #[derive(Clone, Default)]
-pub(crate) struct RunFollows(Arc<Mutex<HashMap<String, VecDeque<Followed>>>>);
+pub(crate) struct RunFollows(Arc<Mutex<Follows>>);
+
+#[derive(Default)]
+struct Follows {
+    runs: HashMap<String, VecDeque<Followed>>,
+    /// The runs of a chain whose read came back [`RefreshOutcome::Gone`]:
+    /// deleted, or outside the source's scope (a TeamCity source scoped to
+    /// a project, a dependency in another), never mirrored, so never held
+    /// as finished. Not brought again, or every read of the run waiting on
+    /// one would read it again. At most [`GONE_KEPT`].
+    gone: HashSet<String>,
+}
+
+/// How many gone runs of chains are kept, past which they are forgotten.
+const GONE_KEPT: usize = 256;
 
 #[derive(Clone)]
 struct Followed {
@@ -102,7 +159,7 @@ impl RunFollows {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let runs = all.entry(source.to_owned()).or_default();
+        let runs = all.runs.entry(source.to_owned()).or_default();
         if runs.iter().any(|run| run.entity == entity) {
             return None;
         }
@@ -119,18 +176,53 @@ impl RunFollows {
         Some(stop)
     }
 
+    /// Note `entity` of `source` as followed for the chain of a followed run,
+    /// only where a slot is free: it stops no follow. `None` when it is
+    /// followed already or [`PER_SOURCE`] are.
+    fn join(&self, source: &str, entity: &str) -> Option<Arc<AtomicBool>> {
+        let mut all = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if all.gone.contains(entity) {
+            return None;
+        }
+        let runs = all.runs.entry(source.to_owned()).or_default();
+        if runs.len() >= PER_SOURCE || runs.iter().any(|run| run.entity == entity) {
+            return None;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        runs.push_back(Followed {
+            entity: entity.to_owned(),
+            stop: Arc::clone(&stop),
+        });
+        Some(stop)
+    }
+
     /// The follow `stop` belongs to has ended.
     fn end(&self, source: &str, stop: &Arc<AtomicBool>) {
         let mut all = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(runs) = all.get_mut(source) {
+        if let Some(runs) = all.runs.get_mut(source) {
             runs.retain(|run| !Arc::ptr_eq(&run.stop, stop));
             if runs.is_empty() {
-                all.remove(source);
+                all.runs.remove(source);
             }
         }
+    }
+
+    /// The run `entity` of a chain read as gone: not brought again.
+    fn gone(&self, entity: &str) {
+        let mut all = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if all.gone.len() >= GONE_KEPT {
+            all.gone.clear();
+        }
+        all.gone.insert(entity.to_owned());
     }
 
     /// The runs of `source` being followed now, oldest first.
@@ -140,7 +232,8 @@ impl RunFollows {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        all.get(source)
+        all.runs
+            .get(source)
             .map(|runs| runs.iter().map(|run| run.entity.clone()).collect())
             .unwrap_or_default()
     }
@@ -156,10 +249,24 @@ pub fn followed(scheduler: &Scheduler, source: &str) -> Vec<String> {
 /// Whether `entity` is a run in the mirror, live and not finished: its kind
 /// declares the run frame and its payload no `finished` instant.
 pub(crate) async fn in_flight(scheduler: &Scheduler, entity: &str) -> bool {
-    use knobas_core::payload::{Frame, resolve_string};
+    matches!(mirrored(scheduler, entity).await, Mirrored::InFlight { .. })
+}
+
+/// What the mirror holds of `entity`, as a follow reads it.
+enum Mirrored {
+    /// No live row, or one the follow cannot read.
+    Nothing,
+    /// A run, live and not finished, and the keys of the runs it waits on.
+    InFlight { waits_on: Vec<String> },
+    /// Anything else: a finished run, or no run at all.
+    Settled,
+}
+
+async fn mirrored(scheduler: &Scheduler, entity: &str) -> Mirrored {
+    use knobas_core::payload::{Frame, resolve_list, resolve_string};
     let deps = scheduler.deps();
     let Ok(parsed) = knobas_core::entity::EntityRef::parse(entity) else {
-        return false;
+        return Mirrored::Nothing;
     };
     let row: Option<(String, serde_json::Value)> =
         sqlx::query_as("select kind, payload from sync.live_item where entity_id = $1")
@@ -169,17 +276,27 @@ pub(crate) async fn in_flight(scheduler: &Scheduler, entity: &str) -> bool {
             .ok()
             .flatten();
     let Some((kind, payload)) = row else {
-        return false;
+        return Mirrored::Nothing;
     };
     let Ok(declarations) = super::paths::declared_paths(&deps.pool, deps.registry.as_ref()).await
     else {
-        return false;
+        return Mirrored::Nothing;
     };
-    declarations
-        .get(&parsed.namespace, &kind)
-        .is_some_and(|paths| {
-            paths.frame == Some(Frame::Run) && resolve_string(&payload, &paths.finished).is_none()
-        })
+    match declarations.get(&parsed.namespace, &kind) {
+        Some(paths)
+            if paths.frame == Some(Frame::Run)
+                && resolve_string(&payload, &paths.finished).is_none() =>
+        {
+            Mirrored::InFlight {
+                waits_on: resolve_list(&payload, &paths.waits_on)
+                    .iter()
+                    .map(|key| knobas_core::entity::EntityRef::new(&parsed.namespace, key))
+                    .map(|run| run.to_string())
+                    .collect(),
+            }
+        }
+        _ => Mirrored::Settled,
+    }
 }
 
 /// After a landed write's read-back of `entity`: follow it, in the
@@ -195,33 +312,103 @@ pub(crate) async fn follow_if_in_flight(scheduler: &Scheduler, source: &str, ent
     let Some(stop) = follows.begin(source, entity) else {
         return false;
     };
-    let (task, source_id, entity_id, stopped) = (
+    let began = Instant::now();
+    bring_chain(scheduler, source, entity, began).await;
+    let spawned = scheduler.background().spawn(to_its_end(
+        Followed {
+            entity: entity.to_owned(),
+            stop: Arc::clone(&stop),
+        },
         scheduler.clone(),
         source.to_owned(),
-        entity.to_owned(),
-        Arc::clone(&stop),
-    );
-    let spawned = scheduler.background().spawn(async move {
-        follow(&task, &entity_id, &stopped).await;
-        follows.end(&source_id, &stopped);
-    });
+        follows,
+        began,
+        false,
+    ));
     if !spawned {
         // The quit has begun: the next start's scheduled run reads it.
-        if let Some(follows) = RunFollows::of(scheduler) {
-            follows.end(source, &stop);
-        }
+        follows_end(scheduler, source, &stop);
     }
     spawned
 }
 
-/// Read `entity` again on [`next_wait`]'s cadence until it is no run in
-/// flight, or the follow ends otherwise (the module's list).
-async fn follow(scheduler: &Scheduler, entity: &str, stop: &AtomicBool) {
-    let began = Instant::now();
-    let mut failed = 0;
-    while let Some(wait) = next_wait(began.elapsed()) {
+fn follows_end(scheduler: &Scheduler, source: &str, stop: &Arc<AtomicBool>) {
+    if let Some(follows) = RunFollows::of(scheduler) {
+        follows.end(source, stop);
+    }
+}
+
+/// Follow each run `entity` waits on that the mirror does not hold as
+/// settled and nobody follows yet, where a slot is free (the module's
+/// *brings its chain*), on the clock `began` of the run that brought it.
+async fn bring_chain(scheduler: &Scheduler, source: &str, entity: &str, began: Instant) {
+    let Some(follows) = RunFollows::of(scheduler) else {
+        return;
+    };
+    let Mirrored::InFlight { waits_on } = mirrored(scheduler, entity).await else {
+        return;
+    };
+    for run in waits_on {
+        if matches!(mirrored(scheduler, &run).await, Mirrored::Settled) {
+            continue;
+        }
+        let Some(stop) = follows.join(source, &run) else {
+            continue;
+        };
+        let chained = to_its_end(
+            Followed {
+                entity: run,
+                stop: Arc::clone(&stop),
+            },
+            scheduler.clone(),
+            source.to_owned(),
+            follows.clone(),
+            began,
+            true,
+        );
+        if !scheduler.background().spawn(chained) {
+            follows_end(scheduler, source, &stop);
+        }
+    }
+}
+
+/// [`follow`] `run`, then note its follow ended: the task a follow is spawned
+/// as. Boxed by name, so a run of a chain can bring its own chain.
+fn to_its_end(
+    run: Followed,
+    scheduler: Scheduler,
+    source: String,
+    follows: RunFollows,
+    began: Instant,
+    at_once: bool,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let gone = follow(&scheduler, &source, &run.entity, &run.stop, began, at_once).await;
+        follows.end(&source, &run.stop);
+        if gone && at_once {
+            follows.gone(&run.entity);
+        }
+    })
+}
+
+/// Read `entity` again on [`next_wait`]'s cadence, timed from `began`, until
+/// it is no run in flight, or the follow ends otherwise (the module's list);
+/// the first read at once when `at_once`. Each read brings its chain.
+/// `true` when it ended on a read that found `entity` gone.
+async fn follow(
+    scheduler: &Scheduler,
+    source: &str,
+    entity: &str,
+    stop: &AtomicBool,
+    began: Instant,
+    at_once: bool,
+) -> bool {
+    let (mut failed, mut busy) = (0, 0);
+    let mut first = at_once;
+    while let Some(cadence) = next_wait(began.elapsed()) {
+        let wait = wait_before(cadence, std::mem::take(&mut first), busy);
         if !nap(scheduler, wait, stop).await {
-            return;
+            return false;
         }
         let read = super::refresh::refresh(scheduler, entity, None, Lock::Try);
         let outcome = if began.elapsed() < AS_A_PERSON {
@@ -230,29 +417,36 @@ async fn follow(scheduler: &Scheduler, entity: &str, stop: &AtomicBool) {
             knobas_http::behind(read).await
         };
         match outcome {
-            Ok(RefreshOutcome::Refreshed | RefreshOutcome::Unchanged) => failed = 0,
-            // A run holds the lock: its in-flight poll reads the build.
-            Ok(RefreshOutcome::RunInFlight) => continue,
-            Ok(RefreshOutcome::Gone | RefreshOutcome::NotOffered)
+            Ok(RefreshOutcome::Refreshed | RefreshOutcome::Unchanged) => (failed, busy) = (0, 0),
+            // A run holds the lock, whose in-flight poll reads the build, or
+            // another follow's read does, for a moment: [`wait_before`].
+            Ok(RefreshOutcome::RunInFlight) => {
+                busy += 1;
+                continue;
+            }
+            Ok(RefreshOutcome::Gone) => return true,
+            Ok(RefreshOutcome::NotOffered)
             | Err(
                 RefreshError::TurnedOff(_)
                 | RefreshError::NotConfigured(_)
                 | RefreshError::NotAnEntity(_),
-            ) => return,
+            ) => return false,
             Err(error @ (RefreshError::Build(_) | RefreshError::Sync(_))) => {
                 failed += 1;
                 tracing::info!(%entity, failed, %error, "a followed run could not be read");
                 if failed >= FAILURES {
-                    return;
+                    return false;
                 }
                 continue;
             }
         }
         if !in_flight(scheduler, entity).await {
-            return;
+            return false;
         }
+        bring_chain(scheduler, source, entity, began).await;
     }
     tracing::info!(%entity, "a followed run is still in flight after 2 h; the source's runs read it from here");
+    false
 }
 
 /// Wait `wait`, looking up every [`NAP`]: `false` once the quit has begun or
@@ -287,6 +481,43 @@ mod tests {
         assert_eq!(next_wait(s(7_200)), None);
     }
 
+    /// **A read the lock turned away tries again soon, a few times** (#2594):
+    /// a chain's runs are read at once together and on one clock, so one
+    /// follow's read holds the lock when another's comes, for a moment.
+    #[test]
+    fn a_turned_away_read_tries_again_soon_a_few_times_then_waits_the_cadence() {
+        let s = Duration::from_secs;
+        assert_eq!(
+            wait_before(s(5), true, 0),
+            Duration::ZERO,
+            "a chain's first read"
+        );
+        assert_eq!(wait_before(s(5), false, 0), s(5));
+        for busy in 1..=BUSY_RETRIES {
+            assert_eq!(wait_before(s(5), false, busy), BUSY, "turned away {busy}");
+        }
+        assert_eq!(
+            wait_before(s(5), false, BUSY_RETRIES + 1),
+            s(5),
+            "a run holds it"
+        );
+        assert_eq!(
+            wait_before(Duration::from_millis(100), false, 1),
+            Duration::from_millis(100)
+        );
+    }
+
+    /// **A run of a chain read as gone is not brought again** (#2594).
+    #[test]
+    fn a_run_of_a_chain_read_as_gone_is_not_brought_again() {
+        let follows = RunFollows::default();
+        let stop = follows.join("tc", "tc:build:6").expect("a free slot");
+        follows.end("tc", &stop);
+        follows.gone("tc:build:6");
+        assert!(follows.join("tc", "tc:build:6").is_none());
+        assert!(follows.join("tc", "tc:build:7").is_some(), "another is");
+    }
+
     #[test]
     fn a_sixth_run_of_a_source_stops_the_oldest_and_a_run_is_followed_once() {
         let follows = RunFollows::default();
@@ -311,5 +542,49 @@ mod tests {
         );
         follows.end("tc", &sixth);
         assert!(!follows.of_source("tc").contains(&"tc:build:9".to_owned()));
+    }
+
+    /// **A chain counts run by run but only a write's run makes room**
+    /// (#2594): a run of a chain joins a free slot, stops nobody, and is not
+    /// followed twice; a write's run still stops the oldest.
+    #[test]
+    fn a_run_of_a_chain_joins_only_a_free_slot_and_stops_nobody() {
+        let follows = RunFollows::default();
+        let started = follows.begin("tc", "tc:build:10").expect("the write's run");
+        let chain: Vec<_> = (1..PER_SOURCE)
+            .map(|n| {
+                follows
+                    .join("tc", &format!("tc:build:{n}"))
+                    .expect("a free slot")
+            })
+            .collect();
+        assert!(
+            follows.join("tc", "tc:build:1").is_none(),
+            "followed already"
+        );
+        assert!(
+            follows.join("tc", "tc:build:9").is_none(),
+            "no slot is free: it waits for one"
+        );
+        assert!(!started.load(Ordering::SeqCst), "the started run goes on");
+        assert!(chain.iter().all(|stop| !stop.load(Ordering::SeqCst)));
+        assert_eq!(follows.of_source("tc").len(), PER_SOURCE);
+
+        follows.end("tc", &chain[0]);
+        assert!(
+            follows.join("tc", "tc:build:9").is_some(),
+            "a slot freed by a finished run takes the one left out"
+        );
+        assert!(
+            follows.join("tc", "tc:build:1").is_none(),
+            "and the cap holds again"
+        );
+
+        // A write's run makes room as before: the oldest, the started run, stops.
+        follows
+            .begin("tc", "tc:build:20")
+            .expect("a new write's run");
+        assert!(started.load(Ordering::SeqCst));
+        assert_eq!(follows.of_source("tc").len(), PER_SOURCE);
     }
 }

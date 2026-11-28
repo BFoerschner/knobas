@@ -648,9 +648,10 @@ test("the compare page proposes Into and From, the change and its commits, and q
   expect(writes).toEqual([
     { CreatePullRequest: { entity: REPO, title: "Instant SEPA spike", body: "", head: "spike/sepa-instant", base: "main" } },
   ]);
-  expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/prs");
+  // It lands on the new pull request's page, addressed by its write until the source answers (#2584).
+  expect(location.hash).toBe("#/pr/new/1");
   expect(toasts.items.at(-1)!.text).toBe("Queued: open PR Instant SEPA spike.");
-  // It lands on the tab it was queued for, with its row and its chip (F-242).
+  // The repository's tab shows it too, with its row and its chip (F-242).
   unmount(view!);
   view = null;
   await draw(["gitea:tidewater/payout-service", "prs"]);

@@ -149,7 +149,9 @@ check, and the probe goes on with the next case. Calls from the attempt that was
 cannot act on the fresh page, and so does every later call of an attempt that stalled, so a probe that catches the
 error and goes on cannot wait out each deadline in turn. A soak's lap is not tried again (a fresh page would not read
 what the session grew): the soak ends failed-to-run. `compare.mjs` keeps its own way, a fresh Chrome for the next step.
-`KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit; `watchdog-test.sh` runs the tests at 0.01 in about 12 s.
+`KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit; `watchdog-test.sh` runs the tests at 0.01 in about 12 s, with the
+launch and connect limits at 60 s (`KNOBAS_PERF_START_MS`): a loaded machine takes longer than 300 ms to start a
+process and 150 ms for it to list its page (#2546).
 
 ## A layer over a list (the ux24 pass, 2026-11-20)
 

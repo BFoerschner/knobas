@@ -15,7 +15,8 @@
 # runs (`scripts/gate-slot.sh` and the rest of the list in gate-scope.sh), or
 # the head also touches the justfile or an app file. A Markdown file there is
 # prose unless a crate opens it (`join("…/README.md")`): naming it in a panic
-# message reads nothing.
+# message reads nothing. `extension/` (#2545) answers `scripts` the same way, and
+# `full` beside an app file or when `crates/` reads it.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 scope=$here/gate-scope.sh
@@ -25,7 +26,7 @@ trap 'rm -rf "$scratch"' EXIT
 # No excludes file: the machine's global one ignores `.claude/*`, which the repo tracks.
 g() { git -C "$scratch" -c core.excludesFile=/dev/null -c user.name=t -c user.email=t@t "$@"; }
 g init -q -b main
-mkdir -p "$scratch/scripts" "$scratch/testenv/specs" "$scratch/testenv/drivers" "$scratch/app/src/lib/shell" "$scratch/app/src/lib/tf/note" "$scratch/app/src/lib/tf/free" "$scratch/app/src/lib/other" "$scratch/app/src/lib/slash" "$scratch/crates" "$scratch/testenv" "$scratch/docs" "$scratch/.claude/commands"
+mkdir -p "$scratch/extension/firefox/src" "$scratch/scripts" "$scratch/testenv/specs" "$scratch/testenv/drivers" "$scratch/app/src/lib/shell" "$scratch/app/src/lib/tf/note" "$scratch/app/src/lib/tf/free" "$scratch/app/src/lib/other" "$scratch/app/src/lib/slash" "$scratch/crates" "$scratch/testenv" "$scratch/docs" "$scratch/.claude/commands"
 echo a > "$scratch/app/src/lib/launcher.svelte"
 echo a > "$scratch/app/src/lib/tf/note/TfNote.svelte"
 echo a > "$scratch/app/src/lib/tf/free/Free.svelte"
@@ -55,6 +56,7 @@ const PACKAGE: &str = include_str!("../app/package.json");
 const READ: &str = include_str!("../app/src/lib/read.ts");
 EOS
 for f in shot-test.sh rust-reads.sh commented.sh bash-guard.py gate-slot.sh; do echo a > "$scratch/scripts/$f"; done
+for f in router.js protocol.js; do echo a > "$scratch/extension/firefox/src/$f"; done
 echo a > "$scratch/testenv/specs/README.md"
 echo a > "$scratch/testenv/README.md"
 echo a > "$scratch/testenv/drivers/capture.sh"
@@ -64,6 +66,7 @@ cat > "$scratch/crates/scripts.rs" <<'EOS'
 const SEED: &str = include_str!("../scripts/rust-reads.sh");
 fn specs() -> PathBuf { dir.join("../testenv/specs/README.md") }
 fn hint() { panic!("run ./seed from testenv/ (testenv/README.md)") }
+const PROTOCOL: &str = include_str!("../extension/firefox/src/protocol.js");
 EOS
 echo 'const drivers = import.meta.glob("../../../../testenv/drivers/*.sh");' > "$scratch/app/src/lib/shell/witness.ts"
 echo '{}' > "$scratch/.claude/settings.json"
@@ -128,6 +131,9 @@ expect full "the Bash guard, which .claude/settings.json wires in (#2334)" scrip
 expect full "a script the full gate's cargo half runs (#2334)" scripts/gate-slot.sh
 expect full "a testenv Markdown file a crate opens (#2334)" testenv/specs/README.md
 expect front "a testenv Markdown file a crate only names in a message (#2334)" testenv/README.md
+expect scripts "an extension file nothing reads (#2545)" extension/firefox/src/router.js
+expect full "an extension file beside an app file (#2545)" extension/firefox/src/router.js app/src/lib/other/Plain.svelte
+expect full "an extension file crates/ reads (#2545)" extension/firefox/src/protocol.js
 # The perl expressions are single-quoted on purpose: `$1` and `$_` are perl's.
 # shellcheck disable=SC2016
 edit_package front "a new npm dependency with its lockfile (#2301)" \

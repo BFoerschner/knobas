@@ -137,6 +137,17 @@ tauri-plugin-opener = "=2.5.4"
 # halves speak one protocol and a mismatch fails at run time with "command not
 # found" rather than at build time.
 tauri-plugin-notification = "=2.4.0"
+# The native file and folder picker of *Try it on* (#2562): a person chooses
+# a file or a folder anywhere on the disk to try a renderer, a pipeline, a
+# command or an application on. No npm half: the webview makes one call,
+# `plugin:dialog|open`, through knobas's own `invoke` (`app/src/lib/ipc/app.ts`,
+# `pickPath`), so its argument shape is pinned by that line and this version
+# together. 2.7.3 is the newest release that takes the Tauri 2.11 the lock
+# holds (2.8 needs 2.12). Only `dialog:allow-open` is granted
+# (`capabilities/default.json`): no save dialog, no message box, and the
+# plugin's file-system scope is never used, since the path the picker answers
+# is read by knobas's own `try_*` commands on the press.
+tauri-plugin-dialog = "=2.7.3"
 # The capture window's global shortcut (#503, spec #491 stories 40-43). Pinned
 # exactly, the discipline the two plugins above record -- but for a different
 # reason, and the difference is the point: **no npm half exists for this one**.

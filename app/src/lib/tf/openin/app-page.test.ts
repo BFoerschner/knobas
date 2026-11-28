@@ -40,8 +40,8 @@ test("Settings knows the page, Esc goes up to Checkouts from it, and the cog doe
   expect(parentOf(route)).toBe("#/settings/checkouts");
   expect(sectionTabOf(route)).toBeNull();
   expect(sectionTabOf(parseTfHash("#/settings/checkouts"))).toBe("settings");
-  // Opened from a repository's Open in…, Esc and Back go there.
-  expect(escTarget(route, { hash: "#/repo/gitea%3At%2Fx", name: "t/x" })).toEqual({ hash: "#/repo/gitea%3At%2Fx", name: "t/x", opened: true });
+  // Opened from a repository's Open in…, Esc still goes up to Checkouts (#2559); the page's Save and Cancel go back there.
+  expect(escTarget(route, { hash: "#/repo/gitea%3At%2Fx", name: "t/x" })).toEqual({ hash: "#/settings/checkouts", name: "Checkouts and Open in", opened: false });
 });
 
 const TERMINAL: CheckoutApplication = { id: "terminal", name: "Terminal", command: "wt -d {path}", file_command: null };

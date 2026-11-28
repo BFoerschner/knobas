@@ -393,7 +393,7 @@ test("on a ticket page, Link to targets that ticket, not the chosen job", async 
   expect(rows).toContain("Link to PAY-240");
 });
 
-test("a ticket result in ⌘K opens the ticket page, and Esc there goes back to the page it was pressed over (F-047)", async () => {
+test("a ticket result in ⌘K opens the ticket page, and Esc there goes up to Tickets, not back to the page it was pressed over (F-047, #2559)", async () => {
   await openOn("#/builds", "Builds");
   await search("PAY-240");
   inLauncher("Enter");
@@ -401,7 +401,7 @@ test("a ticket result in ⌘K opens the ticket page, and Esc there goes back to 
   await pageOf("PAY-240");
   await until(() => launcher() === null, "the launcher stayed open");
   key("Escape");
-  await until(() => location.hash.startsWith("#/builds"), `Esc went to ${location.hash}`);
+  await until(() => location.hash === "#/tickets", `Esc went to ${location.hash}`);
 });
 
 test("a bare #/ticket lands on Tickets, and an unreadable id says it was not found", async () => {
@@ -445,7 +445,7 @@ function withRunTicket(handlers: Record<string, Handler>): Record<string, Handle
   };
 }
 
-test("a run's ticket link on Builds opens the ticket page, and Esc there returns to the run", async () => {
+test("Tickets: a run's ticket link on Builds opens the ticket page, and Esc there goes up to Tickets, never back to the run (#2559)", async () => {
   installFakeTauri(recorded(withRunTicket(withTicketSearch(demoHandlers()))));
   await openOn(RUN_HASH, "#1187");
   const link = `a[href="#/ticket/${encodeURIComponent("mock:PAY-231")}"]`;
@@ -454,21 +454,33 @@ test("a run's ticket link on Builds opens the ticket page, and Esc there returns
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `the run's ticket opened ${location.hash}`);
   await pageOf("PAY-231");
   expect(lit()).toBe("Tickets");
-  expect(hint()).toBe("Back to Run #1187 Esc");
+  expect(hint()).toBe("Back to Tickets Esc");
 
   key("Escape");
-  await until(() => location.hash === RUN_HASH, `Esc went to ${location.hash}`);
+  await until(() => location.hash === "#/tickets", `Esc went to ${location.hash}`);
 });
 
-test("a run opened from a doc page names the doc page in its hint, as Esc goes there (spec #2227, story 35)", async () => {
+test("Builds: a run opened from a doc page names its pipeline in its hint, as Esc goes there, never to the doc page (spec #2227, story 35, #2559)", async () => {
   await openOn("#/page/confluence%3Asepa", "SEPA payout retry design");
   await until(() => shown(".tf-rd-title")?.textContent?.includes("SEPA payout retry design") ?? false, "the doc page never drew");
   location.hash = RUN_HASH;
   await until(() => shown(".tf-crumbs strong")?.textContent === "#1187", "the run never drew");
-  expect(hint()).toBe("Back to SEPA payout retry design Esc");
+  expect(hint()).toBe("Back to Payout_IntegrationTests Esc");
 
   key("Escape");
-  await until(() => location.hash === "#/page/confluence%3Asepa", `Esc went to ${location.hash}`);
+  const pipeline = `#/builds/${encodeURIComponent("teamcity:buildType:Payout_IntegrationTests")}`;
+  await until(() => location.hash === pipeline, `Esc went to ${location.hash}`);
+});
+
+test("Docs: a doc page opened from a ticket's page goes up to its space on Esc, by the name its crumb gives it, never back to the ticket (#2559)", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  location.hash = "#/page/confluence%3Asepa";
+  await until(() => shown(".tf-rd-title")?.textContent?.includes("SEPA payout retry design") ?? false, "the doc page never drew");
+  const space = shown(".tf-rd-crumb a[href^='#/docs/space/']");
+  expect(space, "the fixture's page sits in a space").not.toBeNull();
+  await until(() => hint() === `Back to ${space!.textContent!.trim()} Esc`, `the hint said ${hint()}`);
+  key("Escape");
+  await until(() => location.hash === space!.getAttribute("href"), `Esc went to ${location.hash}`);
 });
 
 // ---- the reading column (#2399) ----

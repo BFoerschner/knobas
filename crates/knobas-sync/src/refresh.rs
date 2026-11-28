@@ -40,7 +40,8 @@ pub enum RefreshOutcome {
     /// The adapter does not read this item by id. Nothing was written; the
     /// caller runs the source instead.
     NotOffered,
-    /// Under [`Lock::Try`], a run of the source held its lock: nothing was
+    /// Under [`Lock::Try`], or past [`Lock::WaitAtMost`]'s patience, a run
+    /// of the source held its lock: nothing was
     /// read or written. That run writes the item as the source holds it when
     /// it ends, or, where the run started before what changed it, the next.
     RunInFlight,
@@ -62,6 +63,13 @@ pub enum Lock {
     /// Take the lock only if no run holds it, else answer
     /// [`RefreshOutcome::RunInFlight`] at once.
     Try,
+    /// Wait for the lock at most this long, then answer
+    /// [`RefreshOutcome::RunInFlight`] as [`Lock::Try`] does: a landed
+    /// write's effect (ADR-0064), whose wait behind a run of another source
+    /// that may not stand aside would otherwise hold up the write's own run.
+    /// The bound is Postgres's `lock_timeout` on the lock's ask alone, so no
+    /// read is dropped half done.
+    WaitAtMost(std::time::Duration),
 }
 
 /// Why a refresh did not happen, or failed.
@@ -184,6 +192,54 @@ pub async fn refresh_item_under(
     }
 }
 
+/// Ask for the source's run lock in `tx`, waiting at most `patience`
+/// ([`Lock::WaitAtMost`]). Answers whether it is held. The ask runs in a
+/// savepoint under `lock_timeout`, so one that runs out leaves `tx` usable,
+/// and the setting is put back once the lock is held, so the refresh's own
+/// writes wait as they always have.
+async fn wait_at_most(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+    patience: std::time::Duration,
+) -> Result<bool, sqlx::Error> {
+    /// Postgres's `lock_not_available`, what a `lock_timeout` raises.
+    const LOCK_NOT_AVAILABLE: &str = "55P03";
+    let before: String = sqlx::query_scalar("select current_setting('lock_timeout')")
+        .fetch_one(&mut **tx)
+        .await?;
+    sqlx::query("savepoint run_lock").execute(&mut **tx).await?;
+    sqlx::query("select set_config('lock_timeout', $1, true)")
+        .bind(format!("{}ms", patience.as_millis().max(1)))
+        .execute(&mut **tx)
+        .await?;
+    let asked = sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(source_id)
+        .execute(&mut **tx)
+        .await;
+    match asked {
+        Ok(_) => {
+            sqlx::query("release savepoint run_lock")
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query("select set_config('lock_timeout', $1, true)")
+                .bind(before)
+                .execute(&mut **tx)
+                .await?;
+            Ok(true)
+        }
+        Err(sqlx::Error::Database(error))
+            if error.code().as_deref() == Some(LOCK_NOT_AVAILABLE) =>
+        {
+            // Rolling back to the savepoint puts `lock_timeout` back too.
+            sqlx::query("rollback to savepoint run_lock")
+                .execute(&mut **tx)
+                .await?;
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Tombstone one entity, keeping a tombstone's first time.
 const TOMBSTONE: &str =
     "update knobas.entity set deleted_at = now() where id = $1 and deleted_at is null";
@@ -215,6 +271,11 @@ async fn refresh_locked(
                 .bind(source_id)
                 .execute(&mut **tx)
                 .await?;
+        }
+        Lock::WaitAtMost(patience) => {
+            if !wait_at_most(tx, source_id, patience).await? {
+                return Ok(RefreshOutcome::RunInFlight);
+            }
         }
         Lock::Try => {
             let taken: bool =

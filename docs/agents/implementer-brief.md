@@ -63,7 +63,9 @@ The merge-manager runs the ticket's only full gate and its only review; you run 
 
 A gap you meet beside your ticket (a sibling bug, a missed instance of the cause you fix, a stale comment or doc line) you fix in your PR when all of these hold: the folded fixes add about 100 changed lines or fewer; they reach no frozen surface your PR wasn't already touching; `scripts/gate-scope.sh` prints the same for your branch; no decision a ticket reserves for Björn; nothing in the app he would need to judge; on a self-merge dispatch, the PR stays inside the self-merge limits. Search the cause's other instances first and fix the class or none. Each fix has a test that fails without it (prose needs none) and its own commit. The PR lists them under **Fixed in passing**: what was wrong, `path:line`, the test. A ticket, spec, ADR or glossary that is wrong goes through *Decisions*, not here.
 
-**Filing a follow-up**: file the class, not the instance. Grep the workspace for the pattern and run `gh issue list --state all --search '<cause>'`; an open issue that names the cause gets your instance as a comment. Otherwise one issue per root cause: the cause, every instance (`path:line`), the search so it can be rerun. `ready-for-agent` if Björn would notice it in the app, else `backlog`.
+**Small is fixed, not filed** (Björn, 2026-11-27): a small fix you find (a flaky test, a probe or script bug, a one-line gate rule) goes in your PR when it fits the limits above, otherwise in a small PR of its own, self-merged when inside the self-merge limits. Never to `backlog`.
+
+**Filing a follow-up**: only what isn't small, and the issue says why it isn't. File the class, not the instance. Grep the workspace for the pattern and run `gh issue list --state all --search '<cause>'`; an open issue that names the cause gets your instance as a comment. Otherwise one issue per root cause: the cause, every instance (`path:line`), the search so it can be rerun. `ready-for-agent` if Björn would notice it in the app, else `backlog`.
 
 ## Attribution
 

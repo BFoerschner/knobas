@@ -5,8 +5,10 @@
 
   - *Name*; *Command* with the placeholder buttons, the refusal under the field as it is typed, and *It is offered on*
     as one line that holds its room; *It shows*; *Timeout*; *Which files* or *Which folders*; *How it starts*.
-  - **Try it on**: a repository with a checkout here, and a file or folder in it. *Try it* saves the command (only a
-    saved command runs, ADR-0016) and opens the run dialog on it.
+  - **Try it on** (`TfTryOn`, #2562): pasted text (on stdin, or as a throwaway file of its name, as the command takes
+    it), a file or a folder chosen anywhere on this disk (in the checkout's place), or a repository with a checkout here
+    and a file or folder in it. *Try it* saves the command (only a saved command runs, ADR-0016) and opens the run
+    dialog on it. A command on a commit or a range is tried on a repository only.
   - The paragraph of what knobas does not protect against, then *Save command*, *Cancel*, *Remove*.
 -->
 <script lang="ts">
@@ -25,6 +27,9 @@
   import { realTryReads, type TryReads } from "../openin/try-reads";
   import { TryRepos } from "../openin/try-repos.svelte";
   import TfTryMore from "../openin/TfTryMore.svelte";
+  import type { TryOn } from "../../ipc/app";
+  import TfTryOn from "./TfTryOn.svelte";
+  import type { TrySource } from "./try-on";
   import {
     COMMAND_PLACEHOLDERS,
     commandDraftFrom,
@@ -140,6 +145,20 @@
     const target =
       kind === "file" ? { kind: "file" as const, path, lines: null, at: null } : kind === "folder" ? { kind: "folder" as const, path } : { kind: "repository" as const };
     store.openRun(command, picked.entityId, picked.title, target, picked.path);
+  }
+
+  /** What *Try it on* offers for what the command runs on: a file's command a file or text, a folder's a folder or text. */
+  const sources = $derived<readonly TrySource[]>(
+    kind === "file" ? ["text", "file", "repo"] : kind === "folder" || kind === "repository" ? ["folder", "text", "repo"] : ["repo"],
+  );
+
+  /** *Try it* on the person's own example (#2562): saved first, then run in the dialog with it in the checkout's place. */
+  async function tryOnOwn(on: TryOn) {
+    if (!ready) return;
+    const id = await keep();
+    const command = store.commands.find((c) => c.id === id);
+    if (command === undefined) return;
+    store.openTry(command, on);
   }
 
   function goBack() {
@@ -296,33 +315,41 @@
       {/if}
     </div>
 
-    <div class="tf-stg-sec">
-      <h2>Try it on</h2>
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-ocp-repo">Repository<small>One with a checkout on this disk.</small></label>
-        <div class="tf-stg-c tf-stg-inl">
-          <select id="tf-ocp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none} title={tryOn.failed ?? undefined}>
-            {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}
-                >{tryOn.failed !== null ? `Could not read the repositories: ${tryOn.failed}` : "No repository is cloned on this computer"}</option
-              >{/if}
-            {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
-          </select>
-          <TfTryMore {tryOn} />
-        </div>
-      </div>
-      {#if kind === "file" || kind === "folder"}
+    <TfTryOn
+      id="tf-ocp-try"
+      {sources}
+      why={ready ? null : (why ?? "Saving…")}
+      name="example.ts"
+      title="Saves it, then runs it on what you chose"
+      ontry={tryOnOwn}
+    >
+      {#snippet repoRows()}
         <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-ocp-on">{kind === "file" ? "File" : "Folder"}<small>A path from the top{kind === "folder" ? "; empty for the top folder" : ""}.</small></label>
+          <label class="tf-stg-l" for="tf-ocp-repo">Repository<small>One with a checkout on this disk.</small></label>
           <div class="tf-stg-c tf-stg-inl">
-            <input id="tf-ocp-on" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-ocp-files-list" placeholder={kind === "file" ? "src/index.ts" : "src"} bind:value={on} />
-            <datalist id="tf-ocp-files-list">{#each fileList.slice(0, FILES_SHOWN) as one (one)}<option value={one}></option>{/each}</datalist>
+            <select id="tf-ocp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none} title={tryOn.failed ?? undefined}>
+              {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}
+                  >{tryOn.failed !== null ? `Could not read the repositories: ${tryOn.failed}` : "No repository is cloned on this computer"}</option
+                >{/if}
+              {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
+            </select>
+            <TfTryMore {tryOn} />
           </div>
         </div>
-      {/if}
-      <div class="tf-stg-acts">
-        <button type="button" class="tf-btn tf-sm" disabled={!ready || repo === null || (kind === "file" && on.trim() === "")} title={ready && repo !== null ? `Saves it, then runs it on ${repo.title}` : (why ?? undefined)} onclick={() => void tryIt()}>Try it</button>
-      </div>
-    </div>
+        {#if kind === "file" || kind === "folder"}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-ocp-on">{kind === "file" ? "File" : "Folder"}<small>A path from the top{kind === "folder" ? "; empty for the top folder" : ""}.</small></label>
+            <div class="tf-stg-c tf-stg-inl">
+              <input id="tf-ocp-on" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-ocp-files-list" placeholder={kind === "file" ? "src/index.ts" : "src"} bind:value={on} />
+              <datalist id="tf-ocp-files-list">{#each fileList.slice(0, FILES_SHOWN) as one (one)}<option value={one}></option>{/each}</datalist>
+            </div>
+          </div>
+        {/if}
+        <div class="tf-stg-acts">
+          <button type="button" class="tf-btn tf-sm" disabled={!ready || repo === null || (kind === "file" && on.trim() === "")} title={ready && repo !== null ? `Saves it, then runs it on ${repo.title}` : (why ?? undefined)} onclick={() => void tryIt()}>Try it</button>
+        </div>
+      {/snippet}
+    </TfTryOn>
 
     {#if error !== null}<div class="tf-banner tf-err tf-stg-gap" role="alert">{error}</div>{/if}
     <p class="tf-stg-p tf-stg-gap">

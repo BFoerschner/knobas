@@ -10,7 +10,9 @@
 // `Stalled` naming the probe, the size, the throttle, the case and the call. `runCase()` runs one case of a probe under
 // a wall-clock limit: on a `Stalled` it tries the case once more on a fresh page (and a fresh Chrome when the one it
 // launched died), and a second `Stalled` makes the case failed-to-run, which the probe reports and goes on from.
-// `KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit (the tests run at 0.01).
+// `KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit (the tests run at 0.01); `KNOBAS_PERF_START_MS` sets the launch
+// and connect limits alone, unscaled: how long a process takes to start and list its page is the machine's load, not a
+// deadline under test (#2546).
 import { spawn } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -41,6 +43,7 @@ export const LIMITS = Object.fromEntries(Object.entries({
   call: 30_000, slowCall: 120_000, event: 60_000, evaluate: 180_000, margin: 15_000, connect: 15_000, launch: 30_000,
   fetch: 120_000, renew: 60_000, case: 600_000,
 }).map(([k, v]) => [k, Math.max(1, Math.round(v * SCALE))]));
+if (Number(process.env.KNOBAS_PERF_START_MS) > 0) LIMITS.launch = LIMITS.connect = Number(process.env.KNOBAS_PERF_START_MS);
 /** A limit given in real milliseconds, at the watchdog's scale. */
 export const scaled = (ms) => Math.max(1, Math.round(ms * SCALE));
 const SLOW = /^(Tracing\.end|Page\.captureScreenshot|Page\.printToPDF|HeapProfiler\.|Profiler\.(stop|takePreciseCoverage)|Input\.synthesize)/;
@@ -196,10 +199,13 @@ export async function attach(port, match = (t) => t.type === "page") {
     if (!target) throw new Stalled(`no ${targetId ? `page ${targetId}` : "matching page"} on debug port ${portNow()} in ${LIMITS.connect} ms`, { browserDied: !(await answers(portNow())) });
     const ws = new WebSocket(target.webSocketDebuggerUrl);
     const l = { ws, target, pending: new Map(), waiters: new Set(), closed: null };
+    // Its timer cleared once the socket answers: one left waiting out a long limit (`KNOBAS_PERF_START_MS`) holds the
+    // process open after its work is done.
+    let timer;
     const opened = await Promise.race([
       new Promise((resolve) => { ws.onopen = () => resolve(true); ws.onerror = () => resolve(false); ws.onclose = () => resolve(false); }),
-      wait(Math.max(1, deadline - Date.now())).then(() => false),
-    ]);
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), Math.max(1, deadline - Date.now())); }),
+    ]).finally(() => clearTimeout(timer));
     if (!opened) { try { ws.close(); } catch {} throw new Stalled(`the DevTools socket to ${target.webSocketDebuggerUrl} did not open in ${LIMITS.connect} ms`, { browserDied: !(await answers(portNow())) }); }
     ws.onerror = () => {};
     ws.onclose = () => {
@@ -261,15 +267,16 @@ export async function attach(port, match = (t) => t.type === "page") {
   /**
    * Moves the session to a fresh page after a stall: the old page closed, a new one opened (in a fresh Chrome when the
    * one `launch()` started died), and the calls that set the page up made again on it. Its own deadline is
-   * `LIMITS.renew`. Calls of the attempt that stalled fail from here on (`runCase`).
+   * `LIMITS.renew`, on top of a fresh Chrome's `LIMITS.launch` and the fresh page's `LIMITS.connect`. Calls of the
+   * attempt that stalled fail from here on (`runCase`).
    */
   const renew = async () => {
     const old = link;
     try { old.ws.close(); } catch {}
+    let restarted = false;
+    if (browser && (!browser.alive() || !(await answers(browser.port)))) { await browser.restart(); restarted = true; }
+    else if (!browser && !(await answers(port))) throw new Stalled(`the browser on debug port ${port} is gone`, { browserDied: true });
     const work = (async () => {
-      let restarted = false;
-      if (browser && (!browser.alive() || !(await answers(browser.port)))) { await browser.restart(); restarted = true; }
-      else if (!browser && !(await answers(port))) throw new Stalled(`the browser on debug port ${port} is gone`, { browserDied: true });
       let fresh = null;
       try {
         const r = await quick(`http://127.0.0.1:${portNow()}/json/new?about:blank`, Math.min(5000, LIMITS.renew), { method: "PUT" });
@@ -279,7 +286,10 @@ export async function attach(port, match = (t) => t.type === "page") {
       await connect(fresh ? fresh.id : null);
       for (const [method, params] of sticky.values()) await raw(method, params);
     })();
-    await Promise.race([work, wait(LIMITS.renew).then(() => { throw new Stalled(`a fresh page did not open in ${LIMITS.renew} ms`, { browserDied: true }); })]);
+    const limit = LIMITS.renew + LIMITS.connect;
+    let timer;
+    const over = new Promise((_, reject) => { timer = setTimeout(() => reject(new Stalled(`a fresh page did not open in ${limit} ms`, { browserDied: true })), limit); });
+    try { await Promise.race([work, over]); } finally { clearTimeout(timer); }
   };
 
   await connect();

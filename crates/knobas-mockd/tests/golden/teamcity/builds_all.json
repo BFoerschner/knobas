@@ -30,6 +30,10 @@
         "elapsedSeconds": 10020,
         "percentageComplete": 60
       },
+      "snapshot-dependencies": {
+        "build": [],
+        "count": 0
+      },
       "startDate": "20260822T114500+0000",
       "state": "running",
       "status": "SUCCESS",
@@ -67,6 +71,10 @@
       "queuedDate": "20260822T101000+0000",
       "revisions": {
         "revision": []
+      },
+      "snapshot-dependencies": {
+        "build": [],
+        "count": 0
       },
       "startDate": "20260822T101000+0000",
       "state": "finished",
@@ -106,6 +114,10 @@
       "queuedDate": "20260821T162000+0000",
       "revisions": {
         "revision": []
+      },
+      "snapshot-dependencies": {
+        "build": [],
+        "count": 0
       },
       "startDate": "20260821T162000+0000",
       "state": "finished",

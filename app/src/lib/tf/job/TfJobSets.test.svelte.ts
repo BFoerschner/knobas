@@ -314,13 +314,14 @@ test("back from Manage link sets, the page opens the drawer again, once, with fo
   await settle();
 });
 
-test("Manage link sets opens the sets' page to come back from, and the dialog and the drawer go with the move (F-520)", async () => {
+test("Manage link sets opens the sets' page as a press would, and the dialog and the drawer go with the move (F-520, #2559)", async () => {
   open();
   await settle();
   button(drawerOpen(), "Apply a link set…").click();
   await settle();
   dialog().querySelector<HTMLAnchorElement>("footer a")!.click();
-  expect(takeTold(location.hash), "the shell stamps it as a visit").toBe("visit");
+  // No visit stamp since #2559: Esc on Link sets goes nowhere, and Back is the way to the ticket.
+  expect(takeTold(location.hash)).toBeNull();
   expect(location.hash).toBe("#/sets");
   await settle();
   expect(document.querySelector("[role=dialog]")).toBeNull();

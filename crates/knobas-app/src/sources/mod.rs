@@ -7,6 +7,7 @@
 
 pub mod crud;
 pub mod demo;
+pub mod effects;
 pub mod files_on_sync;
 pub mod follow_run;
 pub mod held;

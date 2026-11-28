@@ -9,7 +9,11 @@
  * - `waiting`: the source does not answer, and the move waits *Queued*;
  * - `slow`: as sent, five seconds later (the *Queued* chip stands to be looked at).
  *
- * `submit_write` stays `monitors.ts`'s; it hands a `Transition` here. `pending_writes` stays `write-queue.ts`'s and
+ * A `CreatePullRequest` (#2584) is the same open row, sent after a moment and read back as the repository's newest pull
+ * request the fixture holds, so its page takes that pull request's address; `?fake-pr-create=slow` keeps it open a minute
+ * (the page's waiting state, to be looked at) and `refused` has the source say no.
+ *
+ * `submit_write` stays `monitors.ts`'s; it hands a `Transition` and a `CreatePullRequest` here. `pending_writes` stays `write-queue.ts`'s and
  * reads the open moves here; `discard_write` is answered here.
  */
 import type { QueuedWrite } from "../../../ipc/sources";
@@ -22,6 +26,7 @@ import { keyOf } from "../../../time/format";
 type Mode = "sent" | "refused" | "held" | "waiting" | "slow";
 
 let mode: Mode = "sent";
+let createMode: "sent" | "slow" | "refused" = "sent";
 let bridge: FakeBridge | null = null;
 /** The moves the fixture's queue holds open, oldest first. */
 const open: QueuedWrite[] = [];
@@ -29,6 +34,8 @@ const open: QueuedWrite[] = [];
 export function seed(params: URLSearchParams): void {
   const asked = params.get("fake-move");
   mode = asked === "refused" || asked === "held" || asked === "waiting" || asked === "slow" ? asked : "sent";
+  const create = params.get("fake-pr-create");
+  createMode = create === "slow" || create === "refused" ? create : "sent";
   open.length = 0;
 }
 
@@ -49,6 +56,7 @@ export function handlers(): Handlers {
 keepSeed(open);
 onFakeReset(() => {
   mode = "sent";
+  createMode = "sent";
   bridge = null;
 });
 
@@ -108,6 +116,33 @@ export function fakeMove(row: QueuedWrite): QueuedWrite {
       moved();
     },
     mode === "slow" ? 5_000 : 600,
+  );
+  return pending;
+}
+
+/** `submit_write` of a `CreatePullRequest` (#2584): open, then sent and read back, or refused, as `?fake-pr-create=` says. */
+export function fakeCreatePr(row: QueuedWrite): QueuedWrite {
+  const pending: QueuedWrite = { ...row, state: "pending", attempted_at: null, attempts: 0, settled_at: null };
+  open.push(pending);
+  const emit = (event: string, payload: unknown) => bridge?.emit(event, payload);
+  setTimeout(
+    () => {
+      const at = open.findIndex((one) => one.id === pending.id);
+      if (at < 0) return;
+      if (createMode === "refused") {
+        open[at] = { ...open[at]!, state: "refused", attempts: 1, detail: "pull request already exists for these targets" };
+        emit(EVENTS.activityNew, { id: pending.id });
+        return;
+      }
+      open.splice(at, 1);
+      emit(EVENTS.activityNew, { id: pending.id });
+      // The read-back of what it made (ADR-0031): the newest pull request of the repository the fixture holds.
+      const [source, path = ""] = row.entity_id.split(":");
+      const prefix = `${source}:${path.split("/").at(-1)}#`;
+      const made = CORPUS.filter((one) => one.kind === "pr" && one.entity_id.startsWith(prefix)).map((one) => one.entity_id).sort().at(-1);
+      if (made !== undefined) setTimeout(() => emit(EVENTS.itemRefreshed, { entity_id: made, write_id: pending.id, ended: "refreshed" }), 150);
+    },
+    createMode === "slow" ? 60_000 : 600,
   );
   return pending;
 }

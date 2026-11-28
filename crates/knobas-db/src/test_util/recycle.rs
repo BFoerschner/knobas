@@ -42,7 +42,8 @@
 //! whose part differs is truncated (a materialized view cannot be, and one
 //! that differs declines the database), the template's rows go back into the
 //! ones that had some, the sequences are set back, and the cumulative
-//! statistics are reset.
+//! statistics are reset; an autovacuum worker that read them before is
+//! stopped, and the statistics it wrote put back.
 //!
 //! Left out on purpose: what a session holds (advisory locks, `listen`, a
 //! `set`) ends with the sessions the taker terminates, and a prepared
@@ -511,31 +512,8 @@ async fn reset(
         .execute(&mut *tx)
         .await?;
     }
-    sqlx::raw_sql(
-        "delete from pg_statistic s using pg_class c join pg_namespace n on n.oid = c.relnamespace
-          where s.starelid = c.oid
-            and n.nspname <> 'information_schema' and n.nspname !~ '^pg_'",
-    )
-    .execute(&mut *tx)
-    .await?;
     // In-transaction `stats` sees what the truncation left.
-    for (stats, was) in stats(&mut tx).await?.iter().zip(&before.stats) {
-        if stats != was {
-            sqlx::query(
-                "select pg_restore_relation_stats(
-                   'schemaname', $1::text, 'relname', $2::text, 'relpages', $3::int,
-                   'reltuples', $4::real, 'relallvisible', $5::int, 'relallfrozen', $6::int)",
-            )
-            .bind(&was.schema)
-            .bind(&was.relation)
-            .bind(was.pages)
-            .bind(was.tuples)
-            .bind(was.visible)
-            .bind(was.frozen)
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
+    put_back_statistics(&mut tx, &before.stats).await?;
     for (sequence, was) in now.sequences.iter().zip(&before.sequences) {
         if sequence != was {
             sqlx::query("select setval($1::oid::regclass, $2, $3)")
@@ -548,15 +526,69 @@ async fn reset(
     }
     tx.commit().await?;
 
+    reset_counts(conn).await?;
+    // An autovacuum worker that read the counts before the reset (the
+    // test's writes, which `truncate` leaves owing an analyze) may still
+    // analyze a table it picked then, emptied since, and leave statistics a
+    // fresh copy has not (#2579). Stopped, it does no more; one started
+    // after the reset finds nothing owed, as on a fresh copy; and what one
+    // finished before it stopped is put back.
+    let stopped: Vec<bool> = sqlx::query_scalar(
+        "select pg_terminate_backend(pid, 5000) from pg_stat_activity
+          where datname = current_database() and backend_type = 'autovacuum worker'",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    if !stopped.into_iter().all(|gone| gone) {
+        return Ok(None);
+    }
+    put_back_statistics(conn, &before.stats).await?;
     let after = snapshot(conn, &template.catalog_query, &seeded).await?;
-    // This session's own counts first, or they would land after the reset.
+    // The snapshot's reads, which a fresh copy has not had either.
+    reset_counts(conn).await?;
+    Ok(Some(after))
+}
+
+/// The database's cumulative statistics reset, this session's own counts
+/// first, or they would land after the reset.
+async fn reset_counts(conn: &mut PgConnection) -> Result<(), sqlx::Error> {
     sqlx::raw_sql("select pg_stat_force_next_flush()")
         .execute(&mut *conn)
         .await?;
     sqlx::raw_sql("select pg_stat_reset()")
         .execute(&mut *conn)
         .await?;
-    Ok(Some(after))
+    Ok(())
+}
+
+/// The planner's statistics put back to `before`: none in `pg_statistic`,
+/// and each relation's numbers in `pg_class` as they were.
+async fn put_back_statistics(conn: &mut PgConnection, before: &[Stats]) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(
+        "delete from pg_statistic s using pg_class c join pg_namespace n on n.oid = c.relnamespace
+          where s.starelid = c.oid
+            and n.nspname <> 'information_schema' and n.nspname !~ '^pg_'",
+    )
+    .execute(&mut *conn)
+    .await?;
+    for (stats, was) in stats(conn).await?.iter().zip(before) {
+        if stats != was {
+            sqlx::query(
+                "select pg_restore_relation_stats(
+                   'schemaname', $1::text, 'relname', $2::text, 'relpages', $3::int,
+                   'reltuples', $4::real, 'relallvisible', $5::int, 'relallfrozen', $6::int)",
+            )
+            .bind(&was.schema)
+            .bind(&was.relation)
+            .bind(was.pages)
+            .bind(was.tuples)
+            .bind(was.visible)
+            .bind(was.frozen)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
