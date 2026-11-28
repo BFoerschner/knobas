@@ -460,15 +460,21 @@ pub struct KindInfo {
     /// it without knowing the remote corpus, so the adapter's own integration
     /// tests are what hold it honest.
     pub full_sync_exhaustive: bool,
-    /// Whether [`Source::refresh`] reads an item **of this kind** by id
-    /// (#2146, ADR-0031). Read only under [`Capability::Refresh`], through
-    /// [`SourceDescriptor::refreshes_kind`]: the capability says the adapter
-    /// reads one item at all, this says which of its kinds. `false` for a
-    /// kind its refresh answers [`RefreshAnswer::NotOffered`] for, such as
-    /// TeamCity's build configuration or Gitea's repository, branch and
-    /// commit, so their detail draws *Sync now* from the start rather than
-    /// *Refresh* until the first press. [`contract::battery`] clause 13
-    /// holds it to the answers, kind by kind.
+    /// Whether the adapter reads one item **of this kind** outside a run: by
+    /// id ([`Source::refresh`], #2146, ADR-0031) or with what stands under it
+    /// ([`Source::refresh_under`], ADR-0047). Read only under
+    /// [`Capability::Refresh`], through [`SourceDescriptor::refreshes_kind`]:
+    /// the capability says the adapter reads one item at all, this says which
+    /// of its kinds. `false` for a kind both answer
+    /// [`RefreshAnswer::NotOffered`] / [`UnderAnswer::NotOffered`] for, so
+    /// its detail draws *Sync now* from the start rather than *Refresh* until
+    /// the first press. Every kind of every adapter here that declares the
+    /// capability is `true`, those read only by the walk included: TeamCity's
+    /// build configuration (#2564), Gitea's repository, branch and commit,
+    /// Jira's board and filter view (#2593). The Passwords role's kinds
+    /// ([`passwords::kind_infos`]) say `false`, under adapters that declare no
+    /// refresh. [`contract::battery`] clause 13 holds it to the answers, kind
+    /// by kind.
     ///
     /// **Per kind, not per adapter**, as [`Self::full_sync_exhaustive`] is.
     ///
