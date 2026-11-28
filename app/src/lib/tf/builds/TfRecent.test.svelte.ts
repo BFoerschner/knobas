@@ -398,6 +398,16 @@ async function leaveFromAll(box: ReturnType<typeof scroller>) {
   box.sets.length = 0;
 }
 
+test("back at the same scope, its scroll comes back: kept as it scrolled, not read once the page is gone (#2566 review)", async () => {
+  const outer = target;
+  const box = scroller();
+  await leaveFromAll(box);
+  draw({ recent: () => new Promise<never>(() => {}) });
+  await settle();
+  expect(box.sets).toEqual([480]);
+  target = outer;
+});
+
 test("back at another scope, it draws none of what it held and restores neither the scroll nor the focus (#2566 review)", async () => {
   const outer = target;
   const box = scroller();

@@ -508,6 +508,19 @@
   function scrollerOf(): HTMLElement | null {
     return runsBox?.closest<HTMLElement>(".tf-scroller") ?? null;
   }
+  /**
+   * The scroller's offset, followed as it scrolls: what is kept on the way out. Read at the end it was always 0, since
+   * Svelte takes the page out of the document before its `onDestroy` runs, so `scrollerOf` finds nothing.
+   */
+  let scrolledTo = 0;
+  $effect(() => {
+    const scroller = runsBox === null ? null : scrollerOf();
+    if (scroller === null) return;
+    scrolledTo = scroller.scrollTop;
+    const follow = () => (scrolledTo = scroller.scrollTop);
+    scroller.addEventListener("scroll", follow, { passive: true });
+    return () => scroller.removeEventListener("scroll", follow);
+  });
   function openRow(event: MouseEvent, one: RecentRun) {
     opened = one.run.entity_id;
     if ((event.target as Element | null)?.closest("a, button, input, select, label")) return;
@@ -551,7 +564,7 @@
     const at = back?.scroll ?? 0;
     const was = back?.opened ?? null;
     const scroller = scrollerOf();
-    if (scroller !== null) scroller.scrollTop = at;
+    if (scroller !== null) scroller.scrollTop = scrolledTo = at;
     let tries = 0;
     const focus = () => {
       const row = [...(runsBox?.querySelectorAll<HTMLElement>("tr[data-run]") ?? [])].find((one) => one.dataset["run"] === was);
@@ -581,7 +594,7 @@
     clearTimeout(headSoon);
     clearTimeout(inFlightTimer);
     reads += 1;
-    kept = held === null ? null : { basis: heldFor, runs: held, pipelines, next, scroll: scrollerOf()?.scrollTop ?? 0, opened };
+    kept = held === null ? null : { basis: heldFor, runs: held, pipelines, next, scroll: scrolledTo, opened };
   });
 </script>
 
