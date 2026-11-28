@@ -167,6 +167,10 @@
 /* The file's directory dim before its name (mockups/code-area `.fileview > header .p .dim`). */
 .tf-fileview .tf-p .tf-pdir { color: var(--ink-2); font-weight: var(--wt-ui, 400); }
 .tf-fileview .tf-fpad { padding: 12px; }
+/* An example opened in the XML view (E1, #2626): its meta takes only the room the name and the trail leave, so *Copy*
+   and *Save to Downloads* stay on the name's line when the explorer's meta (seed, parts, lines) replaces the seed's
+   shorter one. Cut, the whole line is its title. */
+.tf-exhead > .tf-fmeta { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-banner { display: flex; gap: 10px; align-items: center; padding: 8px 12px; font-size: calc(var(--t-sm) * var(--fs)); border-bottom: 1px solid var(--rule); }
 .tf-banner.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-banner.tf-info { background: var(--info-bg); color: var(--info); }
