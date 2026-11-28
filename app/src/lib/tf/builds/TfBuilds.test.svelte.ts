@@ -1020,6 +1020,23 @@ test("a repository's folder turns the rail to By repository and lists the pipeli
   expect(target.querySelector('.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("tidewater/payout-service");
 });
 
+test("a folder reached by its address is revealed in the rail: the folds above it opened, its pill drawn, the rows shown (#2572)", async () => {
+  const nested: PipelineRow[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw(["folder", "teamcity", "Core", "Payments", "V2"], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const pill = target.querySelector<HTMLElement>('.tf-pl-rows summary.tf-tfold[aria-current="true"]');
+  expect(pill?.querySelector(".tf-fold-nm")?.textContent).toBe("V2");
+  const opened = (name: string) =>
+    ([...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)?.parentElement as HTMLDetailsElement | undefined)?.open;
+  expect([opened("Core"), opened("Payments"), opened("V2")]).toEqual([true, true, true]);
+  expect(opened("V1"), "a fold beside it stays as it was").toBe(false);
+  expect(target.querySelector(".tf-pl-rows")?.classList.contains("tf-unseen"), "shown once revealed").toBe(false);
+});
+
 test("a folder knobas does not hold says so, under the header and crumbs", async () => {
   draw(["folder", "teamcity", "Gone"]);
   await settle();

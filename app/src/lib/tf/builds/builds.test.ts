@@ -12,6 +12,7 @@ import {
   pinnedOf,
   reasonsLine,
   treeOf,
+  foldChain,
   isFailing,
   isRunning,
   keptPipelines,
@@ -397,3 +398,16 @@ test("a fold counts every failing pipeline and opens by itself only for one that
 });
 
 
+
+test("the folds from a tree's root down to a folder's place, or none where no fold stands there (#2572)", () => {
+  const trees = treeOf([at("Payout_Build", ["Payments", "Payouts"]), at("Deploy", ["Payments", "Payouts", "Deploy"]), at("Ledger", ["Payments", "Ledger"]), at("Deep", ["A", "B", "C"])]);
+  expect(foldChain(trees, ["teamcity", "Payments", "Payouts", "Deploy"])?.map((f) => f.key)).toEqual([
+    "teamcity/Payments",
+    "teamcity/Payments/Payouts",
+    "teamcity/Payments/Payouts/Deploy",
+  ]);
+  expect(foldChain(trees, ["teamcity", "A", "B", "C"])?.map((f) => f.name), "a joined chain is one fold").toEqual(["A › B › C"]);
+  expect(foldChain(trees, ["teamcity", "A", "B"]), "inside a joined chain no fold stands").toBeNull();
+  expect(foldChain(trees, ["teamcity", "Nowhere"])).toBeNull();
+  expect(foldChain([], ["teamcity", "Payments"])).toBeNull();
+});

@@ -549,3 +549,22 @@ export function failedBuildLine(line: string): string {
   const counts = /^Tests failed: (\d+)(?: \(\d+ new\))?(?:, passed: (\d+))?(?:, ignored: (\d+))?$/.exec(line);
   return counts === null ? line : testsWords({ failed: Number(counts[1]), passed: Number(counts[2] ?? 0), ignored: Number(counts[3] ?? 0) });
 }
+
+/**
+ * The folds from a tree's root down to the one standing at `path` (a folder's place, {@link Fold.path}), outermost
+ * first, or `null` where no fold stands there: not read yet, narrowed out, or inside a joined chain (#2572). What the
+ * rail opens to reveal a folder reached by its address.
+ */
+export function foldChain(trees: readonly { folds: readonly Fold[] }[], path: readonly string[]): Fold[] | null {
+  const under = (fold: Fold) => fold.path.length <= path.length && fold.path.every((part, at) => part === path[at]);
+  for (const tree of trees) {
+    const chain: Fold[] = [];
+    let folds = tree.folds;
+    for (let fold = folds.find(under); fold !== undefined; fold = folds.find(under)) {
+      chain.push(fold);
+      if (fold.path.length === path.length) return chain;
+      folds = fold.folds;
+    }
+  }
+  return null;
+}

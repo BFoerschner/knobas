@@ -144,11 +144,18 @@ export function recentFilterOf(choice: RecentChoice, jobBranches: readonly strin
 }
 
 /**
- * The quiet text after a pipeline's name: the folders it sits in, outermost first, and its source's name before them
- * where two or more CI sources list runs, so two servers' *Payout › Build* read apart.
+ * The folders the run row says before a pipeline's name: those it sits in, outermost first, and its source's name before
+ * them where two or more CI sources list runs, so two servers' *Payout › Build* read apart. At a folder by project
+ * (`folder`, its place as {@link RunScope} has it) they are said from that folder down, and the source not at all: every
+ * row shares both (#2572). A folder by repository is none of a pipeline's folders, so they are said whole there.
  */
-export function placeWords(pipeline: Pick<RecentPipeline, "path" | "group" | "source_name"> | undefined, manySources: boolean): string {
+export function placeWords(
+  pipeline: Pick<RecentPipeline, "path" | "group" | "source_name"> | undefined,
+  manySources: boolean,
+  folder: readonly string[] | null = null,
+): string {
   if (pipeline === undefined) return "";
+  if (folder !== null && folder[0] !== REPO_FOLDER) return groupsOf(pipeline).slice(folder.length - 1).join(" › ");
   return [...(manySources ? [pipeline.source_name] : []), ...groupsOf(pipeline)].join(" › ");
 }
 
@@ -156,13 +163,23 @@ export function placeWords(pipeline: Pick<RecentPipeline, "path" | "group" | "so
  * What the typed words rank a run by (#2535): its own words as a pipeline's Runs filter reads them ({@link runText}),
  * then its pipeline's name and place as the row draws them, and the source's name where the place does not hold it.
  */
-export function recentText(run: RecentRun, pipelines: ReadonlyMap<string, RecentPipeline>, manySources: boolean): string {
-  return recentFields(run, pipelines, manySources).text;
+export function recentText(
+  run: RecentRun,
+  pipelines: ReadonlyMap<string, RecentPipeline>,
+  manySources: boolean,
+  folder: readonly string[] | null = null,
+): string {
+  return recentFields(run, pipelines, manySources, folder).text;
 }
 
-function recentFields({ run, pipeline_id }: RecentRun, pipelines: ReadonlyMap<string, RecentPipeline>, manySources: boolean): Joined {
+function recentFields(
+  { run, pipeline_id }: RecentRun,
+  pipelines: ReadonlyMap<string, RecentPipeline>,
+  manySources: boolean,
+  folder: readonly string[] | null,
+): Joined {
   const pipeline = pipelines.get(pipeline_id);
-  const fields = [runText(run), pipeline?.name ?? "", placeWords(pipeline, manySources)];
+  const fields = [runText(run), pipeline?.name ?? "", placeWords(pipeline, manySources, folder)];
   if (pipeline !== undefined && !manySources) fields.push(pipeline.source_name);
   return joined(fields);
 }
@@ -173,8 +190,9 @@ export function recentMarks(
   pipelines: ReadonlyMap<string, RecentPipeline>,
   manySources: boolean,
   pairs: readonly number[],
+  folder: readonly string[] | null = null,
 ): RunMarks & { name: readonly number[]; place: readonly number[] } {
-  const fields = recentFields({ run, pipeline_id }, pipelines, manySources);
+  const fields = recentFields({ run, pipeline_id }, pipelines, manySources, folder);
   return { ...runMarks(run, pairs), name: fields.cut(pairs, 1), place: fields.cut(pairs, 2) };
 }
 
@@ -183,4 +201,41 @@ export function withPipelines(held: ReadonlyMap<string, RecentPipeline>, page: r
   const all = new Map(held);
   for (const pipeline of page) all.set(pipeline.entity_id, pipeline);
   return all;
+}
+
+/**
+ * A pipeline's name as the run row cuts it (#2572, the mockup's *The run row*): what leads it and its last word. Only
+ * the lead shrinks, so `CustomsGateway_Build` and `CustomsGateway_Contract` never read as the same `CustomsGatew…`.
+ * The last word follows the last `_`, space, `-` or `.`, which stays with the lead. A name with none splits where its
+ * last capital follows a small letter (`CustomsGatewayBuild`), and one with neither is its last word whole: an end cut.
+ */
+export function nameParts(name: string): [lead: string, last: string] {
+  const split = /^(.*[^_\s.-].*[_\s.-])([^_\s.-]+)$/.exec(name) ?? /^(.*[a-z])([A-Z][^A-Z]*)$/.exec(name);
+  return split === null ? ["", name] : [split[1]!, split[2]!];
+}
+
+/**
+ * A run row's pipeline cell (#2572): its name, the folders said before it ({@link placeWords}), the address of the
+ * pipeline's own folder for those words to link to (`null` when none are said), and the whole path as the cell's title.
+ */
+export function rowPipeline(
+  pipeline: Pick<RecentPipeline, "source_id" | "source_name" | "name" | "path" | "group"> | undefined,
+  manySources: boolean,
+  folder: readonly string[] | null,
+): { name: string; place: string; folder: string | null; whole: string } {
+  if (pipeline === undefined) return { name: "", place: "", folder: null, whole: "" };
+  const place = placeWords(pipeline, manySources, folder);
+  const whole = [placeWords(pipeline, manySources), pipeline.name].filter((part) => part !== "").join(" › ");
+  const link = place === "" ? null : runScopeHash({ kind: "folder", path: [pipeline.source_id, ...groupsOf(pipeline)] });
+  return { name: pipeline.name, place, folder: link, whole };
+}
+
+/**
+ * How wide the run table's folder column stands (#2572): `long` at *All pipelines* and at a folder by repository, where
+ * the folders are said whole; `short` at a folder by project with folders below it; `none` at one without, where the
+ * names take the whole cell. Read from the folder's pipelines, so it is known before a run is.
+ */
+export function folderColumn(pipelines: readonly Pick<PipelineRow, "path" | "group">[], folder: readonly string[] | null): "long" | "short" | "none" {
+  if (folder === null || folder[0] === REPO_FOLDER) return "long";
+  return pipelines.some((p) => groupsOf(p).length > folder.length - 1) ? "short" : "none";
 }

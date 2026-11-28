@@ -92,7 +92,7 @@
   import TfScroller from "../TfScroller.svelte";
   import { afterLayout } from "../../shell/after-layout";
   import TfBareHeader from "../TfBareHeader.svelte";
-  import { flushSync, tick, untrack } from "svelte";
+  import { flushSync, onDestroy, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -114,7 +114,7 @@
   import TfRun from "./TfRun.svelte";
   import TfRunGlyph from "./TfRunGlyph.svelte";
   import TfRecent from "./TfRecent.svelte";
-  import { RECENT_HASH, REPO_FOLDER, folderPipelines, runScopeHash, runScopeOf, type RunScope } from "./recent";
+  import { RECENT_HASH, REPO_FOLDER, folderColumn, folderPipelines, runScopeHash, runScopeOf, type RunScope } from "./recent";
   import { parseTfHash } from "../route";
   import { pipelineOfRun } from "./run";
   import { runsRead } from "./runs-read.svelte";
@@ -143,6 +143,7 @@
     pinnedOf,
     railGlyph,
     railTime,
+    foldChain,
     reasonsById,
     reasonsLine,
     repoTreeOf,
@@ -471,6 +472,12 @@
     for (const repos of commitRepos?.values() ?? []) for (const repo of repos) if (repo.id === id) return repo.title;
     return "";
   });
+  /** How wide the table's folder column stands (#2572): known with the folder's pipelines, before a run is read. */
+  const folderPaths = $derived.by(() => {
+    if (folderPath === null || folderIds === null || all === null) return folderColumn([], null);
+    const ids = new Set(folderIds);
+    return folderColumn(all.filter((p) => ids.has(p.entity_id)), folderPath);
+  });
   /** The group above the folder, as a pipeline's crumbs name its group. */
   const folderAbove = $derived(folderPath !== null && !repoFolder && folderPath.length > 2 ? folderPath.at(-2)! : null);
   /** Whether `f` is the folder the table lists: drawn as the rail's pill. */
@@ -480,6 +487,7 @@
   /** Select a folder: its table, and the fold opened as the reader's own toggle (the mockup's *Interactions*). */
   function selectFold(f: Fold): void {
     remembered.set(f.key, true);
+    foldPicked = runScopeHash({ kind: "folder", path: f.path });
     location.hash = runScopeHash({ kind: "folder", path: f.path });
   }
 
@@ -689,6 +697,49 @@
     };
   });
 
+  /**
+   * A folder reached by its address, a run row's folders (#2572) or a typed one, is revealed in the rail: its fold and
+   * those above it opened, drawn if the window left it out, and scrolled into view. The rows are held unseen meanwhile,
+   * as `railUnseen` holds a run's step, so nothing drawn moves. A fold pressed in the rail is in view already
+   * (`foldPicked`). One reveal a folder: what the reader folds after it stays folded.
+   */
+  let foldPicked: string | null = null;
+  let foldUnseen = $state(false);
+  let foldShown: string | null = null;
+  let foldScroll = () => {};
+  // Before the DOM: the folds open in the flush that draws the rows, so no row is drawn shut and then opened.
+  $effect.pre(() => {
+    const path = folderPath;
+    const hash = path === null ? null : runScopeHash({ kind: "folder", path });
+    if (hash === null || hash === foldShown) return;
+    if (hash === untrack(() => foldPicked)) {
+      foldShown = hash;
+      return;
+    }
+    const chain = foldChain(trees, path!);
+    if (chain === null) return; // not in the tree yet (still read), or narrowed out of it: the rail stays where it is
+    foldShown = hash;
+    foldUnseen = true;
+    for (const f of chain) remembered.set(f.key, true);
+    foldScroll();
+    let gone = false;
+    let cancel = () => {};
+    foldScroll = () => {
+      gone = true;
+      cancel();
+    };
+    void tick().then(() => {
+      const rail = list;
+      if (gone || rail === undefined) return void (foldUnseen = false);
+      cancel = afterLayout(rail, () => {
+        win.reveal(rows.findIndex((row) => row.kind === "fold" && isScope(row.fold)));
+        flushSync();
+        rail.querySelector('summary[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+        foldUnseen = false;
+      });
+    });
+  });
+  onDestroy(() => foldScroll());
 
   /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
   let railOpen = $state(false);
@@ -859,7 +910,7 @@
           <button type="button" class="tf-linkish" onclick={() => (commitsRetry += 1)}>Try again</button>
         </p>
       {/if}
-      <div class="tf-pl-rows" class:tf-unseen={railUnseen} {@attach win.list}>
+      <div class="tf-pl-rows" class:tf-unseen={railUnseen || foldUnseen} {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>
@@ -887,6 +938,8 @@
         {sync}
         title={runScope.kind === "all" ? "All pipelines" : folderName}
         pipelines={runScope.kind === "all" ? [] : folderIds}
+        place={folderPath}
+        paths={folderPaths}
         {syncRevision}
         ondrawn={() => (recentDrawn = true)}
       />
