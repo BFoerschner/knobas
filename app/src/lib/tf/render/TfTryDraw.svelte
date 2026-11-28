@@ -6,7 +6,7 @@
     renderers; *Drawn by* on the panel picks one, else the default does, and the header's *Render as ▾* switches as on
     the Code page (and *Make default* writes the same default). A pipeline runs where the panel names one, or where a
     default names one for the file's name (*As the Code page does*); its bar is the Code page's, and a change runs at once.
-  - **The same drawing.** The leaves are Code's own: Source's lines, Markdown, Mermaid, D2 and Graphviz, a page in the
+  - **The same drawing.** The Code page's own dispatch draws it (`TfFileDraw`, #2581), with no repository: Source's lines, Markdown, Mermaid, D2 and Graphviz, a page in the
     frame that runs no script, a command renderer's output, an image, a PDF, the XML and JSON view, the API explorer and
     the schema explorer (a set of one file: nothing else is beside it). A JAR, which Code reads through the archive's
     backend reads, is not drawn here, and says so.
@@ -35,26 +35,15 @@
 
   import { folderRenderFrame, type CommandStep, type NamedPipeline, type RendererDefault } from "../../ipc/app";
   import { ipcErrorMessage } from "../../ipc";
-  import { commandIdOf } from "../../render/command";
   import { defaultPipeline, makeDefaultPattern, openWith, withDefault } from "../../render/defaults";
-  import { isDelimited } from "../../render/json-sniff";
   import { inputOf, pipedFile, sized, stepName } from "../../render/pipeline";
   import { allRenderers, type Renderer } from "../../render/registry";
   import { renderPort, type RenderPort } from "../../render/port";
   import { push } from "../../shell/toasts.svelte";
-  import TfLines from "../code/TfLines.svelte";
-  import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { isText, tryName } from "../settings/try-on";
-  import TfBytesImage from "./TfBytesImage.svelte";
-  import TfCommandOutput from "./TfCommandOutput.svelte";
-  import TfDiagram from "./TfDiagram.svelte";
+  import TfFileDraw from "./TfFileDraw.svelte";
   import TfFilePipeline from "./TfFilePipeline.svelte";
-  import TfHtmlPage from "./TfHtmlPage.svelte";
-  import TfPdf from "./TfPdf.svelte";
   import TfRendererSwitch from "./TfRendererSwitch.svelte";
-  import { docViewModule } from "./doc/doc-module";
-  import { explorerModule } from "./oas-module";
-  import { xsdModule } from "./xsd/xsd-module";
 
   const realPorts: TryDrawPorts = { bytes: tryBytes, piped: tryPiped, commands: ipcCommands, frame: folderRenderFrame };
 
@@ -191,12 +180,8 @@
   /** *Drawn by* named a renderer that does not take this example. */
   const notTaken = $derived(opened !== null && wanted !== "auto" && switched === null && !opened.offered.some((r) => r.id === wanted) ? (allRenderers().find((r) => r.id === wanted)?.name ?? wanted) : null);
   const drawAs = $derived(shown?.id ?? null);
-  const bytesRead = $derived(drawn?.bytes ? () => Promise.resolve(drawn.bytes!) : null);
-  const image = $derived.by(() => {
-    if (drawAs !== "image" || drawn === null || drawn.binary) return null;
-    const bytes = new TextEncoder().encode(drawn.text);
-    return { bytes, read: () => Promise.resolve(bytes) };
-  });
+  /** The example's bytes as read, for the leaf that reads bytes (a PDF, an image): never under a pipeline's output. */
+  const drawnBytes = $derived(drawn?.bytes ? { read: () => Promise.resolve(drawn.bytes!), size: drawn.size } : null);
 
   async function makeDefault(chosen: Renderer) {
     if (savedefaults === null || drawn === null || opened === null) return;
@@ -251,39 +236,7 @@
       <p class="tf-empty tf-dim" role="status">Running {steps.map((s) => stepName(s, commandSteps)).join(" → ")}…</p>
     {:else}
       {#if notTaken !== null}<div class="tf-banner tf-info" role="status">{notTaken} does not take {drawn.path}: it is drawn as the Code page would draw it.</div>{/if}
-      {#if bytesRead !== null && drawAs === "pdf"}
-        <TfPdf read={bytesRead} size={drawn.size} {render} />
-      {:else if drawn.binary && bytesRead !== null && drawAs === "image"}
-        <TfBytesImage read={bytesRead} path={drawn.path} size={drawn.size} />
-      {:else if drawAs === "jar"}
-        <div class="tf-empty"><p>A JAR is drawn from a repository’s file on the Code page; here it is not drawn.</p></div>
-      {:else if drawn.binary}
-        <div class="tf-empty"><p>A binary file, not drawn.</p></div>
-      {:else if image !== null}
-        <TfBytesImage read={image.read} path={drawn.path} size={image.bytes.length} />
-      {:else if drawAs === "openapi"}
-        {#await explorerModule() then { default: TfOpenApi }}
-          <TfOpenApi text={drawn.text} path={drawn.path} />
-        {/await}
-      {:else if drawAs === "xsd"}
-        {#await xsdModule() then { default: TfXsd }}
-          <TfXsd text={drawn.text} path={drawn.path} read={() => Promise.resolve(null)} paths={() => Promise.resolve([drawn.path])} {render} />
-        {/await}
-      {:else if drawAs === "xml" || drawAs === "json"}
-        {#await docViewModule() then { default: TfDocView }}
-          <TfDocView text={drawn.text} path={drawn.path} kind={drawAs === "json" ? (isDelimited(drawn.path) ? "jsonl" : "json") : "xml"} {render} />
-        {/await}
-      {:else if drawAs === "markdown"}
-        <div class="tf-rendered"><TfMarkdown text={drawn.text} {render} /></div>
-      {:else if drawAs === "html"}
-        <TfHtmlPage html={drawn.text} title="{drawn.path}, drawn as a page" frame={(doc) => ports.frame(doc)} room=".tf-try-view" />
-      {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
-        <TfDiagram engine={drawAs} code={drawn.text} {render} />
-      {:else if shown !== null && drawAs === shown.id && commandIdOf(shown) !== null}
-        <div class="tf-rendered"><TfCommandOutput renderer={shown} text={drawn.text} commands={ports.commands} /></div>
-      {:else}
-        <TfLines text={drawn.text} path={drawn.path} {render} />
-      {/if}
+      <TfFileDraw {drawn} renderer={shown} bytes={drawnBytes} {render} commands={ports.commands} frame={(doc) => ports.frame(doc)} room=".tf-try-view" />
     {/if}
   </div>
 </div>
