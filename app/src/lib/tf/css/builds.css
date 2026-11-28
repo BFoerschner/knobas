@@ -463,14 +463,16 @@
    the names stand in one column and the folder that tells two *Build*s apart is the word beside the name. The line is
    the grid's: its columns are fractions of a cell every row has at one width. The folders are cut at their start (`rtl`),
    so the one nearest the name stays; they are a link to that folder. At a folder they are said from it down, so their
-   column narrows (`short`), or goes where no pipeline sits deeper (`none`). */
+   column narrows (`short`), or goes where no pipeline sits deeper (`none`). The folders clip (`overflow: clip`), never
+   hide: cut at their start, a hidden box is a scroll container whose words overflow to its left, and Chromium hit-tests
+   each wheel over it on the main thread (#2624, `style-cost.test.ts`). */
 .tf-run-pipe { white-space: nowrap; overflow: hidden; }
 .tf-run-id { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr); column-gap: 7px; align-items: baseline; min-width: 0; }
 .tf-runs.tf-recent[data-paths="short"] .tf-run-id { grid-template-columns: minmax(0, .36fr) minmax(0, 1fr); }
 .tf-runs.tf-recent[data-paths="none"] .tf-run-id { grid-template-columns: minmax(0, 1fr); }
 .tf-runs.tf-recent[data-paths="none"] .tf-run-path { display: none; }
 .tf-run-path {
-  justify-self: end; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+  justify-self: end; max-width: 100%; overflow: clip; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
   font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); text-decoration: none;
 }
 .tf-run-path > bdi { direction: ltr; unicode-bidi: isolate; }

@@ -326,3 +326,40 @@ test("the scroller rule reads a background's colour, the last layer of a shortha
   expect(caught(".a { overflow-x: auto; background: var(--x); background-color: var(--under); }")).toBe(0);
   expect(caught(".a { overflow: auto; background: #fff; }")).toBe(0);
 });
+
+/** `file:line  selector` for each rule that sets `direction: rtl` on a box it clips with `overflow: hidden`. */
+function rtlScrollContainers(file: string, source: string, sheet: Node): string[] {
+  const found: string[] = [];
+  const visit = (node: Node | null | undefined) => {
+    if (!node) return;
+    if (node.type === "Rule" && typeof node.prelude === "object") {
+      const decls = ((node.block?.children ?? []) as unknown as Decl[]).filter((d) => d.type === "Declaration");
+      const hidden = decls.some((d) => /^overflow(-x|-y)?$/.test(d.property) && /\bhidden\b/.test(d.value));
+      const rtl = decls.some((d) => d.property === "direction" && /\brtl\b/.test(d.value));
+      const prelude = node.prelude as Node;
+      if (hidden && rtl) found.push(`${file.slice(ROOT.length + 1)}:${source.slice(0, node.start).split("\n").length}  ${source.slice(prelude.start, prelude.end).replace(/\s+/g, " ")}`);
+    }
+    for (const child of node.children ?? []) visit(child);
+    if (node.block) visit(node.block);
+  };
+  visit(sheet);
+  return found;
+}
+
+/**
+ * A box cut at its start (`direction: rtl`, so the end of a path stays) clipped with `overflow: hidden` is a scroll
+ * container whose content overflows to its left, and Chromium hit-tests each wheel over it on the main thread, which is
+ * what scrolls the list under it on the main thread in WebView2 (#2624: Builds' runs, a wheel over a run's folders,
+ * `scrollers.mjs --strict`). `overflow: clip` cuts the same, ellipsis included, and is no scroll container.
+ */
+test("no box cut at its start clips with overflow: hidden, so a wheel over it is hit-tested on the compositor (#2624)", () => {
+  expect(sheets().flatMap(({ file, source, sheet }) => rtlScrollContainers(file, source, sheet))).toEqual([]);
+});
+
+test("the start-cut rule catches overflow: hidden beside direction: rtl, and passes clip", () => {
+  const caught = (css: string) => rtlScrollContainers(join(ROOT, "x.css"), css, parseCss(css) as unknown as Node).length;
+  expect(caught(".a { overflow: hidden; text-overflow: ellipsis; direction: rtl; }")).toBe(1);
+  expect(caught("@container (width > 1px) { .a { overflow-x: hidden; direction: rtl; } }")).toBe(1);
+  expect(caught(".a { overflow: clip; text-overflow: ellipsis; direction: rtl; }")).toBe(0);
+  expect(caught(".a { overflow: hidden; direction: ltr; }")).toBe(0);
+});
