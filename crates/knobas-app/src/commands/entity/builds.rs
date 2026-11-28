@@ -983,8 +983,8 @@ pub async fn recent_runs_inner(
     // one after another, so the read holds one of the pool's five connections
     // at a time. Side by side (#2569) they asked for five or six at once:
     // about 1 ms quicker on a quiet pool, but on a cold start of the scale
-    // database 4 of 28 first reads spent 21 to 127 ms in them, against at most
-    // 26 ms in 18 runs one after another (#2569b).
+    // database 3 of 28 first reads spent 58 to 127 ms in them; one after
+    // another they never passed 26 ms in 18 runs (#2569b).
     crate::commands::search::declare(pool, registry).await?;
     let declarations = declared_paths(pool, registry).await?;
     let identity = identity_of(pool).await?;
