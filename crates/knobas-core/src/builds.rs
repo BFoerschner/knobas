@@ -153,7 +153,9 @@ pub struct RailPipeline {
 
 impl From<PipelineRow> for RailPipeline {
     /// The row's runs as the rail reads them; its `commit_id`s already
-    /// linked, so `commits` names what they name.
+    /// linked, so `commits` names what they name. The window's twin,
+    /// `railRuns` in `app/src/lib/tf/builds/builds.ts`, lays a run's refresh
+    /// the same way; `app/src/lib/tf/builds/rail-twin.json` holds both.
     fn from(row: PipelineRow) -> Self {
         // When a run counts as made, to the millisecond as the front parses
         // it; a run with neither instant is the oldest (`Option`'s `None`).
@@ -2068,5 +2070,56 @@ mod tests {
             0,
             "nothing ran"
         );
+    }
+
+    /// The window's twin (`railRuns` in `app/src/lib/tf/builds/builds.ts`)
+    /// reads the same cases: a run's refresh lays its pipeline's runs into the
+    /// row as this read laid them. The statement reads the first
+    /// [`PIPELINE_RECENT`]; the twin slices its runs to the same count.
+    #[test]
+    fn the_rail_twin_fixture_holds() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../app/src/lib/tf/builds/rail-twin.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["rail_runs"].as_i64(), Some(PIPELINE_RECENT));
+        let at = |v: &serde_json::Value| {
+            v.as_str().map(|s| {
+                DateTime::parse_from_rfc3339(s)
+                    .unwrap()
+                    .with_timezone(&Utc)
+            })
+        };
+        let strs = |v: &serde_json::Value| -> Vec<String> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_owned())
+                .collect()
+        };
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let runs = case["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .take(usize::try_from(PIPELINE_RECENT).unwrap())
+                .map(|r| {
+                    let mut run = run(None);
+                    run.entity_id = r["id"].as_str().unwrap().to_owned();
+                    run.started = at(&r["started"]);
+                    run.finished = at(&r["finished"]);
+                    run.updated_at = at(&r["updated"]);
+                    run.commit_id = r["commit"].as_str().map(str::to_owned);
+                    run
+                })
+                .collect();
+            let rail = RailPipeline::from(row(runs));
+            let ids: Vec<String> = rail.recent.iter().map(|r| r.entity_id.clone()).collect();
+            assert_eq!(ids, strs(&case["recent"]), "{name}: recent");
+            assert_eq!(rail.commits, strs(&case["commits"]), "{name}: commits");
+        }
     }
 }
