@@ -102,6 +102,7 @@ an SSH tunnel.
 | `frame-budget.sh` | what `just frame-budget` runs |
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
+| `open-cold.sh` | Recent's first open on a cold start, a fresh backend each round (`just open-cold`, *Opening a page*, below) |
 | `inner-items.json`, `slow-forge.mjs` | the inner pages' items per throttle, and the proxy that slows the forge (below) |
 | `extremes.mjs`, `extremes-items.json` | the extremes an `--extremes` run seeds, syncs, presses and removes (*The extremes*, below) |
 | `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
@@ -232,6 +233,12 @@ HOME="$TMPDIR/home" cargo run --release -p knobas-app --features test-util --exa
 just open-budget --real 5411
 curl -X POST http://127.0.0.1:5411/quit
 ```
+
+Every place above reloads the page on a backend that has been up for minutes, which no start of the app does: its
+bring-up work (the fills, the picker's names, the sync engine's first runs) has long ended. `just open-cold --backend
+<release headless_ipc> --home <a copy of the saved home>` starts the backend afresh each round, loads the page the moment
+it answers and presses Recent as soon as the nav draws (`builds-recent-start`, at 1x unless `--throttle` says otherwise),
+so Recent's first read meets the start-up reads and whatever bring-up left running (#2569b).
 
 `--timings` makes the windowless backend append one line a command (its name, its arguments, when it arrived and
 left, the backend's time on it, the answer's bytes), which splits an open into what the backend spent and what the
