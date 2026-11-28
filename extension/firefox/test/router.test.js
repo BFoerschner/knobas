@@ -16,13 +16,21 @@ function knobas(rules, onHandoff) {
 
 const opened = () => ({ action: "opened", target: "entity", source_id: "jira", entity_id: "jira:PAY-231", entity_kind: "ticket" });
 
+/**
+ * The router's timeouts in a test that waits on real time: far past any answer the fake host gives, so a loaded
+ * machine never stretches an answer past one and the page loads where it should have been handed off. A test of
+ * what happens at a timeout takes `SHORT` and runs its timers on `t.mock.timers`.
+ */
+const PATIENT = { rules: 10_000, handoff: 10_000 };
+const SHORT = { rules: 50, handoff: 80 };
+
 async function started({ host, tabs = fakeTabs({ 1: "about:blank" }), storage = fakeStorage(), clock = fakeClock(), ...rest }) {
   const router = createRouter({
     connect: () => host.connect(),
     tabs,
     storage,
     now: clock.now,
-    timeouts: { rules: 50, handoff: 80 },
+    timeouts: PATIENT,
     ...rest,
   });
   await router.start();
@@ -152,7 +160,7 @@ test("a navigation before startup has read the pause state and the rules waits f
   for (const paused of [true, false]) {
     const host = fakeHost({ answer: knobas([JIRA], opened) });
     const storage = fakeStorage({ paused });
-    const router = createRouter({ connect: () => host.connect(), tabs: fakeTabs({ 1: "about:blank" }), storage, timeouts: { rules: 50, handoff: 80 } });
+    const router = createRouter({ connect: () => host.connect(), tabs: fakeTabs({ 1: "about:blank" }), storage, timeouts: PATIENT });
     const starting = router.start();
     const early = router.onBeforeRequest(nav(PAY));
     await starting;
@@ -191,7 +199,7 @@ test("with knobas closed the page loads, and so it does when the host is missing
   });
   await t.test("host never answers", async (t) => {
     const host = fakeHost({ answer: knobas([JIRA], opened) });
-    const { router, tabs } = await started({ host });
+    const { router, tabs } = await started({ host, timeouts: SHORT });
     host.answer = () => "hang";
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const answer = watched(router.onBeforeRequest(nav(PAY, { tabId: 1 })));
@@ -225,7 +233,7 @@ test("a handoff never queues in the host behind a request that timed out, so it 
   // of that stamp: a handoff stuck behind a hung frame would be stamped late.
   const host = fakeHost({ answer: knobas([JIRA], opened) });
   const clock = fakeClock();
-  const { router, tabs } = await started({ host, clock });
+  const { router, tabs } = await started({ host, clock, timeouts: SHORT });
   host.answer = (m) => (m.type === "get_rules" ? "hang" : knobas([JIRA], opened)(m));
   clock.advance(60_000); // stale: this navigation reads the rules first, and that read hangs
   t.mock.timers.enable({ apis: ["setTimeout"] });
