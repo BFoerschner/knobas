@@ -239,7 +239,8 @@
 .tf-pl-fold > summary.tf-tfold::before { margin: 0 3px 1px 3px; }
 .tf-fold-nm { font-weight: 600; color: var(--ink-2); }
 .tf-fold-n { flex: none; color: var(--ink-2); font-size: calc(var(--t-2xs) * var(--fs)); font-weight: var(--wt-ui, 400); font-variant-numeric: tabular-nums; }
-.tf-tfold[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
+/* A fold's count, and *All pipelines*', on the pill. */
+:is(.tf-pi, .tf-tfold)[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
 /* The tools: the chips, and *Collapse all* / *Expand all* as the line's trailing group (`.tf-trail`). */
 .tf-pl-tools { display: flex; align-items: center; gap: var(--control-gap); }
 .tf-pl-pin { padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--rule-2); }
@@ -409,7 +410,6 @@
 .tf-pl-root .tf-pi-nm { font-weight: 600; }
 .tf-pl-rooticon { flex: none; width: 12px; height: 12px; color: var(--ink-2); }
 .tf-pi[aria-current="true"] .tf-pl-rooticon { color: inherit; }
-.tf-pi[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
 .tf-pl-root .tf-fold-n.tf-unseen { visibility: hidden; }
 /* The bubble columns (#2573): five at every row's end, in the top bar's order (red, yellow, green, grey, blue), each in
    its own place on every row, so a number that comes or goes moves nothing, a scan down one column reads one colour,
