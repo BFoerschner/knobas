@@ -740,8 +740,9 @@ async fn read_one(
 ///
 /// A view whose fingerprint the cursor already holds walks to nothing. One a
 /// run would leave out walks to its tombstone and leaves the position. No
-/// cursor, or one this build cannot read, is `NotOffered`: a full sync is
-/// owed, as for every walk.
+/// cursor, one this build cannot read, or one whose views were read under
+/// another *Boards and filters* setting, is `NotOffered`: a run is owed, as
+/// for every walk.
 ///
 /// The search index lags a write by seconds. A landed write reads its ticket
 /// back first (`crate::refresh`), which waits until the index holds the
@@ -759,6 +760,12 @@ pub(crate) async fn walk(
     let (true, Some(mut position)) = (is_view(key), position) else {
         return Ok(knobas_source::UnderAnswer::NotOffered);
     };
+    // A position taken under another *Boards and filters* setting is not
+    // this setting's (ADR-0047): the views it holds are the other setting's,
+    // and the next run reads the boards at once.
+    if position.board_read.as_ref().map(|read| read.scope.as_str()) != Some(&scope(cfg)) {
+        return Ok(knobas_source::UnderAnswer::NotOffered);
+    }
     let held = position.views.iter().position(|seen| seen.k == key);
     let (item, moved) = match read_one(api, cfg, base_url, key).await? {
         Some(view) => {
@@ -1016,6 +1023,13 @@ mod tests {
             })
         }
         async fn board(&self, id: u64) -> Result<Board, SourceError> {
+            if self.software_refused {
+                return Err(knobas_http::status_error(
+                    knobas_http::StatusCode::FORBIDDEN,
+                    r#"{"errorMessages":["You currently don't have access to perform this operation."]}"#,
+                    None,
+                ));
+            }
             let b = self.board(id).ok_or_else(not_found)?;
             Ok(serde_json::from_value(json!({ "id": b.0, "name": b.1, "type": b.2 })).unwrap())
         }
@@ -1698,6 +1712,54 @@ mod tests {
         ));
         assert!(matches!(
             walk_of(&api, &cfg(), "board-21", Some("not a cursor")).await,
+            knobas_source::UnderAnswer::NotOffered
+        ));
+    }
+
+    /// **A board put back in Jira after a walk read it is delivered again**
+    /// (ADR-0047 as amended 2026-11-28): the walk moved the board's position
+    /// to what it read, so the next board read finds the board back as it
+    /// was before the walk and delivers it, instead of matching the
+    /// fingerprint the run left and keeping the walked keys for good.
+    #[tokio::test]
+    async fn a_board_put_back_after_its_walk_is_delivered_by_the_next_run() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        let before = api.boards[1].6.clone();
+        api.boards[1].6 = vec!["WEB-5", "PAY-240"]; // PAY-231 went to Done
+        let (_, cursor) = walked(walk_of(&api, &cfg(), "board-22", Some(&first)).await);
+        api.boards[1].6 = before; // and back to In Progress in the web UI
+
+        // The app keeps the stored cursor where a walk moves none.
+        let stored = cursor.unwrap_or(first);
+        api.clock_minutes = 120; // an hour on: the boards are read again
+        let (again, _) = sync(&api, Some(stored)).await;
+        assert_eq!(keys_of(&again), [("board-22", false)], "{again:?}");
+        assert_eq!(again[0].payload["keys"], json!(["WEB-5", "PAY-240", "PAY-231"]));
+    }
+
+    /// A board record Jira Software refuses with 403 (#2374) is a failed
+    /// read, not a board gone: the walk fails and delivers no tombstone.
+    #[tokio::test]
+    async fn a_board_refused_with_403_is_a_failed_walk_not_a_tombstone() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        api.software_refused = true;
+        let refused = walk(&api, &cfg(), "jira", "https://jira.example/", "board-21", Some(&first))
+            .await
+            .expect_err("a refused board record fails the walk");
+        assert_eq!(refused.status(), Some(403));
+    }
+
+    /// A position whose views were read under another *Boards and filters*
+    /// setting is not walked from (ADR-0047): the run reads the boards at
+    /// once under the new one.
+    #[tokio::test]
+    async fn a_view_under_another_boards_setting_is_not_offered() {
+        let api = seeded();
+        let (_, first) = sync(&api, None).await;
+        assert!(matches!(
+            walk_of(&api, &cfg_with("all", false), "board-21", Some(&first)).await,
             knobas_source::UnderAnswer::NotOffered
         ));
     }
