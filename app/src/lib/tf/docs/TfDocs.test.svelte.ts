@@ -25,8 +25,20 @@ import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 // A code block's views (API, Schema, XML view) load their code on the first press: held before the tests, as
 // `TfFileViewer`'s are. A cold import of the XML view on a busy machine outlasted `vi.waitFor`'s second (#2604's gate, load 60).
+// A code block's views load their component on the first press, and in jsdom (no worker) their engines load their model
+// on the first call: the API view's `openapi`, the XSD view's `xsd-answer` and `xsd-known`, the XML view's `doc-model`.
+// Cold, under load, any one of them outlasts `vi.waitFor`'s one second, so all are loaded
+// before the first test (PR #2607; #2572's run).
 beforeAll(async () => {
-  await Promise.all([docViewModule(), import("../render/TfOasInline.svelte"), import("../render/xsd/TfXsdInline.svelte")]);
+  await Promise.all([
+    docViewModule(),
+    import("../render/TfOasInline.svelte"),
+    import("../render/xsd/TfXsdInline.svelte"),
+    import("../../render/openapi"),
+    import("../../render/xsd-answer"),
+    import("../../render/xsd-known"),
+    import("../../render/doc-model"),
+  ]);
 });
 
 const TREE: DocsTree = {

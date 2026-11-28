@@ -83,6 +83,7 @@ import type {
   PipeRun,
   PipeStep,
   PipelineRow,
+  RailPipeline,
   RecentCursor,
   RecentFilter,
   RecentRuns,
@@ -303,6 +304,7 @@ export type {
   PipelineReason,
   PipelineRepository,
   PipelineRow,
+  RailPipeline,
   RecentCursor,
   RecentFilter,
   RecentPipeline,
@@ -459,6 +461,14 @@ export function entityHead(entityId: string): Promise<EntityDetail> {
  */
 export function pipelines(): Promise<PipelineRow[]> {
   return invoke<PipelineRow[]>("pipelines");
+}
+
+/**
+ * Every pipeline as the Builds rail draws it (#2571): {@link pipelines}' rows without their strips, each with its latest
+ * run, its runs in flight and the commits its last twelve built. A tenth of the list's size at Björn's scale.
+ */
+export function railPipelines(): Promise<RailPipeline[]> {
+  return invoke<RailPipeline[]>("rail_pipelines");
 }
 
 /**

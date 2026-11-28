@@ -1182,6 +1182,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         // What knobas looks at again after a branch moved (ADR-0064 rule 2,
         // #2585), appended at the foot (§10.8).
         commands::sources::looking_again,
+        // The Builds rail without its strips (spec #2566, #2571), appended
+        // at the foot (§10.8).
+        commands::entity::rail_pipelines,
     ]
 }
 

@@ -1352,6 +1352,7 @@ const CASES: Case[] = [
                   pinned: false,
                   web_url: null,
                   recent: [],
+                  commits: [],
                   unread: [],
                 },
               ]),

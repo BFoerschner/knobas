@@ -1,0 +1,95 @@
+{
+  "about": "The Builds rail's read (#2571): what a pipeline's runs become, read by knobas_core::builds' tests (RailPipeline::from, over the first rail_runs runs as PIPELINES reads them) and builds.test.ts (railRuns) alike, so the window's twin lays a run's refresh into its row as the backend's read laid it. `runs` are in the read's order (the source's last word first); `recent` and `commits` are what the rail keeps.",
+  "rail_runs": 12,
+  "cases": [
+    { "name": "nothing ran", "runs": [], "recent": [], "commits": [] },
+    {
+      "name": "a long failure that finished after a newer pass: the pass is the latest",
+      "runs": [
+        { "id": "long", "started": "2026-08-21T06:00:00Z", "finished": "2026-08-21T12:00:00Z", "updated": "2026-08-21T12:00:00Z", "commit": "c1" },
+        { "id": "short", "started": "2026-08-21T10:00:00Z", "finished": "2026-08-21T10:30:00Z", "updated": "2026-08-21T10:30:00Z", "commit": "c2" }
+      ],
+      "recent": ["short"],
+      "commits": ["c2", "c1"]
+    },
+    {
+      "name": "a run in flight under a newer pass is kept; a queued one past the latest is not",
+      "runs": [
+        { "id": "fresh", "started": "2026-08-21T11:00:00Z", "finished": "2026-08-21T11:30:00Z", "updated": "2026-08-21T11:30:00Z", "commit": "c3" },
+        { "id": "stuck", "started": "2026-08-21T05:00:00Z", "finished": null, "updated": "2026-08-21T05:00:00Z", "commit": "c1" },
+        { "id": "waits", "started": null, "finished": null, "updated": "2026-08-21T04:00:00Z", "commit": null }
+      ],
+      "recent": ["fresh", "stuck"],
+      "commits": ["c3", "c1"]
+    },
+    {
+      "name": "two in flight under a newer failure, newest first",
+      "runs": [
+        { "id": "broke", "started": "2026-08-21T11:00:00Z", "finished": "2026-08-21T11:30:00Z", "updated": "2026-08-21T11:30:00Z", "commit": null },
+        { "id": "slow", "started": "2026-08-21T08:00:00Z", "finished": null, "updated": "2026-08-21T08:00:00Z", "commit": null },
+        { "id": "slower", "started": "2026-08-21T09:00:00Z", "finished": null, "updated": "2026-08-21T07:00:00Z", "commit": null }
+      ],
+      "recent": ["broke", "slower", "slow"],
+      "commits": []
+    },
+    {
+      "name": "queued after the rest started: the queued run is the latest, made when it was queued",
+      "runs": [
+        { "id": "waits", "started": null, "finished": null, "updated": "2026-08-21T13:00:00Z", "commit": null },
+        { "id": "warned", "started": "2026-08-21T12:00:00Z", "finished": "2026-08-21T12:30:00Z", "updated": "2026-08-21T12:30:00Z", "commit": "c4" }
+      ],
+      "recent": ["waits"],
+      "commits": ["c4"]
+    },
+    {
+      "name": "a run with neither instant is the oldest; equals keep the read's order",
+      "runs": [
+        { "id": "blank", "started": null, "finished": null, "updated": null, "commit": null },
+        { "id": "a", "started": "2026-08-21T09:00:00Z", "finished": "2026-08-21T09:30:00Z", "updated": "2026-08-21T09:30:00Z", "commit": null },
+        { "id": "b", "started": "2026-08-21T09:00:00Z", "finished": "2026-08-21T09:20:00Z", "updated": "2026-08-21T09:20:00Z", "commit": null }
+      ],
+      "recent": ["a"],
+      "commits": []
+    },
+    {
+      "name": "the milliseconds count",
+      "runs": [
+        { "id": "x", "started": "2026-08-21T09:00:00.100Z", "finished": "2026-08-21T09:30:00Z", "updated": "2026-08-21T09:30:00Z", "commit": null },
+        { "id": "y", "started": "2026-08-21T09:00:00.200Z", "finished": "2026-08-21T09:20:00Z", "updated": "2026-08-21T09:20:00Z", "commit": null }
+      ],
+      "recent": ["y"],
+      "commits": []
+    },
+    {
+      "name": "each commit once, newest first by when its run was made",
+      "runs": [
+        { "id": "a", "started": "2026-08-21T10:00:00Z", "finished": "2026-08-21T10:10:00Z", "updated": "2026-08-21T10:10:00Z", "commit": "c2" },
+        { "id": "b", "started": "2026-08-21T11:00:00Z", "finished": "2026-08-21T11:10:00Z", "updated": "2026-08-21T10:05:00Z", "commit": "c1" },
+        { "id": "c", "started": "2026-08-21T09:00:00Z", "finished": "2026-08-21T09:10:00Z", "updated": "2026-08-21T09:10:00Z", "commit": "c2" },
+        { "id": "d", "started": "2026-08-21T08:00:00Z", "finished": "2026-08-21T08:10:00Z", "updated": "2026-08-21T08:10:00Z", "commit": null }
+      ],
+      "recent": ["b"],
+      "commits": ["c1", "c2"]
+    },
+    {
+      "name": "the thirteenth run is past the read: neither its commit nor its flight counts",
+      "runs": [
+        { "id": "r0", "started": "2026-08-21T20:00:00Z", "finished": "2026-08-21T20:10:00Z", "updated": "2026-08-21T20:10:00Z", "commit": "same" },
+        { "id": "r1", "started": "2026-08-21T19:00:00Z", "finished": "2026-08-21T19:10:00Z", "updated": "2026-08-21T19:10:00Z", "commit": "same" },
+        { "id": "r2", "started": "2026-08-21T18:00:00Z", "finished": "2026-08-21T18:10:00Z", "updated": "2026-08-21T18:10:00Z", "commit": "same" },
+        { "id": "r3", "started": "2026-08-21T17:00:00Z", "finished": "2026-08-21T17:10:00Z", "updated": "2026-08-21T17:10:00Z", "commit": "same" },
+        { "id": "r4", "started": "2026-08-21T16:00:00Z", "finished": "2026-08-21T16:10:00Z", "updated": "2026-08-21T16:10:00Z", "commit": "same" },
+        { "id": "r5", "started": "2026-08-21T15:00:00Z", "finished": "2026-08-21T15:10:00Z", "updated": "2026-08-21T15:10:00Z", "commit": "same" },
+        { "id": "r6", "started": "2026-08-21T14:00:00Z", "finished": "2026-08-21T14:10:00Z", "updated": "2026-08-21T14:10:00Z", "commit": "same" },
+        { "id": "r7", "started": "2026-08-21T13:00:00Z", "finished": "2026-08-21T13:10:00Z", "updated": "2026-08-21T13:10:00Z", "commit": "same" },
+        { "id": "r8", "started": "2026-08-21T12:00:00Z", "finished": "2026-08-21T12:10:00Z", "updated": "2026-08-21T12:10:00Z", "commit": "same" },
+        { "id": "r9", "started": "2026-08-21T11:00:00Z", "finished": "2026-08-21T11:10:00Z", "updated": "2026-08-21T11:10:00Z", "commit": "same" },
+        { "id": "r10", "started": "2026-08-21T10:00:00Z", "finished": "2026-08-21T10:10:00Z", "updated": "2026-08-21T10:10:00Z", "commit": "same" },
+        { "id": "r11", "started": "2026-08-21T09:00:00Z", "finished": "2026-08-21T09:10:00Z", "updated": "2026-08-21T09:10:00Z", "commit": "same" },
+        { "id": "r12", "started": "2026-08-21T08:00:00Z", "finished": null, "updated": "2026-08-21T08:00:00Z", "commit": "older" }
+      ],
+      "recent": ["r0"],
+      "commits": ["same"]
+    }
+  ]
+}

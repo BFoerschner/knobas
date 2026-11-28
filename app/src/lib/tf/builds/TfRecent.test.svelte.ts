@@ -105,7 +105,15 @@ interface Drawn {
 
 function draw(
   overrides: Partial<RecentPorts> = {},
-  props: { job?: string | null; first?: RecentRuns; title?: string; pipelines?: readonly string[] | null; ondrawn?: () => void } = {},
+  props: {
+    job?: string | null;
+    first?: RecentRuns;
+    title?: string;
+    pipelines?: readonly string[] | null;
+    place?: readonly string[] | null;
+    paths?: "long" | "short" | "none";
+    ondrawn?: () => void;
+  } = {},
 ): Drawn {
   const drawn: Drawn = { asked: [], next: props.first ?? PAGE, started: [], revision: () => {}, scope: () => {} };
   let revision = $state(0);
@@ -150,6 +158,8 @@ function draw(
         return pipelines;
       },
       ...(props.ondrawn ? { ondrawn: props.ondrawn } : {}),
+      ...(props.place !== undefined ? { place: props.place } : {}),
+      ...(props.paths !== undefined ? { paths: props.paths } : {}),
     },
   });
   return drawn;
@@ -164,9 +174,9 @@ test("the newest runs of every pipeline, newest first, each naming its pipeline,
   expect(drawn.asked).toEqual([{ filter: { sources: [], results: [], mine: false, branches: null, pipelines: [] }, before: null, limit: 60 }]);
   expect(numbers()).toEqual(["#12", "#11", "#10"]);
   const first = rows()[0]!;
-  expect(first.querySelector(".tf-run-pname")?.textContent).toBe("Deploy");
-  expect(first.querySelector(".tf-run-place")?.textContent).toBe("Ops");
-  expect(rows()[1]!.querySelector(".tf-run-place")?.textContent).toBe("Payments › Payout");
+  expect(first.querySelector(".tf-run-nm")?.textContent).toBe("Deploy");
+  expect(first.querySelector(".tf-run-path")?.textContent).toBe("Ops ›");
+  expect(rows()[1]!.querySelector(".tf-run-path")?.textContent).toBe("Payments › Payout ›");
   expect(first.querySelector(".tf-run-pno")?.getAttribute("href")).toBe("#/build/tc%3AbuildType%3ADeploy/tc%3Abuild%3A12");
   // No folds: no fold's summary, no tree.
   expect(target.querySelector("details, .tf-tfold")).toBeNull();
@@ -182,8 +192,8 @@ test("a pipeline's place names its source first where two sources list runs", as
   const other: RecentPipeline = { ...DEPLOY, entity_id: "gh:wf:Deploy", source_id: "gh", source_name: "Forgejo" };
   draw({}, { first: { runs: [at(other, run(13, "ok", today(0, 50))), ...PAGE.runs], pipelines: [LINT, DEPLOY, other], next: null } });
   await settle();
-  expect(rows()[0]!.querySelector(".tf-run-place")?.textContent).toBe("Forgejo › Ops");
-  expect(rows()[1]!.querySelector(".tf-run-place")?.textContent).toBe("TeamCity › Ops");
+  expect(rows()[0]!.querySelector(".tf-run-path")?.textContent).toBe("Forgejo › Ops ›");
+  expect(rows()[1]!.querySelector(".tf-run-path")?.textContent).toBe("TeamCity › Ops ›");
   // *Source* is offered with two sources.
   expect(target.querySelector('select[aria-label="Source"], .tf-fsel')).not.toBeNull();
 });
@@ -215,7 +225,7 @@ test("typed words have the app rank the runs by their pipeline's name and place,
   input.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
   expect(numbers()).toEqual(["#11", "#10"]);
-  const names = [...target.querySelectorAll(".tf-run-pname")];
+  const names = [...target.querySelectorAll(".tf-run-nm")];
   for (const name of names) expect([...name.querySelectorAll("mark")].map((m) => m.textContent).join("").toLowerCase()).toBe("pylnt");
 });
 
@@ -347,7 +357,7 @@ test("an older page follows from the last page's cursor", async () => {
 test("back from a run, it draws what it held at once and focuses the run that was opened", async () => {
   draw();
   await settle();
-  rows()[1]!.querySelector<HTMLElement>(".tf-run-pname")!.click();
+  rows()[1]!.querySelector<HTMLElement>(".tf-run-nm")!.click();
   expect(location.hash).toBe("#/build/tc%3AbuildType%3ALint/tc%3Abuild%3A11");
   unmount(page!);
   page = null;
@@ -522,4 +532,75 @@ test("Builds hears the first rows drew once they have painted, so the pipeline l
   expect(drawnAt, "not before their frame").toBe(0);
   await settle();
   expect(drawnAt).toBe(1);
+});
+
+test("a row's folders end at one line and its name starts there: the folders a link to their folder, the whole path its title (#2572)", async () => {
+  const long: RecentPipeline = { ...LINT, entity_id: "tc:buildType:Verify", name: "CarrierAdapters_Contract_Verification_Nightly", path: ["Platform", "Services", "Auth gateway"] };
+  draw({}, { first: { runs: [at(long, run(14, "ok", today(0, 50))), ...PAGE.runs], pipelines: [LINT, DEPLOY, long], next: null } });
+  await settle();
+  expect(target.querySelector(".tf-runs")?.getAttribute("data-paths")).toBe("long");
+  const row = rows()[0]!;
+  const id = row.querySelector(".tf-run-id")!;
+  expect(id.getAttribute("title")).toBe("Platform › Services › Auth gateway › CarrierAdapters_Contract_Verification_Nightly");
+  // The folders, then the name and number: two children of one grid, so the line between them is the grid's.
+  expect([...id.children].map((child) => child.className)).toEqual(["tf-run-path", "tf-run-who"]);
+  const path = row.querySelector<HTMLAnchorElement>("a.tf-run-path")!;
+  expect(path.textContent).toBe("Platform › Services › Auth gateway ›");
+  expect(path.getAttribute("href")).toBe("#/builds/folder/tc/Platform/Services/Auth%20gateway");
+  // Only the lead gives way; the last word and the number stand whole.
+  expect(row.querySelector(".tf-run-nmh")?.textContent).toBe("CarrierAdapters_Contract_Verification_");
+  expect(row.querySelector(".tf-run-nmt")?.textContent).toBe("Nightly");
+  expect(row.querySelector(".tf-run-pno")?.textContent).toBe("#14");
+  // A name of one word is all last word.
+  expect(rows()[1]!.querySelector(".tf-run-nmh")).toBeNull();
+  expect(rows()[1]!.querySelector(".tf-run-nmt")?.textContent).toBe("Deploy");
+});
+
+test("a press on a row's folders selects that folder; a press elsewhere on the row opens the run (#2572)", async () => {
+  draw();
+  await settle();
+  location.hash = "#/builds/recent";
+  const path = rows()[1]!.querySelector<HTMLAnchorElement>("a.tf-run-path")!;
+  path.click();
+  await settle();
+  expect(location.hash).toBe("#/builds/folder/tc/Payments/Payout");
+  rows()[1]!.querySelector<HTMLElement>(".tf-run-nmt")!.click();
+  await settle();
+  expect(location.hash).toBe("#/build/tc%3AbuildType%3ALint/tc%3Abuild%3A11");
+});
+
+test("at a folder the folders are said from it down, and none where the pipeline sits in it (#2572)", async () => {
+  const nightly: RecentPipeline = { ...LINT, entity_id: "tc:buildType:Nightly", name: "Nightly", path: ["Payments", "Payout", "Deploy"] };
+  draw({}, { title: "Payout", pipelines: [LINT.entity_id, nightly.entity_id], place: ["tc", "Payments", "Payout"], paths: "short", first: { runs: [at(nightly, run(15, "ok", today(0, 55))), at(LINT, run(11, "err", today(0, 30)))], pipelines: [LINT, nightly], next: null } });
+  await settle();
+  expect(target.querySelector(".tf-runs")?.getAttribute("data-paths")).toBe("short");
+  expect(rows()[0]!.querySelector(".tf-run-path")?.textContent).toBe("Deploy ›");
+  expect(rows()[0]!.querySelector(".tf-run-id")?.getAttribute("title"), "the title still says the whole path").toBe("Payments › Payout › Deploy › Nightly");
+  // In the folder itself: no words, no link, but the folders' cell keeps its place in the grid.
+  expect(rows()[1]!.querySelector("a.tf-run-path")).toBeNull();
+  expect(rows()[1]!.querySelector(".tf-run-id")?.firstElementChild?.className).toBe("tf-run-path");
+});
+
+test("a row's dot is in the colour of the bubble that counts its run, with its words; a row in none has none (#2572)", async () => {
+  draw({}, { first: { runs: [at(DEPLOY, run(16, "ok", today(0, 58), { state: { text: "running", tone: "info" }, finished: null, duration_seconds: null })), ...PAGE.runs], pipelines: [LINT, DEPLOY], next: null } });
+  await settle();
+  const dot = (at: number) => rows()[at]!.querySelector(".tf-unread");
+  expect(dot(0)?.className).toContain("tf-u-blue");
+  expect(dot(0)?.textContent).toBe("Running, not opened yet.");
+  expect(dot(2)?.className).toContain("tf-u-red");
+  expect(dot(1), "a pass seen before the visit is in no bubble").toBeNull();
+});
+
+test("a new scope keeps the count's room while it reads, so the bar's controls hold still (#2572, moves' builds-folder-link)", async () => {
+  let reads = 0;
+  // The first page answers; the folder's read is still out.
+  const drawn = draw({ recent: () => (reads++ === 0 ? Promise.resolve(PAGE) : new Promise<RecentRuns>(() => {})) });
+  await settle();
+  const room = () => target.querySelector(".tf-fcount")?.getAttribute("data-room");
+  const before = room();
+  expect(before, "held for a page of 200 though the first brought three: the next page lands in it").toBe("199 of 200 runs");
+  drawn.scope("Payout", [LINT.entity_id]);
+  await settle();
+  expect(reads).toBe(2);
+  expect(room(), "the folder's runs still read: the count says nothing, in the room it had").toBe(before);
 });

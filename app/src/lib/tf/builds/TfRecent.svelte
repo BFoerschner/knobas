@@ -90,7 +90,7 @@
   import { runsRead } from "./runs-read.svelte";
   import { InFlightReads, IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, runsInFlight } from "./runs-in-flight";
   import { askRunAgain } from "./run-again";
-  import { RECENT_FIRST, RECENT_HOLD, RECENT_PAGE, placeWords, recentFilterOf, recentMarks, recentText, withHead, withOlder, withPipelines } from "./recent";
+  import { RECENT_FIRST, RECENT_HOLD, RECENT_PAGE, recentFilterOf, recentMarks, recentText, rowPipeline, withHead, withOlder, withPipelines } from "./recent";
 
   const BRIDGE: RecentPorts = {
     recent: (filter, before, limit) => recentRuns(filter, before, limit),
@@ -110,6 +110,8 @@
     sync,
     title,
     pipelines: scoped = [],
+    place = null,
+    paths = "long",
     syncRevision = 0,
     ondrawn,
   }: {
@@ -127,6 +129,10 @@
      * pipelines are still being read, when it reads nothing.
      */
     pipelines?: readonly string[] | null;
+    /** The folder's place at a folder (#2572, `RunScope`): each row says its folders from it down. `null` at *All*. */
+    place?: readonly string[] | null;
+    /** How wide the folder column stands (`folderColumn`): the names start at the same line on every row. */
+    paths?: "long" | "short" | "none";
     /** Moves when a sync ended: the head is read again. */
     syncRevision?: number;
     /** Its first page has drawn: the Builds list is read behind it, so a run opens at once. */
@@ -375,9 +381,10 @@
   const runs = $derived.by(() => {
     void pipelines;
     void manySources;
+    void place;
     return [...(held ?? [])];
   });
-  const runText = (one: RecentRun) => recentText(one, pipelines, manySources);
+  const runText = (one: RecentRun) => recentText(one, pipelines, manySources, place);
   const runOrder = heldOrder<RecentRun>("recent-runs");
   $effect(() => runOrder.ask(filter.text, runs, runText));
   const typed = $derived(inOrder(runs, runOrder.rows(filter.text, runs, runText)));
@@ -574,11 +581,11 @@
 </header>
 
 <div class="tf-runbar tf-recentbar">
-  <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} held={heldBar} {after} />
+  <FilterBar {config} {filter} shown={held === null ? null : placed.rows.length} total={held?.length ?? null} room={RECENT_PAGE} held={heldBar} {after} />
 </div>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="tf-runs tf-recent" bind:this={runsBox} onpointerenter={() => (pointerOn = true)} onpointerleave={() => (pointerOn = false)} onkeydown={runKeys}>
+<div class="tf-runs tf-recent" data-paths={paths} bind:this={runsBox} onpointerenter={() => (pointerOn = true)} onpointerleave={() => (pointerOn = false)} onkeydown={runKeys}>
   {#if placed.waiting > 0}
     <div class="tf-newruns"><button type="button" title="Started since the list drew. They wait here while the pointer is on the runs, so nothing moves under it." onclick={showNew}>Show {counted(placed.waiting, "new run", "new runs")}</button></div>
   {/if}
@@ -614,12 +621,12 @@
                 {attach}
                 href={runHash(one.pipeline_id, run.entity_id)}
                 typed={runMarking}
-                marks={filter.text.trim() === "" ? null : recentMarks(one, pipelines, manySources, runOrder.marks(one))}
+                marks={filter.text.trim() === "" ? null : recentMarks(one, pipelines, manySources, runOrder.marks(one), place)}
                 {job}
                 jobBranches={jobBranches ?? []}
                 max={longest.get(one.pipeline_id) ?? 0}
                 arrived={arrived.has(run.entity_id)}
-                pipeline={{ name: pipe?.name ?? "", place: placeWords(pipe, manySources) }}
+                pipeline={rowPipeline(pipe, manySources, place)}
                 onopen={(event) => openRow(event, one)}
                 onagain={() => runAgain(one)}
               />

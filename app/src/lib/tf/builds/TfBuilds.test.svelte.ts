@@ -7,7 +7,7 @@ import { layers as sharedLayers } from "../layers.svelte";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
+import type { JobPipeline, RailPipeline, RunRow } from "../../ipc/entity";
 import * as entityIpc from "../../ipc/entity";
 import { sessionFilter, sessionValue } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
@@ -17,6 +17,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { echoEvents } from "../echo-events.fixture";
 import { echoWrite, forgetEchoes } from "../queued.svelte";
 import { QUEUED_RUN } from "./pipeline";
+import { failedRun, railOf } from "./builds";
 
 // Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
 vi.mock("../../ipc/sources", async (original) => ({
@@ -98,8 +99,17 @@ function run(id: string, tone: "ok" | "err", extra: Partial<RunRow> = {}): RunRo
   };
 }
 
-function pipeline(id: string, name: string, recent: RunRow[]): PipelineRow {
-  return {
+/** Each fixture pipeline's whole runs, by entity id: what its page reads (`pipeline_runs`), not what the rail does. */
+const RUNS = new Map<string, RunRow[]>();
+const runsOf = (id: string): RunRow[] => RUNS.get(id) ?? [];
+
+/**
+ * A pipeline as the rail's read answers it (#2571): `recent` the runs of its last twelve the rail reads, `commits` what
+ * they built, `unread` its failures (the backend's are over the whole history; here, those among `recent`).
+ */
+function pipeline(id: string, name: string, recent: RunRow[]): RailPipeline {
+  RUNS.set(`teamcity:buildType:${id}`, recent);
+  return railOf({
     entity_id: `teamcity:buildType:${id}`,
     source_id: "teamcity",
     source_name: "TeamCity",
@@ -109,11 +119,11 @@ function pipeline(id: string, name: string, recent: RunRow[]): PipelineRow {
     pinned: false,
     web_url: null,
     recent,
-    unread: [],
-  };
+    unread: recent.filter(failedRun).map((run) => run.entity_id),
+  });
 }
 
-const LIST: PipelineRow[] = [
+const LIST: RailPipeline[] = [
   pipeline("Payout_Build", "Payout_Build", [
     run("teamcity:build:1188", "ok", { finished: null, duration_seconds: null, state: { text: "running", tone: "info" } }),
   ]),
@@ -136,7 +146,7 @@ function draw(rest: string[], head = "builds", asked: string[] = [], extra: Part
     pipelines: extra.pipelines ?? (() => Promise.resolve(LIST)),
     runs: (id) => {
       asked.push(id);
-      return Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []);
+      return Promise.resolve(runsOf(id));
     },
   };
   page = mount(TfBuilds, { target, props: { ready: true, head, rest, job: null, ports, ...(sync ? { sync: syncNow } : {}) } });
@@ -322,7 +332,7 @@ test("Sync now is in the header of All pipelines while no pipeline has synced ye
 
 // -- the project tree and pins (#849), *This job* (#850) ----------------------
 
-const TREE: PipelineRow[] = [
+const TREE: RailPipeline[] = [
   { ...pipeline("Dbt_Test", "Dbt_Test", [run("teamcity:build:640", "err")]), path: ["Data"] },
   { ...pipeline("Payout_Build", "Payout_Build", [run("teamcity:build:1188", "ok")]), path: ["Payments", "Payouts"], pinned: true },
   {
@@ -339,7 +349,7 @@ function drawTree(
   let list = TREE.map((p) => ({ ...p }));
   const ports: BuildsPorts = {
     pipelines: () => Promise.resolve(list),
-    runs: (id) => Promise.resolve(list.find((p) => p.entity_id === id)?.recent ?? []),
+    runs: (id) => Promise.resolve(runsOf(id)),
     setPinned: (id, pinned) => {
       options.pins?.push([id, pinned]);
       list = list.map((p) => (p.entity_id === id ? { ...p, pinned } : p));
@@ -578,7 +588,7 @@ test("a job with no pipelines says so and offers to search all of them", async (
 });
 
 test("Builds draws every pipeline the read answers and drops none by the source list (#1295)", async () => {
-  const relay: PipelineRow = {
+  const relay: RailPipeline = {
     ...pipeline("Rocket_Build", "Rocket_Build", [run("relay:run:7", "ok")]),
     entity_id: "relay:pipeline:Rocket_Build",
     source_id: "relay",
@@ -586,7 +596,7 @@ test("Builds draws every pipeline the read answers and drops none by the source 
   };
   const ports: BuildsPorts = {
     pipelines: () => Promise.resolve([...LIST, relay]),
-    runs: (id) => Promise.resolve([...LIST, relay].find((p) => p.entity_id === id)?.recent ?? []),
+    runs: (id) => Promise.resolve(runsOf(id)),
   };
   page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [], job: null, ports } });
   await settle();
@@ -638,7 +648,7 @@ test("Refresh on a pipeline reads the list again, and its row as the read answer
   let list = LIST;
   const ports: BuildsPorts = {
     pipelines: () => (reads++, Promise.resolve(list)),
-    runs: (id) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []),
+    runs: (id) => Promise.resolve(runsOf(id)),
   };
   page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [LIST[1]!.entity_id], job: null, ports } });
   await settle();
@@ -654,7 +664,7 @@ test("a read again of the list that answers takes away the note an earlier faile
   let fail = false;
   const ports: BuildsPorts = {
     pipelines: () => (fail ? Promise.reject(new Error("database is locked")) : Promise.resolve(LIST)),
-    runs: (id) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []),
+    runs: (id) => Promise.resolve(runsOf(id)),
   };
   page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [LIST[1]!.entity_id], job: null, ports } });
   await settle();
@@ -741,7 +751,7 @@ test("a day of a hundred runs draws the runs near the viewport, with room for th
 
 test("By repository folds the pipelines by the repositories their runs built, those that built none last", async () => {
   const commit = (repo: string) => `git:${repo}@abc`;
-  const at = (id: string, repo: string | null, failing = false): PipelineRow => ({
+  const at = (id: string, repo: string | null, failing = false): RailPipeline => ({
     ...pipeline(id, id, [{ ...run(`teamcity:build:${id}`, failing ? "err" : "ok"), commit_id: repo === null ? null : commit(repo) }]),
   });
   const list = [at("Payout_Build", "tidewater/payout-service", true), at("Ledger_Build", "tidewater/ledger-api"), at("Nightly", null)];
@@ -881,13 +891,46 @@ test("a run queued here says queued on the rail at once; its row is read again w
   forgetEchoes();
 });
 
+test("a run in flight under a newer one still moves its row: its end reads the row again and Running goes (#2571)", async () => {
+  const events = echoEvents(settle);
+  const stuck = run("teamcity:build:900", "ok", { started: "2026-08-22T09:00:00Z", finished: null, duration_seconds: null, updated_at: "2026-08-22T09:00:00Z", state: { text: "running", tone: "info" } });
+  const newer = run("teamcity:build:904", "ok");
+  let runs = [newer, stuck];
+  let reads = 0;
+  const ports: BuildsPorts = {
+    pipelines: () => Promise.resolve([pipeline("Payout_Lint", "Payout_Lint", runs)]),
+    runs: () => (reads++, Promise.resolve(runs)),
+    listen: events.listen,
+  };
+  // On the pipeline's page, so its fold is open; the page reads its own runs too.
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: ["teamcity:buildType:Payout_Lint"], job: null, ports } });
+  await settle();
+  const lint = () => rows().find((row) => row.querySelector(".tf-pi-nm")?.textContent === "Payout_Lint")!;
+  expect(lint().querySelector(".tf-rg")?.getAttribute("aria-label"), "the glyph is the newer pass").toBe("Passed");
+  const before = reads;
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!.click();
+  flushSync();
+  expect(names(), "the run in flight puts it under Running").toEqual(["Payout_Lint"]);
+  // The older run ends: its refresh names it, though the rail draws only the newer one's glyph.
+  runs = [newer, { ...stuck, finished: "2026-08-22T10:20:00Z", updated_at: "2026-08-22T10:20:00Z", state: { text: "FAILURE", tone: "err" } }];
+  await events.refreshed("teamcity:build:900", null);
+  await settle();
+  expect(reads, "its row's runs, read again").toBeGreaterThan(before);
+  expect(names(), "nothing in flight: Running keeps none").toEqual([]);
+  // Its failure is no longer the latest, yet the right-click counts it before the list is read again.
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!.click();
+  flushSync();
+  expect(thingAt(lint().querySelector(".tf-pi-nm"))?.thing).toMatchObject({ kind: "pipeline", unread: ["teamcity:build:900"] });
+  forgetEchoes();
+});
+
 // ---------------------------------------------------------------------------
 // *Recent* (2026-11-25): the newest runs of every pipeline, no folds
 // ---------------------------------------------------------------------------
 
 
 /** A folder's estate: two pipelines under *Payments › Payout*, one under *Ops*. */
-const FOLDERED: PipelineRow[] = [
+const FOLDERED: RailPipeline[] = [
   { ...LIST[0]!, path: ["Payments", "Payout"], group: "Payout" },
   { ...LIST[1]!, path: ["Payments", "Payout"], group: "Payout" },
   { ...LIST[2]!, path: ["Ops"], group: "Ops" },
@@ -1003,7 +1046,7 @@ test("a press on a fold's name selects that folder and opens it; Enter on a fold
 
 test("a repository's folder turns the rail to By repository and lists the pipelines its runs built (#2570)", async () => {
   const asked: { pipelines: string[] }[] = [];
-  const built = LIST.map((p, i) => ({ ...p, recent: p.recent.map((r) => ({ ...r, commit_id: i === 2 ? null : `git:c${i}` })) }));
+  const built = LIST.map((p, i) => railOf({ ...p, recent: runsOf(p.entity_id).map((r) => ({ ...r, commit_id: i === 2 ? null : `git:c${i}` })) }));
   draw(["folder", "~repo", "git:payout"], "builds", [], {
     pipelines: () => Promise.resolve(built),
     commitRepositories: () =>
@@ -1020,6 +1063,65 @@ test("a repository's folder turns the rail to By repository and lists the pipeli
   expect(target.querySelector('.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("tidewater/payout-service");
 });
 
+test("a folder reached by its address is revealed in the rail: the folds above it opened, its pill drawn, the rows shown (#2572)", async () => {
+  const nested: RailPipeline[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  draw(["folder", "teamcity", "Core", "Payments", "V2"], "builds", [], { pipelines: () => Promise.resolve(nested) });
+  await settle();
+  const pill = target.querySelector<HTMLElement>('.tf-pl-rows summary.tf-tfold[aria-current="true"]');
+  expect(pill?.querySelector(".tf-fold-nm")?.textContent).toBe("V2");
+  const opened = (name: string) =>
+    ([...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name)?.parentElement as HTMLDetailsElement | undefined)?.open;
+  expect([opened("Core"), opened("Payments"), opened("V2")]).toEqual([true, true, true]);
+  expect(opened("V1"), "a fold beside it stays as it was").toBe(false);
+  expect(target.querySelector(".tf-pl-rows")?.classList.contains("tf-unseen"), "shown once revealed").toBe(false);
+});
+
+test("a folder reached again, from All pipelines after a press in the rail, is revealed again (#2572)", async () => {
+  const nested: RailPipeline[] = [
+    { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
+    { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
+    { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
+  ];
+  const V2 = ["folder", "teamcity", "Core", "Payments", "V2"];
+  let rest = $state<string[]>(["recent"]);
+  page = mount(TfBuilds, {
+    target,
+    props: {
+      ready: true,
+      head: "builds",
+      get rest() {
+        return rest;
+      },
+      job: null,
+      ports: { pipelines: () => Promise.resolve(nested), runs: () => Promise.resolve([]), recent: QUIET_RECENT },
+    },
+  });
+  await settle();
+  const foldSummary = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-pl-rows summary.tf-tfold")].find((s) => s.querySelector(".tf-fold-nm")?.textContent === name);
+  const opened = (name: string) => (foldSummary(name)?.parentElement as HTMLDetailsElement | undefined)?.open ?? false;
+  // Every fold open, then V2 pressed in the rail: in view already, so nothing is revealed.
+  foldSummary("Core")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  foldSummary("V2")!.querySelector<HTMLElement>(".tf-fold-nm")!.click();
+  rest = V2;
+  await settle();
+  // Back at All pipelines, the reader folds everything; then a row's folders lead to V2 again.
+  rest = ["recent"];
+  await settle();
+  foldSummary("Core")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true }));
+  flushSync();
+  expect(opened("Core")).toBe(false);
+  rest = V2;
+  await settle();
+  expect([opened("Core"), opened("Payments"), opened("V2")]).toEqual([true, true, true]);
+  expect(target.querySelector('.tf-pl-rows summary.tf-tfold[aria-current="true"] .tf-fold-nm')?.textContent).toBe("V2");
+});
+
 test("a folder knobas does not hold says so, under the header and crumbs", async () => {
   draw(["folder", "teamcity", "Gone"]);
   await settle();
@@ -1027,7 +1129,7 @@ test("a folder knobas does not hold says so, under the header and crumbs", async
 });
 
 test("Alt+click on a Builds folder recursively expands and collapses every nested folder under it", async () => {
-  const nested: PipelineRow[] = [
+  const nested: RailPipeline[] = [
     { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
     { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
     { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
@@ -1066,7 +1168,7 @@ test("Alt+click on a Builds folder recursively expands and collapses every neste
 
 test("a right-click on a rail pipeline or folder carries its unread failed runs over the whole history, read as the menu opens (#2543)", async () => {
   marks(["teamcity:build:5", "teamcity:build:40"]);
-  const nested: PipelineRow[] = [
+  const nested: RailPipeline[] = [
     {
       ...pipeline("a", "Api", [run("teamcity:build:1", "err"), run("teamcity:build:9", "ok"), run("teamcity:build:5", "err")]),
       path: ["Core", "Payments"],
@@ -1112,7 +1214,7 @@ test("a right-click on a rail pipeline or folder carries its unread failed runs 
 test("a failure the list did not name, marked unread, reads the list again so the rail's count holds it (#2543)", async () => {
   marks(["teamcity:build:77"]);
   let reads = 0;
-  const listed = (unread: string[]): PipelineRow[] => [{ ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), unread }];
+  const listed = (unread: string[]): RailPipeline[] => [{ ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), unread }];
   draw(["teamcity:buildType:a"], "builds", [], {
     pipelines: () => {
       reads += 1;
@@ -1159,7 +1261,7 @@ test("a run opened from a scope's table holds the rail's rows unseen until its p
         return rest;
       },
       job: null,
-      ports: { pipelines: () => Promise.resolve(LIST), runs: (id: string) => Promise.resolve(LIST.find((p) => p.entity_id === id)?.recent ?? []), recent: QUIET_RECENT },
+      ports: { pipelines: () => Promise.resolve(LIST), runs: (id: string) => Promise.resolve(runsOf(id)), recent: QUIET_RECENT },
     },
   });
   await settle();

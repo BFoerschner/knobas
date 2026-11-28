@@ -154,6 +154,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::entity::AttachmentBytes::export_all(cfg)?;
     knobas_core::builds::RunRow::export_all(cfg)?;
     knobas_core::builds::PipelineRow::export_all(cfg)?;
+    knobas_core::builds::RailPipeline::export_all(cfg)?;
     knobas_core::builds::RepoPipelineRow::export_all(cfg)?;
     knobas_core::builds::RepoBuilds::export_all(cfg)?;
     knobas_core::builds::BranchPull::export_all(cfg)?;

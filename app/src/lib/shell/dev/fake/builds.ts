@@ -48,7 +48,7 @@ import { fakeRoleScope } from "./corpus";
 import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { recentOrder } from "../../../tf/builds/recent";
-import { runBubble } from "../../../tf/builds/builds";
+import { railOf, runBubble } from "../../../tf/builds/builds";
 import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -59,7 +59,7 @@ const SOURCE = "teamcity";
 const SOURCE_NAME = "Tidewater TeamCity";
 
 /** prototype-6's `cfgDefs`: project path to its configurations. */
-const CONFIGURATIONS: Record<string, string[]> = {
+const BASE_CONFIGURATIONS: Record<string, string[]> = {
   "Payments/Payouts": ["Payout_Build", "Payout_IntegrationTests", "Payout_Lint", "Payout_Docker"],
   "Payments/Payouts/Deploy": ["Payout_Deploy_Staging", "Payout_Deploy_Prod"],
   "Payments/Payouts/Dashboard": ["Dashboard_Build", "Dashboard_E2E"],
@@ -115,6 +115,15 @@ const CONFIGURATIONS: Record<string, string[]> = {
     "YardPlanner_Build",
   ],
 };
+/**
+ * `?fake-long-names` (#2572): the mockup's long names and deep folders beside the rest, for the run row's cut: the
+ * folders give way from their start, then the name's lead, never its last word or the number.
+ */
+const LONG_NAMES: Record<string, string[]> = {
+  "Platform/Services/Auth gateway": ["CarrierAdapters_Contract_Verification_Nightly"],
+  "Platform/Services/Auth gateway/Release trains for the EU data centre": ["CustomsGatewayContractVerificationAgainstStaging"],
+};
+let CONFIGURATIONS = BASE_CONFIGURATIONS;
 
 /** prototype-6's `S.pins`: pinned until the session unpins them (#849). */
 const pins = new Set(["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_Staging"].map((c) => `${SOURCE}:buildType:${c}`));
@@ -250,6 +259,9 @@ type Latest = { no: number; st: "running" | "failed" | "success" | "queued"; bra
 
 /** prototype-6's `realCfg`: the configurations whose latest run has a story. */
 const LATEST: Record<string, Latest> = {
+  // `?fake-long-names`' own (#2572), near the top of *All pipelines*.
+  CarrierAdapters_Contract_Verification_Nightly: { no: 412, st: "failed", branch: "main", at: "today 11:50", dur: 1260 },
+  CustomsGatewayContractVerificationAgainstStaging: { no: 77, st: "success", branch: "main", at: "today 11:48", dur: 420 },
   Payout_Build: { no: 1188, st: "running", branch: "feature/PAY-231-sepa-retry", at: "today 11:45", dur: null },
   Payout_IntegrationTests: { no: 1187, st: "failed", branch: "feature/PAY-231-sepa-retry", at: "today 10:05", dur: 252 },
   Payout_Lint: { no: 904, st: "success", branch: "feature/PAY-231-sepa-retry", at: "today 11:44", dur: 38 },
@@ -433,6 +445,7 @@ export function endFakeRun(id: string, now: Date = new Date()): boolean {
 onFakeReset(() => {
   built = null;
   longPaths = false;
+  CONFIGURATIONS = BASE_CONFIGURATIONS;
 });
 
 /** {@link history} built from scratch, from the seed, for the day of `now`. */
@@ -928,9 +941,19 @@ export function bulkPipelines(n: number, now: Date = new Date()): PipelineRow[] 
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   const bulk = bulkPipelines(Number(params.get("fake-pipelines") ?? 0) || 0);
   const bulkById = new Map(bulk.map((p) => [p.entity_id, p]));
+  // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
+  const listed = (): PipelineRow[] => {
+    const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
+    return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk.map((p) => ({ ...p, unread: unreadOf(p.recent) }))];
+  };
   // `fake-scale` (`fake-scale.ts`): a history thousands of runs long.
   const depth = params.has("fake-scale") ? SCALE_HISTORY : OLDER_DEPTH;
   longPaths = params.has("fake-long-paths");
+  const configurations = params.has("fake-long-names") ? { ...BASE_CONFIGURATIONS, ...LONG_NAMES } : BASE_CONFIGURATIONS;
+  if (configurations !== CONFIGURATIONS) {
+    CONFIGURATIONS = configurations;
+    built = null;
+  }
   return {
     older_pipeline_runs: (args) => {
       const config = configOf(String(args["pipelineId"] ?? ""));
@@ -967,11 +990,9 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       presets.set(id, kept);
       return null;
     },
-    // CI's read by definition, so it narrows itself to the role's fillers, as the server's does (#1295).
-    pipelines: () => {
-      const fillers = new Set(fakeRoleScope(CI_ROLE).sources);
-      return [...fakePipelines().filter((pipeline) => fillers.has(pipeline.source_id)), ...bulk.map((p) => ({ ...p, unread: unreadOf(p.recent) }))];
-    },
+    pipelines: () => listed(),
+    // The rail's read (#2571): the same rows without their strips, as the server reduces them.
+    rail_pipelines: () => listed().map(railOf),
     // Mark builds as read (ux18, ADR-0063): the fixture's own sets, as `knobas.run_read` holds them.
     read_runs: (): RunMarks => ({ read: [...readRuns], while_running: [...whileRunningRuns] }),
     mark_runs_read: (args): RunMarks => {

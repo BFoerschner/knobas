@@ -1566,7 +1566,7 @@ test("an unread failed run carries a dot hung in its number cell; a passed one a
   await runsRead.load();
   draw();
   await settle();
-  expect(dotOf(1187)?.textContent).toBe("Unread");
+  expect(dotOf(1187)?.textContent).toBe("Failed, unread. M marks it read.");
   expect(dotOf(1186)).toBeNull();
   expect(dotOf(1185), "read").toBeNull();
   expect(rowOf(1187).hasAttribute("data-failed")).toBe(true);
@@ -1589,7 +1589,7 @@ test("the row's Mark as read turns it at once and back with Mark as unread; a pa
   expect(calls.mark).toEqual([[["teamcity:build:1187"], []]]);
   inRow(1187, "Mark as unread")!.click();
   flushSync();
-  expect(dotOf(1187)?.textContent).toBe("Unread");
+  expect(dotOf(1187)?.textContent).toBe("Failed, unread. M marks it read.");
   await settle();
   expect(calls.unmark).toEqual([["teamcity:build:1187"]]);
 });
@@ -1607,7 +1607,7 @@ test("m on a failed run's row marks it read and again unread; on a passed run or
   expect(dotOf(1187)).toBeNull();
   press(link);
   flushSync();
-  expect(dotOf(1187)?.textContent).toBe("Unread");
+  expect(dotOf(1187)?.textContent).toBe("Failed, unread. M marks it read.");
   press(rowOf(1186).querySelector(".tf-run-no a")!);
   const field = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
   press(field);
@@ -1639,14 +1639,20 @@ test("a new failure a read brings is unread, beside a read one", async () => {
   drawn.next = [run(1188, "err", today(0, 30)), ...RUNS];
   drawn.sync?.({ source_id: "teamcity", running: false, last_run: null, next_run_at: null });
   await settle();
-  expect(dotOf(1188)?.textContent).toBe("Unread");
+  expect(dotOf(1188)?.textContent).toBe("Failed, unread. M marks it read.");
   expect(dotOf(1187)).toBeNull();
 });
 
 // -- a run in flight moves on where it is drawn (the TeamCity run fix, 2026-11-25) --
 
 /** Each run row's first cell: its number and the chip its state says. */
-const runLabels = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.textContent?.replace(/\s+/g, " ").trim());
+/** The number cell's words: its number and chip, not its dot's (#2572: a run in flight carries the blue one). */
+const runLabels = () =>
+  [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => {
+    const cell = td.cloneNode(true) as Element;
+    cell.querySelector(".tf-unread")?.remove();
+    return cell.textContent?.replace(/\s+/g, " ").trim();
+  });
 
 test("a run in flight moves on as its refreshes land, with no run of the source", async () => {
   const events = echoEvents(settle);
@@ -1663,6 +1669,8 @@ test("a run in flight moves on as its refreshes land, with no run of the source"
   await events.refreshed("teamcity:build:1188", null);
   expect(drawn.reads).toBe(reads + 1);
   expect(runLabels()[0]).toBe("#1188 Running");
+  expect(dotOf(1188)?.className, "running and not opened: the blue bubble's dot (#2572)").toContain("tf-u-blue");
+  expect(dotOf(1188)?.textContent).toBe("Running, not opened yet.");
   // A refresh of a run this page does not draw, or one that failed, reads nothing.
   await events.refreshed("teamcity:build:9999", null);
   expect(drawn.reads).toBe(reads + 1);

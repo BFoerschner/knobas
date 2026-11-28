@@ -53,11 +53,12 @@
   import type { RecentPorts } from "./TfRecent.svelte";
   import { replaceAddress } from "../opener";
 
-  import type { CommitRepository, JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
+  import type { CommitRepository, JobPipeline, PipelineRow, RailPipeline, RunRow, SourceView } from "../../ipc/entity";
 
   /** The reads and the write this page makes, injectable so a test needs no bridge. */
   export interface BuildsPorts {
-    pipelines: () => Promise<PipelineRow[]>;
+    /** The rail's read (#2571): each pipeline's latest run, its runs in flight and its commits, never the strip. */
+    pipelines: () => Promise<RailPipeline[]>;
     runs: (pipelineId: string) => Promise<RunRow[]>;
     /** Pin or unpin (#849); the bridge's when omitted. */
     setPinned?: (pipelineId: string, pinned: boolean) => Promise<boolean>;
@@ -92,7 +93,7 @@
   import TfScroller from "../TfScroller.svelte";
   import { afterLayout } from "../../shell/after-layout";
   import TfBareHeader from "../TfBareHeader.svelte";
-  import { flushSync, tick, untrack } from "svelte";
+  import { flushSync, onDestroy, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -100,7 +101,7 @@
     getEntity,
     jobPipelines as readJobPipelines,
     pipelineRuns,
-    pipelines as readPipelines,
+    railPipelines as readPipelines,
     setPipelinePinned,
     type PipelineReason,
   } from "../../ipc/entity";
@@ -114,7 +115,7 @@
   import TfRun from "./TfRun.svelte";
   import TfRunGlyph from "./TfRunGlyph.svelte";
   import TfRecent from "./TfRecent.svelte";
-  import { RECENT_HASH, REPO_FOLDER, folderPipelines, runScopeHash, runScopeOf, type RunScope } from "./recent";
+  import { RECENT_HASH, REPO_FOLDER, folderColumn, folderPipelines, runScopeHash, runScopeOf, type RunScope } from "./recent";
   import { parseTfHash } from "../route";
   import { pipelineOfRun } from "./run";
   import { runsRead } from "./runs-read.svelte";
@@ -132,6 +133,7 @@
     foldOpen,
     groupsOf,
     recentNewestFirst,
+    relaid,
     asksAttention,
     unreadRunsOf,
     namesEvery,
@@ -143,6 +145,7 @@
     pinnedOf,
     railGlyph,
     railTime,
+    foldChain,
     reasonsById,
     reasonsLine,
     repoTreeOf,
@@ -192,7 +195,7 @@
    * narrows it to the CI role's fillers and the page drops nothing (#1295,
    * ADR-0029 as amended on 2026-10-19).
    */
-  let all = $state.raw<PipelineRow[] | null>(null);
+  let all = $state.raw<RailPipeline[] | null>(null);
   let failed = $state<string | null>(null);
 
   /**
@@ -242,7 +245,7 @@
   /**
    * A failure marked unread that the list names nowhere (#2543): it was read when the list was read, so no pipeline's
    * `unread` holds it, and the rail's count would miss it. The list is read again once the mark's write answered, so the
-   * read sees it. A mark the list names (*Undo* of a press, a run of the last twelve) moves the count through `read`
+   * read sees it. A mark the list names (*Undo* of a press, a run the rail reads) moves the count through `read`
    * alone.
    */
   let readBefore = untrack(() => read);
@@ -257,8 +260,8 @@
 
   /**
    * A pipeline's row read again when a run it draws moved, or a run queued on it here was read back (the TeamCity run
-   * fix, 2026-11-25): its runs alone, laid into its row, not the whole list (571 KB at Björn's scale). At once on the
-   * first, then at most once in `RAIL_AGAIN_MS`, the last always read.
+   * fix, 2026-11-25): its runs alone, laid into its row as the rail's read lays them (`relaid`), not the whole list. At
+   * once on the first, then at most once in `RAIL_AGAIN_MS`, the last always read.
    */
   const RAIL_AGAIN_MS = 5_000;
   let railReadAt = 0;
@@ -287,7 +290,7 @@
     }
     // A read of the whole list since answers for this row too.
     if (at !== listReads || all === null) return;
-    all = all.map((p) => (p.entity_id === pipelineId ? recentNewestFirst({ ...p, recent: rows.slice(0, Math.max(p.recent.length, 1)) }) : p));
+    all = all.map((p) => (p.entity_id === pipelineId ? relaid(p, rows) : p));
   }
   /** The listed pipeline whose run the refresh that ended moved, or on which it read back a run queued here; `null` for none. */
   function movedPipeline(ended: RefreshEnded): string | null {
@@ -357,7 +360,7 @@
     all === null ? [] : keptPipelines(scope === "job" ? onJob : all, chips),
   );
   /** The pipeline on the right: the one the list picks, or on a run's address the run's own. */
-  function selectedOf(list: PipelineRow[]): PipelineRow | null {
+  function selectedOf(list: RailPipeline[]): RailPipeline | null {
     return list.find((p) => p.entity_id === (head === "builds" ? here : rest)[0]) ?? null;
   }
   const selected = $derived(all === null || runScope !== null ? null : selectedOf(all));
@@ -418,7 +421,7 @@
   $effect(() => {
     void commitsRetry;
     if (!byRepository || all === null) return;
-    const ids = [...new Set(all.flatMap((p) => p.recent.flatMap((run) => (run.commit_id === null ? [] : [run.commit_id]))))].sort();
+    const ids = [...new Set(all.flatMap((p) => p.commits))].sort();
     const asked = JSON.stringify(ids);
     if (asked === commitsAsked) return;
     commitsAsked = asked;
@@ -439,10 +442,12 @@
       },
     );
   });
-  /** The repositories a pipeline's recent runs built, each once. */
+  /** Each listed pipeline's commits (#2571): what its last twelve runs built, as the rail's read names them. */
+  const commitsOf = $derived(new Map((all ?? []).map((p) => [p.entity_id, p.commits])));
+  /** The repositories a pipeline's last twelve runs built, each once. */
   function reposOf(pipeline: PipelineRow): { id: string; title: string }[] {
     const seen = new Map<string, { id: string; title: string }>();
-    for (const run of pipeline.recent) for (const repo of (run.commit_id === null ? null : commitRepos?.get(run.commit_id)) ?? []) seen.set(repo.id, repo);
+    for (const commit of commitsOf.get(pipeline.entity_id) ?? []) for (const repo of commitRepos?.get(commit) ?? []) seen.set(repo.id, repo);
     return [...seen.values()];
   }
   const trees = $derived(byRepository ? (commitRepos === null ? [] : repoTreeOf(kept, reposOf, read)) : treeOf(kept, read));
@@ -471,6 +476,12 @@
     for (const repos of commitRepos?.values() ?? []) for (const repo of repos) if (repo.id === id) return repo.title;
     return "";
   });
+  /** How wide the table's folder column stands (#2572): known with the folder's pipelines, before a run is read. */
+  const folderPaths = $derived.by(() => {
+    if (folderPath === null || folderIds === null || all === null) return folderColumn([], null);
+    const ids = new Set(folderIds);
+    return folderColumn(all.filter((p) => ids.has(p.entity_id)), folderPath);
+  });
   /** The group above the folder, as a pipeline's crumbs name its group. */
   const folderAbove = $derived(folderPath !== null && !repoFolder && folderPath.length > 2 ? folderPath.at(-2)! : null);
   /** Whether `f` is the folder the table lists: drawn as the rail's pill. */
@@ -480,6 +491,7 @@
   /** Select a folder: its table, and the fold opened as the reader's own toggle (the mockup's *Interactions*). */
   function selectFold(f: Fold): void {
     remembered.set(f.key, true);
+    foldPicked = runScopeHash({ kind: "folder", path: f.path });
     location.hash = runScopeHash({ kind: "folder", path: f.path });
   }
 
@@ -689,6 +701,52 @@
     };
   });
 
+  /**
+   * A folder reached by its address, a run row's folders (#2572) or a typed one, is revealed in the rail: its fold and
+   * those above it opened, drawn if the window left it out, and scrolled into view. The rows are held unseen meanwhile,
+   * as `railUnseen` holds a run's step, so nothing drawn moves. A fold pressed in the rail is in view already
+   * (`foldPicked`, spent by the step it names). One reveal each time a folder is reached: what the reader folds while
+   * there stays folded, and reaching it again (from *All pipelines*, or another folder) reveals it again.
+   */
+  let foldPicked: string | null = null;
+  let foldUnseen = $state(false);
+  let foldShown: string | null = null;
+  let foldScroll = () => {};
+  // Before the DOM: the folds open in the flush that draws the rows, so no row is drawn shut and then opened.
+  $effect.pre(() => {
+    const path = folderPath;
+    const hash = path === null ? null : runScopeHash({ kind: "folder", path });
+    if (hash === foldShown) return;
+    if (hash === null || hash === untrack(() => foldPicked)) {
+      foldShown = hash;
+      foldPicked = null;
+      return;
+    }
+    const chain = foldChain(trees, path!);
+    if (chain === null) return; // not in the tree yet (still read), or narrowed out of it: the rail stays where it is
+    foldShown = hash;
+    foldPicked = null;
+    foldUnseen = true;
+    for (const f of chain) remembered.set(f.key, true);
+    foldScroll();
+    let gone = false;
+    let cancel = () => {};
+    foldScroll = () => {
+      gone = true;
+      cancel();
+    };
+    void tick().then(() => {
+      const rail = list;
+      if (gone || rail === undefined) return void (foldUnseen = false);
+      cancel = afterLayout(rail, () => {
+        win.reveal(rows.findIndex((row) => row.kind === "fold" && isScope(row.fold)));
+        flushSync();
+        rail.querySelector('summary[aria-current="true"]')?.scrollIntoView?.({ block: "nearest" });
+        foldUnseen = false;
+      });
+    });
+  });
+  onDestroy(() => foldScroll());
 
   /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
   let railOpen = $state(false);
@@ -859,7 +917,7 @@
           <button type="button" class="tf-linkish" onclick={() => (commitsRetry += 1)}>Try again</button>
         </p>
       {/if}
-      <div class="tf-pl-rows" class:tf-unseen={railUnseen} {@attach win.list}>
+      <div class="tf-pl-rows" class:tf-unseen={railUnseen || foldUnseen} {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
             <h3 {@attach win.row(row.key)}>{row.text}</h3>
@@ -887,6 +945,8 @@
         {sync}
         title={runScope.kind === "all" ? "All pipelines" : folderName}
         pipelines={runScope.kind === "all" ? [] : folderIds}
+        place={folderPath}
+        paths={folderPaths}
         {syncRevision}
         ondrawn={() => (recentDrawn = true)}
       />
