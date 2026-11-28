@@ -9,7 +9,8 @@
  *     The other boards and filters with PAY-231 show after the next sync of Jira.
  *
  * One sentence per source and wording, naming the source and, where the backend knows it, when that source runs next.
- * A source that syncs by hand offers *Sync now* on the toast. The toast goes early once what it names arrives: a refresh
+ * Notes told while the toast stands join it, so a burst of writes is one toast. A source that syncs by hand offers
+ * *Sync now* on the toast. The toast goes early once what it names arrives: a refresh
  * of the item, or the end of a run of its source that began after the toast (any run's end, for one under way). It
  * stands over the page in the toast stack, so nothing on the page moves.
  */
@@ -50,21 +51,34 @@ function subject(line: Unread, note: WriteUnread): string {
   return line.title;
 }
 
+/** A note on the toast, with what is left of it and the sources a run of which began after it came. */
+interface Held {
+  note: WriteUnread;
+  left: Unread[];
+  began: Set<string>;
+}
+
 /**
  * The toast's words for `lines` of `note`: one sentence per source and ending, in the order first found, naming at
  * most one item and counting the rest.
  */
 export function unreadWords(note: WriteUnread, lines: readonly Unread[], now = Date.now()): string {
+  return wordsOf([{ note, left: lines }], now);
+}
+
+/** The words for every note on the toast: their lines grouped as one note's are, across notes. */
+function wordsOf(held: readonly { note: WriteUnread; left: readonly Unread[] }[], now: number): string {
   const groups = new Map<string, { ending: string; subjects: string[]; plural: boolean }>();
-  for (const line of lines) {
-    const ending = when(line, now);
-    const key = `${line.source_id}\u0000${ending}`;
-    const group = groups.get(key) ?? { ending, subjects: [], plural: false };
-    const said = subject(line, note);
-    if (!group.subjects.includes(said)) group.subjects.push(said);
-    if (line.why === "left_out") group.plural = true;
-    groups.set(key, group);
-  }
+  for (const { note, left } of held)
+    for (const line of left) {
+      const ending = when(line, now);
+      const key = `${line.source_id}\u0000${ending}`;
+      const group = groups.get(key) ?? { ending, subjects: [], plural: false };
+      const said = subject(line, note);
+      if (!group.subjects.includes(said)) group.subjects.push(said);
+      if (line.why === "left_out") group.plural = true;
+      groups.set(key, group);
+    }
   return [...groups.values()]
     .map(({ ending, subjects, plural }) => {
       const named = subjects.length <= 2 ? subjects.join(" and ") : `${subjects[0]} and ${subjects.length - 1} more`;
@@ -84,67 +98,101 @@ export interface UnreadHow {
   now?: () => number;
 }
 
-/** Say `note` in a toast, and take each line off it as it arrives; the toast goes with the last. Answers the stop. */
-export function sayUnread(note: WriteUnread, how: UnreadHow = {}): () => void {
+/** What every note's toast is about, so a note told while another's toast stands joins it. */
+const SUBJECT = "unread";
+
+/**
+ * The notes said, in **one toast**: a note told while the toast stands joins it, on a new time, so a burst of landed
+ * writes (a queue drained once a source answers again, *Retry waiting writes*) is one toast and not one each. Each line
+ * goes as it arrives, and the toast goes with the last. `say` adds a note; `stop` says no more.
+ */
+export function unreadNotes(how: UnreadHow = {}): { say: (note: WriteUnread) => void; stop: () => void } {
   const listen = how.listen ?? ((event, handler) => windowListen(event, handler));
   const now = how.now ?? Date.now;
-  let left = [...note.unread];
-  if (left.length === 0) return () => {};
-  const byHand = left.find((line) => line.by_hand);
   const sync = how.sync ?? ((source: string) => void syncNow(source).catch(() => {}));
-  const action = byHand === undefined ? undefined : { label: "Sync now", run: () => sync(byHand.source_id) };
+  let held: Held[] = [];
+  let id: number | null = null;
   let dead = false;
+  // A toast's life is one generation: what its listeners hear, and what they answer, once it has gone is dropped.
+  let generation = 0;
   const offs: (() => void)[] = [];
-  const stop = () => {
-    dead = true;
+  const quiet = () => {
+    generation += 1;
+    held = [];
+    id = null;
     for (const off of offs.splice(0)) off();
   };
-  const id = push({ text: unreadWords(note, left, now()), ms: NOTE_MS, subject: `unread:${note.write_id}`, onend: stop, ...(action ? { action } : {}) });
-  /** The sources a run of which began after the toast: their run's end brings what they hold. */
-  const began = new Set<string>();
-  const arrived = (gone: (line: Unread) => boolean) => {
-    const kept = left.filter((line) => !gone(line));
-    if (kept.length === left.length || dead) return;
-    left = kept;
-    if (!toasts.items.some((toast) => toast.id === id)) return stop();
-    if (left.length === 0) dismiss(id);
-    else amend(id, { text: unreadWords(note, left, now()), ...(action && left.some((line) => line.by_hand) ? { action } : {}) });
+  /** *Sync now* on the first source left that syncs by hand. */
+  const action = () => {
+    const line = held.flatMap((h) => h.left).find((l) => l.by_hand);
+    return line === undefined ? {} : { action: { label: "Sync now", run: () => sync(line.source_id) } };
   };
-  const hear = (event: string, handler: (payload: unknown) => void) =>
-    void listen(event, ({ payload }) => {
-      if (!dead) handler(payload);
-    })
-      .then((off) => (dead ? off() : offs.push(off)))
-      .catch(() => {});
-  hear(EVENTS.itemRefreshed, (payload) => {
-    const ended = payload as RefreshEnded;
-    if (ended.ended !== "failed") arrived((line) => line.entity_id === ended.entity_id);
-  });
-  hear(EVENTS.syncState, (payload) => {
-    const row = payload as SourceSyncStatus;
-    if (row.running) {
-      began.add(row.source_id);
-      return;
+  const arrived = (gone: (line: Unread, h: Held) => boolean) => {
+    if (id === null) return;
+    let changed = false;
+    for (const h of held) {
+      const kept = h.left.filter((line) => !gone(line, h));
+      if (kept.length !== h.left.length) [h.left, changed] = [kept, true];
     }
-    if (row.last_outcome !== "ok") return;
-    arrived((line) => line.source_id === row.source_id && (began.has(row.source_id) || line.why === "run_in_flight"));
-  });
-  return stop;
+    if (!changed) return;
+    held = held.filter((h) => h.left.length > 0);
+    if (held.length === 0) dismiss(id);
+    else amend(id, { text: wordsOf(held, now()), ...action() });
+  };
+  const hear = (event: string, handler: (payload: unknown) => void) => {
+    const life = generation;
+    void listen(event, ({ payload }) => {
+      if (life === generation) handler(payload);
+    })
+      .then((off) => (life === generation ? offs.push(off) : off()))
+      .catch(() => {});
+  };
+  const hearArrivals = () => {
+    hear(EVENTS.itemRefreshed, (payload) => {
+      const ended = payload as RefreshEnded;
+      if (ended.ended !== "failed") arrived((line) => line.entity_id === ended.entity_id);
+    });
+    hear(EVENTS.syncState, (payload) => {
+      const row = payload as SourceSyncStatus;
+      if (row.running) {
+        for (const h of held) h.began.add(row.source_id);
+        return;
+      }
+      if (row.last_outcome !== "ok") return;
+      arrived((line, h) => line.source_id === row.source_id && (h.began.has(row.source_id) || line.why === "run_in_flight"));
+    });
+  };
+  const say = (note: WriteUnread) => {
+    if (dead || note.unread.length === 0) return;
+    if (id === null || !toasts.items.some((toast) => toast.id === id)) {
+      quiet();
+      hearArrivals();
+    }
+    held.push({ note, left: [...note.unread], began: new Set() });
+    id = push({ text: wordsOf(held, now()), ms: NOTE_MS, subject: SUBJECT, onend: quiet, ...action() });
+  };
+  return {
+    say,
+    stop: () => {
+      dead = true;
+    },
+  };
 }
 
-/** Say every `write:unread` for the life of the shell. Answers the teardown. */
+/** Say every `write:unread` for the life of the shell. Answers the teardown; a toast standing then goes on its own. */
 export function startSayingUnread(how: UnreadHow = {}): () => void {
   const listen = how.listen ?? ((event, handler) => windowListen(event, handler));
+  const notes = unreadNotes(how);
   let dead = false;
   let off: (() => void) | undefined;
-  // Each note stops hearing once its toast goes, so only the listener for new notes is the shell's to stop.
   void listen(EVENTS.writeUnread, ({ payload }) => {
-    if (!dead) sayUnread(payload as WriteUnread, how);
+    if (!dead) notes.say(payload as WriteUnread);
   })
     .then((unlisten) => (dead ? unlisten() : (off = unlisten)))
     .catch(() => {});
   return () => {
     dead = true;
+    notes.stop();
     off?.();
   };
 }

@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { EVENTS } from "../ipc";
 import type { Unread, WriteUnread } from "../ipc/sources";
 import { reset, toasts } from "./toasts.svelte";
-import { sayUnread, startSayingUnread, unreadWords, type UnreadListen } from "./unread-toast";
+import { startSayingUnread, unreadNotes, unreadWords, type UnreadHow, type UnreadListen } from "./unread-toast";
 
 const NOW = Date.parse("2026-11-28T10:00:00Z");
 
@@ -36,6 +36,13 @@ const texts = () => toasts.items.map((toast) => toast.text);
 const run = (source_id: string, running: boolean) => ({ source_id, running, last_outcome: running ? null : "ok" });
 
 afterEach(() => reset());
+
+/** Say `told` as the shell does, one note after another. */
+function say(how: UnreadHow, ...told: WriteUnread[]) {
+  const notes = unreadNotes(how);
+  for (const one of told) notes.say(one);
+  return notes.stop;
+}
 
 test("each case says what shows when, naming the source and, where known, when it runs next", () => {
   const say = (unread: Unread[], over: Partial<WriteUnread> = {}) => unreadWords(note(unread, over), unread, NOW);
@@ -73,7 +80,7 @@ test("one sentence per source and wording, naming one item and counting the rest
 
 test("the toast goes once everything it names has arrived: a refresh of the item, or a run of its source that began after it", async () => {
   const b = bridge();
-  const stop = sayUnread(note([line({}), line({ entity_id: "tc:b-9", title: "Payout build", source_id: "tc", source_name: "TeamCity" })]), { listen: b.listen, now: () => NOW });
+  const stop = say({ listen: b.listen, now: () => NOW }, note([line({}), line({ entity_id: "tc:b-9", title: "Payout build", source_id: "tc", source_name: "TeamCity" })]));
   await settle();
   expect(texts()).toEqual(["PAY-1 shows after the next sync of Jira. Payout build shows after the next sync of TeamCity."]);
   // A failed refresh brings nothing; a run that began before the toast does not count.
@@ -91,7 +98,7 @@ test("the toast goes once everything it names has arrived: a refresh of the item
 
 test("held behind a run under way, it goes when that run ends", async () => {
   const b = bridge();
-  sayUnread(note([line({ why: "run_in_flight" })]), { listen: b.listen, now: () => NOW });
+  say({ listen: b.listen, now: () => NOW }, note([line({ why: "run_in_flight" })]));
   await settle();
   b.send(EVENTS.syncState, run("jira", false));
   expect(texts()).toEqual([]);
@@ -100,7 +107,7 @@ test("held behind a run under way, it goes when that run ends", async () => {
 test("a source that syncs by hand offers Sync now, which runs it", async () => {
   const b = bridge();
   const sync = vi.fn();
-  sayUnread(note([line({ entity_id: null, source_id: "gitea", source_name: "Gitea", by_hand: true, why: "by_hand" })]), { listen: b.listen, sync, now: () => NOW });
+  say({ listen: b.listen, sync, now: () => NOW }, note([line({ entity_id: null, source_id: "gitea", source_name: "Gitea", by_hand: true, why: "by_hand" })]));
   await settle();
   expect(toasts.items[0]!.action?.label).toBe("Sync now");
   toasts.items[0]!.action!.run();
@@ -116,4 +123,33 @@ test("the shell says each write:unread the backend tells, and nothing once torn 
   stop();
   b.send(EVENTS.writeUnread, note([line({})], { write_id: 8 }));
   expect(texts()).toHaveLength(1);
+});
+
+test("a burst of landed writes is one toast, each line going as it arrives", async () => {
+  const b = bridge();
+  const gitea = { entity_id: null, source_id: "gitea", source_name: "Gitea", by_hand: true, why: "by_hand" as const };
+  say(
+    { listen: b.listen, now: () => NOW },
+    note([line({ ...gitea, title: "Retry SEPA payouts" })], { write_id: 7, title: "Retry SEPA payouts" }),
+    note([line({ ...gitea, title: "Fix rounding" })], { write_id: 8, entity_id: "gitea:tide/pay#8", title: "Fix rounding" }),
+    note([line({ ...gitea, title: "Pin the toolchain" })], { write_id: 9, entity_id: "gitea:tide/pay#9", title: "Pin the toolchain" }),
+    note([line({ why: "run_in_flight" })], { write_id: 10, entity_id: "jira:PAY-1", title: "PAY-1" }),
+  );
+  await settle();
+  expect(texts()).toEqual([
+    "What else the write to Retry SEPA payouts moved and 2 more show after Sync now on Gitea. PAY-1 shows once the sync of Jira under way ends.",
+  ]);
+  expect(toasts.items[0]!.action?.label).toBe("Sync now");
+  // One listener a kind for the toast, not one a note.
+  expect(b.hearing(EVENTS.itemRefreshed)).toBe(1);
+  b.send(EVENTS.syncState, run("jira", false));
+  expect(texts()).toEqual(["What else the write to Retry SEPA payouts moved and 2 more show after Sync now on Gitea."]);
+  b.send(EVENTS.syncState, run("gitea", true));
+  b.send(EVENTS.syncState, run("gitea", false));
+  expect(texts()).toEqual([]);
+  expect(b.hearing(EVENTS.itemRefreshed)).toBe(0);
+  // Once it has gone, the next note is a toast of its own.
+  say({ listen: b.listen, now: () => NOW }, note([line({})], { write_id: 11 }));
+  await settle();
+  expect(texts()).toEqual(["PAY-1 shows after the next sync of Jira."]);
 });
