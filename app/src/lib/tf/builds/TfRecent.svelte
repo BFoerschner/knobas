@@ -165,7 +165,9 @@
   );
   /** Waiting for the job's branches, or a folder's pipelines: nothing is read until they are known. */
   const waiting = $derived((scope === "job" && jobBranches === null) || scoped === null);
-  const basis = $derived(JSON.stringify(asked));
+  // A folder still read has no basis a read or a kept list matches: with `scoped ?? []` it was *All pipelines*', so the
+  // folder's header was drawn over the rows kept from there (the #2566 whole-branch review).
+  const basis = $derived(scoped === null ? "waiting" : JSON.stringify(asked));
 
   // -- the reads ---------------------------------------------------------------
   const back = kept;
@@ -544,6 +546,8 @@
   $effect(() => {
     if (restored || runsBox === null || placed.rows.length === 0) return;
     restored = true;
+    // Only at the scope and filter it was kept at: elsewhere its scroll and its run mean nothing.
+    if (back?.basis !== basis) return;
     const at = back?.scroll ?? 0;
     const was = back?.opened ?? null;
     const scroller = scrollerOf();

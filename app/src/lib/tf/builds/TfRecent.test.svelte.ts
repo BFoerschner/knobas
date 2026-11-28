@@ -369,6 +369,52 @@ test("back from a run, it draws what it held at once and focuses the run that wa
   expect(document.activeElement).toBe(rows()[1]!.querySelector(".tf-run-pno"));
 });
 
+/** Builds' scroller around the rows, the target the page mounts in; a set scroll is recorded, since jsdom lays nothing out. */
+function scroller(): { sets: number[]; scrollTo: (to: number) => void } {
+  const box = document.createElement("div");
+  box.className = "tf-scroller";
+  const sets: number[] = [];
+  let top = 0;
+  Object.defineProperty(box, "scrollTop", { get: () => top, set: (v: number) => (sets.push(v), (top = v)) });
+  target.appendChild(box);
+  target = box;
+  return {
+    sets,
+    scrollTo: (to) => {
+      top = to;
+      box.dispatchEvent(new Event("scroll"));
+    },
+  };
+}
+
+/** Open the second row's run from *All pipelines* scrolled to 480, and leave: what *Recent* keeps. */
+async function leaveFromAll(box: ReturnType<typeof scroller>) {
+  draw();
+  await settle();
+  box.scrollTo(480);
+  rows()[1]!.querySelector<HTMLElement>(".tf-run-nm")!.click();
+  unmount(page!);
+  page = null;
+  box.sets.length = 0;
+}
+
+test("back at another scope, it draws none of what it held and restores neither the scroll nor the focus (#2566 review)", async () => {
+  const outer = target;
+  const box = scroller();
+  await leaveFromAll(box);
+  // A folder whose pipelines are still read: All pipelines' rows are not its rows.
+  const drawn = draw({}, { title: "Ops", pipelines: null });
+  flushSync();
+  expect(numbers(), "no rows of another scope under the folder's header").toEqual([]);
+  drawn.next = { ...PAGE, runs: [at(DEPLOY, run(12, "ok", today(0, 40)))], pipelines: [DEPLOY] };
+  drawn.scope("Ops", [DEPLOY.entity_id]);
+  await settle();
+  expect(numbers()).toEqual(["#12"]);
+  expect(box.sets, "All pipelines' scroll is not laid on the folder").toEqual([]);
+  expect(document.activeElement?.closest("tr[data-run]") ?? null).toBe(null);
+  target = outer;
+});
+
 test("Up and Down step the runs by their numbers", async () => {
   draw();
   await settle();
