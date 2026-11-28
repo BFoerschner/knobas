@@ -4371,19 +4371,6 @@ test("the tracker sees what is left behind, and stops seeing it when it is clean
   expect(globalThis.setTimeout).toBe(before);
 });
 
-/**
- * A removal with a **different function reference** balances nothing.
- *
- * This is the hole the first version of the tracker had, and it is the one
- * that matters most: the DOM matches a removal on identity, so an inline
- * arrow in both the add and the remove — the ordinary form of the mistake —
- * leaves the listener attached while a *counting* tracker reports clean. That
- * is finding 1's exact bug walking straight through the net built to catch it.
- *
- * The assertion is tied to the ground truth rather than to the bookkeeping:
- * after the mismatched removal the listener is **still called**, and the
- * tracker has to agree with that, not with the count of calls made.
- */
 test("a frame asked for and never drawn is left behind, one called off is not, and jsdom's own frame clock is not counted (#2569b)", async () => {
   const track = trackResidue();
   try {
@@ -4401,6 +4388,19 @@ test("a frame asked for and never drawn is left behind, one called off is not, a
   }
 });
 
+/**
+ * A removal with a **different function reference** balances nothing.
+ *
+ * This is the hole the first version of the tracker had, and it is the one
+ * that matters most: the DOM matches a removal on identity, so an inline
+ * arrow in both the add and the remove — the ordinary form of the mistake —
+ * leaves the listener attached while a *counting* tracker reports clean. That
+ * is finding 1's exact bug walking straight through the net built to catch it.
+ *
+ * The assertion is tied to the ground truth rather than to the bookkeeping:
+ * after the mismatched removal the listener is **still called**, and the
+ * tracker has to agree with that, not with the count of calls made.
+ */
 test("a removal with a different function reference does not balance the add", async () => {
   const track = trackResidue();
   try {

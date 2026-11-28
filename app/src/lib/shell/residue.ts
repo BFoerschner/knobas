@@ -171,6 +171,8 @@ export function trackResidue(): ResidueTracker {
     // ceremony around a wrapper that only counts.
   }) as unknown as typeof globalThis.setTimeout;
 
+  // True while jsdom's `requestAnimationFrame` runs: the interval it starts then is its frame clock, not a leak.
+  let framing = false;
   globalThis.setInterval = ((handler: TimerHandler, ms?: number, ...args: unknown[]) => {
     const id = realSetInterval(handler, ms, ...args);
     if (!framing) timers.set(id, "setInterval");
@@ -181,7 +183,6 @@ export function trackResidue(): ResidueTracker {
   // its own that it starts at the first request and never stops, which is the environment's and not counted (#2569b).
   const realRequestFrame = globalThis.requestAnimationFrame;
   const realCancelFrame = globalThis.cancelAnimationFrame;
-  let framing = false;
   if (typeof realRequestFrame === "function") {
     globalThis.requestAnimationFrame = ((run: FrameRequestCallback) => {
       framing = true;
