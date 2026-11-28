@@ -601,7 +601,10 @@ const HELD: &str = "select md5(row(i.kind, i.title, i.body_text, i.author, i.ite
       where i.entity_id = $1";
 
 async fn held(pool: &sqlx::PgPool, entity: &str) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar(HELD).bind(entity).fetch_optional(pool).await
+    sqlx::query_scalar(HELD)
+        .bind(entity)
+        .fetch_optional(pool)
+        .await
 }
 
 /// One item a landed write made or touched, or one linked to it, read by

@@ -204,7 +204,12 @@ impl Source for Fake {
     }
 
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
-        self.shared.seen.read.lock().unwrap().push(entity.to_owned());
+        self.shared
+            .seen
+            .read
+            .lock()
+            .unwrap()
+            .push(entity.to_owned());
         let world = self.shared.world.lock().unwrap();
         let found = if entity == PR {
             Some(world.pr())
@@ -521,7 +526,9 @@ async fn step(clock: &HandClock, shared: &Shared, at: u64, entity: &str, reads: 
 }
 
 fn ticket_status(payload: &Value) -> &str {
-    payload["fields"]["status"]["name"].as_str().unwrap_or_default()
+    payload["fields"]["status"]["name"]
+        .as_str()
+        .unwrap_or_default()
 }
 
 /// **A bot's comment on a pull request shows within the schedule.** A
@@ -567,9 +574,20 @@ async fn a_bot_comment_after_a_knobas_comment_shows_within_the_schedule() {
 
     // Its linked ticket, which nothing moves, is read on to the end.
     clock.0.send_replace(Duration::from_secs(300));
-    eventually("the schedule ends", || async { looking_at(&state, PR).is_none() }).await;
-    assert_eq!(reads_of(&shared, PR), before + 2, "a moved item is not read again");
-    assert_eq!(shared.seen.forge_runs.load(Ordering::SeqCst), 2, "the seeding and the write's run");
+    eventually("the schedule ends", || async {
+        looking_at(&state, PR).is_none()
+    })
+    .await;
+    assert_eq!(
+        reads_of(&shared, PR),
+        before + 2,
+        "a moved item is not read again"
+    );
+    assert_eq!(
+        shared.seen.forge_runs.load(Ordering::SeqCst),
+        2,
+        "the seeding and the write's run"
+    );
 }
 
 /// **A Jira ticket that automation transitions 20 s after a knobas comment
@@ -588,7 +606,14 @@ async fn a_ticket_automation_transitions_after_a_comment_shows_within_the_schedu
     let before = reads_of(&shared, PAY_1);
     step(&clock, &shared, 5, PAY_1, before + 1).await;
     step(&clock, &shared, 15, PAY_1, before + 2).await;
-    shared.world.lock().unwrap().tickets.get_mut(PAY_1).unwrap().0 = "Done".to_owned();
+    shared
+        .world
+        .lock()
+        .unwrap()
+        .tickets
+        .get_mut(PAY_1)
+        .unwrap()
+        .0 = "Done".to_owned();
     step(&clock, &shared, 30, PAY_1, before + 3).await;
     eventually("the new status shows", || async {
         mirrored(&state, PAY_1)
@@ -596,7 +621,11 @@ async fn a_ticket_automation_transitions_after_a_comment_shows_within_the_schedu
             .is_some_and(|payload| ticket_status(&payload) == "Done")
     })
     .await;
-    assert_eq!(shared.seen.jira_runs.load(Ordering::SeqCst), 2, "the seeding and the write's run");
+    assert_eq!(
+        shared.seen.jira_runs.load(Ordering::SeqCst),
+        2,
+        "the seeding and the write's run"
+    );
 }
 
 /// **A merged pull request's linked ticket that moves 30 s later shows
@@ -619,13 +648,23 @@ async fn a_merged_pull_requests_linked_ticket_that_moves_later_shows_within_the_
         looking_at(&state, REPO).is_some_and(|each| each.code && each.items)
     })
     .await;
-    assert!(looking_at(&state, PR).is_none(), "one schedule for the merge");
+    assert!(
+        looking_at(&state, PR).is_none(),
+        "one schedule for the merge"
+    );
     assert_eq!(mirrored(&state, PR).await.unwrap()["state"], "merged");
     let before = reads_of(&shared, PAY_1);
     step(&clock, &shared, 5, PAY_1, before + 1).await;
     step(&clock, &shared, 15, PAY_1, before + 2).await;
     step(&clock, &shared, 30, PAY_1, before + 3).await;
-    shared.world.lock().unwrap().tickets.get_mut(PAY_1).unwrap().0 = "Done".to_owned();
+    shared
+        .world
+        .lock()
+        .unwrap()
+        .tickets
+        .get_mut(PAY_1)
+        .unwrap()
+        .0 = "Done".to_owned();
     step(&clock, &shared, 60, PAY_1, before + 4).await;
     eventually("the linked ticket's new status shows", || async {
         mirrored(&state, PAY_1)
@@ -633,14 +672,22 @@ async fn a_merged_pull_requests_linked_ticket_that_moves_later_shows_within_the_
             .is_some_and(|payload| ticket_status(&payload) == "Done")
     })
     .await;
-    assert_eq!(shared.seen.jira_runs.load(Ordering::SeqCst), 1, "no Jira run since the seeding");
+    assert_eq!(
+        shared.seen.jira_runs.load(Ordering::SeqCst),
+        1,
+        "no Jira run since the seeding"
+    );
     assert!(
         mirrored(&state, PAY_2)
             .await
             .is_some_and(|payload| ticket_status(&payload) == "To Do"),
         "an unlinked ticket is not read"
     );
-    assert_eq!(reads_of(&shared, PAY_2), 0, "an unlinked ticket is not read");
+    assert_eq!(
+        reads_of(&shared, PAY_2),
+        0,
+        "an unlinked ticket is not read"
+    );
 }
 
 /// **Bounded and shared.** An item nothing moves is read five times after
@@ -681,10 +728,17 @@ async fn an_item_is_read_five_times_at_most_and_a_second_write_restarts_its_sche
     for (at, reads) in [(25, 1), (35, 2), (50, 3), (80, 4), (140, 5)] {
         step(&clock, &shared, at, PAY_2, restarted + reads).await;
     }
-    eventually("the schedule ends", || async { looking_at(&state, PAY_2).is_none() }).await;
+    eventually("the schedule ends", || async {
+        looking_at(&state, PAY_2).is_none()
+    })
+    .await;
     clock.0.send_replace(Duration::from_secs(600));
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(reads_of(&shared, PAY_2), restarted + 5, "five reads at most");
+    assert_eq!(
+        reads_of(&shared, PAY_2),
+        restarted + 5,
+        "five reads at most"
+    );
 }
 
 /// **A kind that can't be read by id is not scheduled**: the *say so* rule
