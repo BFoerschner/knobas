@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 
 import type { BubbleCounts, RunCounts } from "../ipc/entity";
 import { createBadges, downIn, type BadgePorts } from "./badges.svelte";
-import { noCounts, RunsRead } from "./builds/runs-read.svelte";
+import { noCounts } from "./builds/builds";
+import { RunsRead } from "./builds/runs-read.svelte";
 
 test("a paused monitor is not down", () => {
   expect(

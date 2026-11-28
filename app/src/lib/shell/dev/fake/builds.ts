@@ -29,7 +29,6 @@ import type {
   PipelineSettings,
   RecentCursor,
   RecentFilter,
-  BubbleCounts,
   RunCounts,
   RunMarks,
   SeenMove,
@@ -48,7 +47,7 @@ import { fakeRoleScope } from "./corpus";
 import { payoutBranchPulls } from "./views/repos";
 import { keyOf } from "../../../time/format";
 import { recentOrder } from "../../../tf/builds/recent";
-import { railOf, runBubble } from "../../../tf/builds/builds";
+import { noCounts, plusCounts, railOf, runBubble } from "../../../tf/builds/builds";
 import { dayKey } from "../../../time/day";
 
 /** The role `pipelines` is read for, as `knobas_source::role::CI` spells it. */
@@ -143,11 +142,6 @@ const seen: { at: string; pipelines: Map<string, string>; visit: string | null }
   visit: null,
 };
 
-/** The five counts, all zero. */
-function noCounts(): BubbleCounts {
-  return { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
-}
-
 /**
  * `run_counts` over `pipelines`' runs (the backend's `RUN_COUNTS`), or the five numbers `fake-counts=b,g,y,r,x` names
  * for the whole, on one pipeline: what a shot of each colour draws.
@@ -181,7 +175,7 @@ function fakeRunCounts(pipelines: readonly { id: string; runs: readonly RunRow[]
     }
     if (Object.values(counts).some((n) => n > 0)) {
       answer.pipelines.push({ pipeline: id, counts });
-      for (const key of Object.keys(counts) as (keyof BubbleCounts)[]) answer.total[key] += counts[key];
+      answer.total = plusCounts(answer.total, counts);
     }
   }
   return answer;

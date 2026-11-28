@@ -415,6 +415,16 @@ export function foldHolds(f: Fold, id: string | null): boolean {
   return f.pipelines.some((p) => p.entity_id === id) || f.folds.some((kid) => foldHolds(kid, id));
 }
 
+/** The five counts, all zero. */
+export function noCounts(): BubbleCounts {
+  return { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+}
+
+/** `a` and `b` summed, bubble by bubble. */
+export function plusCounts(a: BubbleCounts, b: BubbleCounts): BubbleCounts {
+  return { blue: a.blue + b.blue, green: a.green + b.green, yellow: a.yellow + b.yellow, red: a.red + b.red, grey: a.grey + b.grey };
+}
+
 /**
  * Each fold's bubbles by its key (#2573): the sums of `countsOf` over every pipeline beneath it, at any depth, each fold
  * walked once. What a folder's columns in the rail draw.
@@ -422,12 +432,9 @@ export function foldHolds(f: Fold, id: string | null): boolean {
 export function foldSums(trees: readonly SourceTree[], countsOf: (id: string) => BubbleCounts): Map<string, BubbleCounts> {
   const sums = new Map<string, BubbleCounts>();
   const walk = (f: Fold): BubbleCounts => {
-    const sum = { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
-    const add = (c: BubbleCounts) => {
-      for (const bubble of RAIL_COLUMNS) sum[bubble] += c[bubble];
-    };
-    for (const p of f.pipelines) add(countsOf(p.entity_id));
-    for (const kid of f.folds) add(walk(kid));
+    let sum = noCounts();
+    for (const p of f.pipelines) sum = plusCounts(sum, countsOf(p.entity_id));
+    for (const kid of f.folds) sum = plusCounts(sum, walk(kid));
     sums.set(f.key, sum);
     return sum;
   };

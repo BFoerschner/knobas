@@ -46,7 +46,7 @@ import {
 import { coalesce } from "../../shell/coalesce";
 import { push, undoable } from "../../shell/toasts.svelte";
 import { counted } from "../counted";
-import { markableRun, runBubble, unreadRun, type Bubble } from "./builds";
+import { markableRun, noCounts, plusCounts, runBubble, unreadRun, type Bubble } from "./builds";
 
 /** What the marks are read and written by. */
 export interface RunsReadPorts {
@@ -78,16 +78,6 @@ const REAL: RunsReadPorts = {
   putBackSeen: async (seen) => putBackSeen(seen),
   inFront: async (front) => buildsInFront(front),
 };
-
-/** The five counts, all zero. */
-export function noCounts(): BubbleCounts {
-  return { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
-}
-
-/** `a` and `b` summed. */
-function plus(a: BubbleCounts, b: BubbleCounts): BubbleCounts {
-  return { blue: a.blue + b.blue, green: a.green + b.green, yellow: a.yellow + b.yellow, red: a.red + b.red, grey: a.grey + b.grey };
-}
 
 /** The runs green, yellow and grey count, of `counts`: what moving an instant clears. */
 function seenCount(counts: BubbleCounts): number {
@@ -206,7 +196,7 @@ export class RunsRead {
 
   /** One pipeline's unread runs by bubble, or a folder's (its pipelines summed): zero where none. */
   countsOf(...pipelines: readonly string[]): BubbleCounts {
-    return pipelines.reduce((sum, id) => plus(sum, this.#byPipeline.get(id) ?? noCounts()), noCounts());
+    return pipelines.reduce((sum, id) => plusCounts(sum, this.#byPipeline.get(id) ?? noCounts()), noCounts());
   }
 
   /**
@@ -481,7 +471,7 @@ export class RunsRead {
     }
     const gone = new Set(pipelines);
     const kept = counts.pipelines.filter((p) => !gone.has(p.pipeline));
-    this.#counts = { ...counts, pipelines: kept, total: kept.reduce((sum, p) => plus(sum, p.counts), noCounts()) };
+    this.#counts = { ...counts, pipelines: kept, total: kept.reduce((sum, p) => plusCounts(sum, p.counts), noCounts()) };
   }
 
   /** Back to nothing read and the real IPC, for a test. */

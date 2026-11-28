@@ -3,7 +3,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type { BubbleCounts, MarkScope, RunCounts, RunMarks, RunRow, SeenMove } from "../../ipc/entity";
 import { reset as resetToasts, toasts } from "../../shell/toasts.svelte";
-import { noCounts, RunsRead, type RunsReadPorts } from "./runs-read.svelte";
+import { noCounts } from "./builds";
+import { RunsRead, type RunsReadPorts } from "./runs-read.svelte";
 
 /** `run_counts`' answer over `by`, each pipeline's counts. */
 function countsOf(by: Record<string, Partial<BubbleCounts>>, extra: Partial<RunCounts> = {}): RunCounts {
