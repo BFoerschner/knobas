@@ -261,7 +261,7 @@ just open-cold --backend <release headless_ipc> --home <another copy> --after 2.
 ```
 
 The local products sync in moments (TeamCity about 0.1 s, the Gitea owner about 2 s when due), far less than a
-person's sources at Björn's scale; the measurement of 2026-11-28 (#2612) is in `docs/decisions/` under that date.
+person's sources at Björn's scale. The first measurement with it (2026-11-28) is on #2612.
 
 `--timings` makes the windowless backend append one line a command (its name, its arguments, when it arrived and
 left, the backend's time on it, the answer's bytes), which splits an open into what the backend spent and what the
