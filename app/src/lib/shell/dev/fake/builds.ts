@@ -442,6 +442,40 @@ export function endFakeRun(id: string, now: Date = new Date()): boolean {
   return false;
 }
 
+/**
+ * `?fake-live-changes` (#2574): the mockup's four live changes (`mockups/builds-recent/`, *Next change*), one per call,
+ * on the fixture's own runs: Terraform_Plan's queued run starts, EtaModel_Train #52 passes, Payout_Build #1188 fails,
+ * and a run starts on Ledger_Build. Each is followed by a sync's end (`fake-tauri.ts`), so a page reads them as it would
+ * a source's. Answers whether there was a change left to make.
+ */
+export function playLiveChange(step: number, now: Date = new Date()): boolean {
+  history(now);
+  const runs = (config: string) => built!.runs.get(config) ?? [];
+  const latest = (config: string) => runs(config)[0];
+  const ago = (seconds: number) => new Date(now.getTime() - seconds * 1000).toISOString();
+  const end = (run: RunRow | undefined, st: "success" | "failed") => {
+    if (run === undefined || run.started === null) return;
+    run.state = STATE[st];
+    run.finished = now.toISOString();
+    run.updated_at = run.finished;
+    run.duration_seconds = Math.max(1, Math.round((now.getTime() - Date.parse(run.started)) / 1000));
+    run.current_step = null;
+  };
+  if (step === 0) {
+    const run = latest("Terraform_Plan");
+    if (run !== undefined && run.started === null) {
+      Object.assign(run, { number: String(LATEST["Terraform_Plan"]!.no), state: STATE.running, started: ago(40), updated_at: ago(40) });
+      run.web_url = `https://ci.tidewater.example/buildConfiguration/Terraform_Plan/${run.number}`;
+    }
+  } else if (step === 1) end(latest("EtaModel_Train"), "success");
+  else if (step === 2) end(latest("Payout_Build"), "failed");
+  else if (step === 3) {
+    const no = Math.max(0, ...runs("Ledger_Build").map((run) => Number(run.number ?? 0))) + 1;
+    runs("Ledger_Build").unshift({ ...runRow("Ledger_Build", no, "running", "main", new Date(now.getTime() - 20_000), null), updated_at: ago(20) });
+  } else return false;
+  return true;
+}
+
 onFakeReset(() => {
   built = null;
   longPaths = false;

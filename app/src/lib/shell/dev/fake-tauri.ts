@@ -58,7 +58,7 @@ import type { EntityDetail, EntityFilter, EntityPage, Reached } from "../../ipc/
 import { lateDiagrams } from "../../render/port";
 import { expandScale, seedScale } from "./fake-scale";
 import { CORPUS } from "./fake/corpus";
-import { addFakeRuns } from "./fake/builds";
+import { addFakeRuns, playLiveChange } from "./fake/builds";
 import { addInboxItem } from "./fake/inbox";
 import { downFakeMonitor } from "./fake/monitors";
 import { endRunsChanged } from "./fake/sources";
@@ -297,6 +297,18 @@ export function installIfRequested(): void {
   // `?fake-diagram-late=<ms>` (#2510): every diagram answers that much later, so its drawing lands after the text's hold.
   const diagramLate = Number(params.get("fake-diagram-late") ?? 0);
   if (Number.isFinite(diagramLate) && diagramLate > 0) lateDiagrams(diagramLate);
+  // `?fake-live-changes[=<ms>]` (#2574): the mockup's four live changes, the first 2.5 s after load and one each <ms>
+  // (1500) after it, each ending a sync that changed something, for a still of the page after them.
+  if (params.has("fake-live-changes")) {
+    const every = Number(params.get("fake-live-changes")) || 1_500;
+    const next = (step: number) =>
+      setTimeout(() => {
+        if (!playLiveChange(step)) return;
+        endRunsChanged();
+        next(step + 1);
+      }, step === 0 ? 2_500 : every);
+    next(0);
+  }
   if (params.has("fake-hooks")) Object.assign(window, { __fake: { corpus: CORPUS, endRuns: endRunsChanged, inboxNew: () => addInboxItem(), runNew: () => addFakeRuns(), monitorDown: () => downFakeMonitor(), emit: (event: string, payload: unknown) => bridge.emit(event, payload) } });
 }
 
