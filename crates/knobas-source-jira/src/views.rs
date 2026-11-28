@@ -1571,7 +1571,9 @@ mod tests {
             .expect("the walk succeeds")
     }
 
-    fn walked(answer: knobas_source::UnderAnswer) -> (Vec<knobas_source::SyncItem>, Option<String>) {
+    fn walked(
+        answer: knobas_source::UnderAnswer,
+    ) -> (Vec<knobas_source::SyncItem>, Option<String>) {
         match answer {
             knobas_source::UnderAnswer::Walked { items, cursor } => (items, cursor),
             knobas_source::UnderAnswer::NotOffered => panic!("the view was not walked"),
@@ -1625,7 +1627,10 @@ mod tests {
 
         api.clock_minutes = 120; // an hour on: the boards are read again
         let (again, _) = sync(&api, Some(moved.encode())).await;
-        assert!(again.is_empty(), "the run finds the walked board delivered: {again:?}");
+        assert!(
+            again.is_empty(),
+            "the run finds the walked board delivered: {again:?}"
+        );
     }
 
     /// From the position a run just left, a board nothing changed on walks
@@ -1665,7 +1670,10 @@ mod tests {
         api.favourites[0].3 = vec!["PAY-240", "WEB-9", "PAY-231", "PAY-250"];
         let (items, cursor) = walked(walk_of(&api, &cfg(), "filter-10300", Some(&first)).await);
         assert_eq!(items.len(), 1, "{items:?}");
-        same_item(&items[0], &as_a_run_emits(&api, &cfg(), "filter-10300").await);
+        same_item(
+            &items[0],
+            &as_a_run_emits(&api, &cfg(), "filter-10300").await,
+        );
         assert!(cursor.is_some());
     }
 

@@ -5680,7 +5680,9 @@ async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_que
     let moved = moved.expect("the board's position moves");
     let (now, _) = full(&*source).await;
     assert_eq!(
-        now.iter().find(|i| i.entity.key == probe).map(|i| &i.payload),
+        now.iter()
+            .find(|i| i.entity.key == probe)
+            .map(|i| &i.payload),
         items.first().map(|i| &i.payload),
         "the walk emits what a run emits now"
     );
@@ -5696,9 +5698,7 @@ async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_que
         format!("rest/agile/1.0/board/{}", board["id"]),
         format!("rest/api/2/filter/{filter_id}"),
     ] {
-        seeded
-            .request(reqwest::Method::DELETE, &path, None)
-            .await;
+        seeded.request(reqwest::Method::DELETE, &path, None).await;
     }
     println!("SEEDED walked board: {probe} dropped {key} once it was Done, without a run");
 }

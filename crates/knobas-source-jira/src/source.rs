@@ -313,7 +313,15 @@ impl Source for JiraSource {
         cursor: Option<&str>,
     ) -> Result<knobas_source::UnderAnswer, SourceError> {
         let key = self.owned_key(entity)?;
-        crate::views::walk(&self.http, &self.cfg, &self.id, &self.base_url, &key, cursor).await
+        crate::views::walk(
+            &self.http,
+            &self.cfg,
+            &self.id,
+            &self.base_url,
+            &key,
+            cursor,
+        )
+        .await
     }
 
     /// Perform one of the three writes M2 ratified for Jira, or refuse.

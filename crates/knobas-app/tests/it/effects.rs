@@ -200,7 +200,12 @@ impl World {
     fn tickets(&self) -> Vec<(&'static str, &'static str, String, Option<String>)> {
         let mara = Some("mara".to_owned());
         let mut tickets = vec![
-            (TICKET, "PAY", self.ticket_status.clone(), self.assignee.clone()),
+            (
+                TICKET,
+                "PAY",
+                self.ticket_status.clone(),
+                self.assignee.clone(),
+            ),
             (SIBLING, "PAY", "To Do".to_owned(), mara.clone()),
             (OTHER, "OPS", "To Do".to_owned(), mara),
         ];
@@ -216,7 +221,11 @@ impl World {
         Some(item(
             entity,
             "ticket",
-            if entity == TICKET { "Retry SEPA payouts" } else { entity },
+            if entity == TICKET {
+                "Retry SEPA payouts"
+            } else {
+                entity
+            },
             json!({ "fields": {
                 "status": { "name": status },
                 "project": { "key": project },
@@ -330,9 +339,9 @@ impl Source for Fake {
         Ok(match entity {
             PULL => RefreshAnswer::Item(world.pull()),
             ISSUE => RefreshAnswer::Item(world.issue()),
-            TICKET | SIBLING | FILED | OTHER => {
-                world.ticket_of(entity).map_or(RefreshAnswer::Gone, RefreshAnswer::Item)
-            }
+            TICKET | SIBLING | FILED | OTHER => world
+                .ticket_of(entity)
+                .map_or(RefreshAnswer::Gone, RefreshAnswer::Item),
             _ => RefreshAnswer::NotOffered,
         })
     }
