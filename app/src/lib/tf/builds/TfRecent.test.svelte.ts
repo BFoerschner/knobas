@@ -671,3 +671,40 @@ test("m takes a running run out of the blue and puts it back, as the row's mark 
   expect(rows()[1]!.querySelector(".tf-rowacts .tf-iconbtn")).toBeNull();
   expect([...rows()[1]!.querySelectorAll(".tf-rowacts .tf-btn")].map((one) => one.textContent?.trim())).toEqual(["Log", "Run again…"]);
 });
+
+test("a run that ends while the table is in front: a pass turns its blue off and adds no green, a failure turns it red (#2574)", async () => {
+  runsRead.ports = { ...runsRead.ports, read: async () => ({ read: [], while_running: [] }) };
+  await runsRead.load();
+  const live = (no: number) => run(no, "ok", today(0, 50 + no - 16), { state: { text: "RUNNING", tone: null }, finished: null, duration_seconds: null });
+  const drawn = draw({}, { first: { runs: [at(DEPLOY, live(17)), at(LINT, live(16)), ...PAGE.runs], pipelines: [LINT, DEPLOY], next: null } });
+  await settle();
+  const dot = (at: number) => rows()[at]!.querySelector(".tf-unread")?.className ?? null;
+  expect([dot(0), dot(1)]).toEqual(["tf-unread tf-u-blue", "tf-unread tf-u-blue"]);
+  const ended = (no: number, tone: "ok" | "err") => ({ ...live(no), finished: today(1, 0), duration_seconds: 300, state: { text: tone === "ok" ? "SUCCESS" : "FAILURE", tone } });
+  drawn.next = { runs: [at(DEPLOY, ended(17, "ok")), at(LINT, ended(16, "err")), ...PAGE.runs], pipelines: [LINT, DEPLOY], next: null };
+  drawn.revision(1);
+  await settle();
+  expect([dot(0), dot(1)]).toEqual([null, "tf-unread tf-u-red"]);
+});
+
+test("at a folder a new run of its pipelines waits behind Show 1 new run under the pointer; a run outside it never shows (#2574)", async () => {
+  // The backend answers a folder's read with its pipelines' runs alone (`RecentFilter.pipelines`).
+  let all: RecentRun[] = PAGE.runs;
+  const drawn = draw(
+    { recent: (filter) => Promise.resolve({ runs: all.filter((one) => filter.pipelines.length === 0 || filter.pipelines.includes(one.pipeline_id)), pipelines: [LINT, DEPLOY], next: null }) },
+    { title: "Payout", pipelines: [LINT.entity_id], place: ["tc", "Payments", "Payout"], paths: "none" },
+  );
+  await settle();
+  expect(numbers()).toEqual(["#11", "#10"]);
+  const list = target.querySelector<HTMLElement>(".tf-recent")!;
+  list.dispatchEvent(new PointerEvent("pointerenter"));
+  all = [at(DEPLOY, run(19, "ok", today(0, 59))), at(LINT, run(18, "ok", today(0, 55))), ...PAGE.runs];
+  drawn.revision(1);
+  await settle();
+  expect(numbers()).toEqual(["#11", "#10"]);
+  expect(target.querySelector(".tf-newruns button")?.textContent).toBe("Show 1 new run");
+  list.dispatchEvent(new PointerEvent("pointerleave"));
+  await settle();
+  expect(numbers()).toEqual(["#18", "#11", "#10"]);
+  expect(rows()[0]!.classList.contains("tf-run-new")).toBe(true);
+});

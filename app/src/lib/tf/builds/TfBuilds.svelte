@@ -316,6 +316,9 @@
       // What it moved goes from the window's answers before this row's read (`hearRuns`' reason).
       cacheEvents.refreshed(payload as RefreshEnded);
       rereadSoon(moved);
+      // A run of the rail's that moved with no sync behind it (a followed run's end) changes the bubbles: its blue goes,
+      // red for a failure, no green in the visit (#2574). The rail, the rows' dots and the top bar read the counts.
+      void runsRead.readCounts();
     })
       .then((stop) => (dead ? stop() : (off = stop)))
       .catch(() => {});

@@ -984,6 +984,38 @@ test("a run in flight under a newer one still moves its row: its end reads the r
   forgetEchoes();
 });
 
+test("a run that ends while Builds is in front reads the counts again: its blue goes red in the rail and the top bar, a pass adds no green (#2574)", async () => {
+  const events = echoEvents(settle);
+  const going = run("teamcity:build:900", "ok", { started: "2026-08-22T09:00:00Z", finished: null, duration_seconds: null, updated_at: "2026-08-22T09:00:00Z", state: { text: "running", tone: "info" } });
+  const passing = run("teamcity:build:901", "ok", { started: "2026-08-22T09:10:00Z", finished: null, duration_seconds: null, updated_at: "2026-08-22T09:10:00Z", state: { text: "running", tone: "info" } });
+  let runs = [passing, going];
+  const ports: BuildsPorts = {
+    pipelines: () => Promise.resolve([pipeline("Payout_Lint", "Payout_Lint", runs)]),
+    runs: () => Promise.resolve(runs),
+    listen: events.listen,
+  };
+  await counted({ Payout_Lint: { blue: 2 } });
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: ["teamcity:buildType:Payout_Lint"], job: null, ports } });
+  await settle();
+  const lint = () => rows().find((row) => row.querySelector(".tf-pi-nm")?.textContent === "Payout_Lint")!;
+  const cell = (bubble: string) => lint().querySelector(`.tf-ub-${bubble}`)?.textContent ?? "";
+  expect([cell("red"), cell("green"), cell("blue")]).toEqual(["", "", "2 running"]);
+  // One fails and one passes, read at their source with no sync behind it: the backend counts the failure red and, in
+  // the visit, no green for the pass.
+  runs = [
+    { ...passing, finished: "2026-08-22T10:20:00Z", duration_seconds: 600, state: { text: "SUCCESS", tone: "ok" } },
+    { ...going, finished: "2026-08-22T10:20:00Z", duration_seconds: 4800, state: { text: "FAILURE", tone: "err" } },
+  ];
+  const zero = { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+  const after = { ...zero, red: 1 };
+  runsRead.ports = { ...runsRead.ports, counts: async () => ({ pipelines: [{ pipeline: "teamcity:buildType:Payout_Lint", counts: after }], total: after, visiting: true, fresh: [] }) };
+  await events.refreshed("teamcity:build:900", null);
+  await settle();
+  expect([cell("red"), cell("green"), cell("blue")]).toEqual(["1 failed", "", ""]);
+  expect(runsRead.topBar).toMatchObject({ red: 1, green: 0, blue: 0 });
+  forgetEchoes();
+});
+
 // ---------------------------------------------------------------------------
 // *Recent* (2026-11-25): the newest runs of every pipeline, no folds
 // ---------------------------------------------------------------------------
