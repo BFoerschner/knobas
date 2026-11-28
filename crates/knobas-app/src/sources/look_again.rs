@@ -114,14 +114,15 @@ impl Clock for RealClock {
 }
 
 /// Which side of a scope a [`Side`] is: what [`LookingAgain`] tells.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SideKind {
     /// Branches, pull requests and commits.
     Code,
     /// The pipelines' runs.
     Builds,
-    /// One item a landed write made or touched, or one linked to it (#2595).
-    Item,
+    /// One item a landed write made or touched, or one linked to it, by
+    /// entity id (#2595): a page drawing it can say it is looked at.
+    Item(String),
 }
 
 /// What one read of a side found.
@@ -165,7 +166,9 @@ pub(crate) async fn run(
         let before = sides.len();
         let mut kept = Vec::with_capacity(before);
         for mut side in sides {
-            if *stop.borrow() {
+            // Up to a repository's sides and a write's eight items read one
+            // after another: the quit does not wait for the rest (#2595).
+            if *stop.borrow() || closed() {
                 return false;
             }
             if side.look().await == Look::Quiet {
@@ -243,7 +246,13 @@ fn looking_of(scope: &str, sides: &[SideKind]) -> LookingAgain {
         scope: scope.to_owned(),
         code: sides.contains(&SideKind::Code),
         builds: sides.contains(&SideKind::Builds),
-        items: sides.contains(&SideKind::Item),
+        items: sides
+            .iter()
+            .filter_map(|side| match side {
+                SideKind::Item(entity) => Some(entity.clone()),
+                SideKind::Code | SideKind::Builds => None,
+            })
+            .collect(),
     }
 }
 
@@ -624,7 +633,7 @@ struct ItemSide {
 #[async_trait]
 impl Side for ItemSide {
     fn kind(&self) -> SideKind {
-        SideKind::Item
+        SideKind::Item(self.entity.clone())
     }
 
     async fn look(&mut self) -> Look {

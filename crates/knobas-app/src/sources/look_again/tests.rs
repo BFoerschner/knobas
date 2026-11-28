@@ -41,13 +41,13 @@ struct Scripted {
 #[async_trait]
 impl Side for Scripted {
     fn kind(&self) -> SideKind {
-        self.kind
+        self.kind.clone()
     }
     async fn look(&mut self) -> Look {
         self.seen
             .lock()
             .unwrap()
-            .push((self.kind, self.clock.now()));
+            .push((self.kind.clone(), self.clock.now()));
         self.script.pop_front().unwrap_or(Look::Quiet)
     }
 }
@@ -222,6 +222,43 @@ async fn the_quit_ends_a_schedule_that_waits() {
     assert!(running.task.is_finished(), "the quit ends the wait");
     assert!(!running.task.await.unwrap());
     assert!(running.seen.lock().unwrap().is_empty());
+}
+
+/// A side whose read is the one the quit began during.
+struct QuitDuring(Arc<std::sync::atomic::AtomicBool>);
+
+#[async_trait]
+impl Side for QuitDuring {
+    fn kind(&self) -> SideKind {
+        SideKind::Code
+    }
+    async fn look(&mut self) -> Look {
+        self.0.store(true, Ordering::SeqCst);
+        Look::Quiet
+    }
+}
+
+#[tokio::test]
+async fn the_quit_during_a_step_reads_none_of_its_sides_left() {
+    let clock = HandClock::new();
+    let seen = Seen::default();
+    let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut sides: Vec<Box<dyn Side>> = vec![Box::new(QuitDuring(Arc::clone(&closed)))];
+    for item in ["forge:pr:tide/pay/7", "jira:ticket:PAY-1"] {
+        sides.push(side(SideKind::Item(item.to_owned()), &[], &clock, &seen));
+    }
+    let (_stop, stopped) = watch::channel(false);
+    let (c, q) = (Arc::clone(&clock), Arc::clone(&closed));
+    let task = tokio::spawn(async move {
+        let closed = move || q.load(Ordering::SeqCst);
+        run(c.as_ref(), Duration::ZERO, sides, stopped, &closed, &|_: &[SideKind]| {}).await
+    });
+    move_to(&clock, &[5]).await;
+    assert!(!task.await.unwrap(), "stopped by the quit, not ended");
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "the items after the read the quit began during are not read"
+    );
 }
 
 #[test]

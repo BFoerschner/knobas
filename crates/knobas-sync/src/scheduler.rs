@@ -389,7 +389,7 @@ pub struct RefreshEnded {
 /// The payload of the shell's `looking:again` event (ADR-0064 rule 2,
 /// #2585, #2595): what a scope's bounded schedule is still looking for. Told
 /// when the schedule starts, each time one of its sides stops, and once it
-/// ends (all `false`).
+/// ends (all `false`, no items).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "sources.ts")]
 pub struct LookingAgain {
@@ -401,9 +401,10 @@ pub struct LookingAgain {
     pub code: bool,
     /// Whether its builds are still looked for.
     pub builds: bool,
-    /// Whether the item a landed write made or touched, or one linked to it,
-    /// is still read again for what its source does after the write (#2595).
-    pub items: bool,
+    /// The items still read again for what their source does after a landed
+    /// write (#2595), by entity id: the one the write made or touched and
+    /// those linked to it, so a page drawing one can say so.
+    pub items: Vec<String>,
 }
 
 /// How a refresh ended. A refresh that was not offered, or refused because
