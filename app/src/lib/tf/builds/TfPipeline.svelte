@@ -256,7 +256,10 @@
     );
   }
 
-  /** The pipeline's item (#2137); a failed read keeps the last one, and none draws no *Refresh*. */
+  /**
+   * The pipeline's item (#2137); a failed read keeps the last one. Until one answers, the header's *Refresh* is drawn
+   * from `expectedSubject` (#2618).
+   */
   function readDetail(wanted: string, current: () => boolean): Promise<void> {
     return ports.getEntity(wanted).then(
       (answer) => {

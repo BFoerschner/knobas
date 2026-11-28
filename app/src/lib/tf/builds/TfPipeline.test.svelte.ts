@@ -1750,3 +1750,22 @@ test("on the first pipeline page the line's repository waits for the source's wo
   await settle();
   expect(target.querySelector(".tf-bhead .tf-sub")?.textContent?.replace(/\s+/g, " ").trim()).toContain("TeamCity build configuration, builds payout-service");
 });
+
+test("Refresh pipeline pressed before the pipeline's item is read refreshes it, and a source that doesn't refresh one runs its sync instead (#2618)", async () => {
+  const probe = refreshProbe();
+  draw([PIPELINE.entity_id], null, { refresh: probe.ports, getEntity: () => new Promise(() => {}) }, undefined, viewSync);
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(probe.refreshed).toEqual([PIPELINE.entity_id]);
+  unmount(page!);
+  page = null;
+  const unoffered = refreshProbe({ answer: () => Promise.resolve({ outcome: "not_offered" }) });
+  draw([PIPELINE.entity_id], null, { refresh: unoffered.ports, getEntity: () => new Promise(() => {}) }, undefined, viewSync);
+  await settle();
+  refreshButton()!.click();
+  await settle();
+  expect(unoffered.refreshed).toEqual([PIPELINE.entity_id]);
+  expect(unoffered.synced).toEqual([PIPELINE.source_id]);
+  expect(headerActs().filter((name) => name.startsWith("Refresh"))).toEqual([]);
+});

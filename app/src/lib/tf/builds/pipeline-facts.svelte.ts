@@ -10,7 +10,10 @@
  *   header's five other actions 138 px left. The item's `refreshes` is its adapter's declaration for its kind
  *   (`KindInfo::refreshes`, #2146), which the TypeScript mirror leaves out. So the header draws the button from
  *   {@link expectedSubject} until the item answers: what this source's last pipeline item said, else *Refresh*, which
- *   every adapter with pipelines declares (TeamCity since #2564, Gitea since ADR-0047, the WASM fixture).
+ *   every adapter with pipelines declares (TeamCity since #2564, Gitea since ADR-0047, the WASM fixture). One whose
+ *   pipelines don't refresh fails nothing: pressed before its item answers, `refresh_entity` says *not offered* and the
+ *   press runs the source's *Sync now* (`tf/refresh.svelte.ts`); its item landing trades the two buttons for one *Sync
+ *   now* once, and its next pipeline page draws that from the first frame.
  */
 import type { PipelineRow } from "../../ipc/entity";
 import type { SourceDescriptor, SourceSummary } from "../../ipc/sources";
