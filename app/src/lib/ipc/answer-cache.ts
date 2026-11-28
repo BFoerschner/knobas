@@ -24,7 +24,9 @@
  *   the timer's heartbeat drops only the time reads ({@link TIME_READS}), the
  *   merge follower (`follow_merges`, asked every few seconds) drops
  *   everything only when it moved a ticket, and a ticket page's promotion
- *   (`promote_context`, asked on every open) only when it made the context.
+ *   (`promote_context`, asked on every open) only when it made the context,
+ *   and a run's open (`mark_run_opened`) only the reads of the marks
+ *   ({@link MARK_READS}), when it wrote one.
  *
  * So a kept answer is what the backend would answer now, as a kept page's
  * drawing is: the kept pages hold what they drew until a run that changed
@@ -275,6 +277,13 @@ export const VISIT_BLIND: ReadonlySet<string> = new Set([
   "list_adapters",
   "checkout_settings",
 ]);
+
+/**
+ * The reads a run's mark moves (`knobas.run_read`, ADR-0063): a pipeline's unread failures (`PipelineRow.unread`, which
+ * the rail's rows carry too) and the Inbox, whose *failed build* line a mark reads. What a run's open drops, and nothing
+ * else.
+ */
+export const MARK_READS: ReadonlySet<string> = new Set(["pipelines", "rail_pipelines", "inbox_items", "inbox_count", "inbox_shelves"]);
 
 /**
  * The sources' own status, which a page draws a line from above what it lists (a source whose last sync failed):
@@ -539,6 +548,14 @@ function ask(cmd: string, args: unknown, options: unknown, warmed: boolean): Pro
       });
     }
     if (cmd === "promote_context") return promoted(args, inner(cmd, args, options));
+    if (cmd === "mark_run_opened") {
+      // A run's page shown (ADR-0063): it marks the run opened, which moves only what reads the marks, and only when it
+      // wrote one. Unknown here, every first open of a run dropped every kept answer (the #2566 whole-branch review).
+      return inner(cmd, args, options).then((wrote) => {
+        if (wrote !== false) drop((entry) => !MARK_READS.has(entry.cmd));
+        return wrote;
+      });
+    }
     if (cmd === "visit_entity") drop((entry) => VISIT_BLIND.has(entry.cmd));
     else if (cmd === "timer_heartbeat") drop((entry) => !TIME_READS.has(entry.cmd));
     else if (!QUIET.has(cmd) && !cmd.startsWith("plugin:")) drop();

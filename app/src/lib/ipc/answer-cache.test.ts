@@ -260,6 +260,23 @@ describe("the answer cache", () => {
     expect(asked("docs_outline")).toBe(2);
   });
 
+  it("drops on a run's open only what reads the marks, and nothing when it wrote none (#2566 review)", async () => {
+    // Unknown here, every first open of a run emptied every kept answer, Builds' rail and the docs outline among them.
+    let wrote = true;
+    answers["mark_run_opened"] = () => wrote;
+    await ask("docs_outline");
+    await ask("recent_runs", { scope: null });
+    await ask("rail_pipelines");
+    await ask("inbox_count");
+    await ask("mark_run_opened", { run: "tc:1" });
+    for (const cmd of ["docs_outline", "recent_runs", "rail_pipelines", "inbox_count"]) await ask(cmd, cmd === "recent_runs" ? { scope: null } : {});
+    expect(["docs_outline", "recent_runs", "rail_pipelines", "inbox_count"].map(asked)).toEqual([1, 1, 2, 2]);
+    wrote = false;
+    await ask("mark_run_opened", { run: "tc:1" });
+    await ask("rail_pipelines");
+    expect(asked("rail_pipelines")).toBe(2);
+  });
+
   it("drops on a run's end what a source of its roles could change", async () => {
     await ask("list_sources");
     await ask("docs_outline");
