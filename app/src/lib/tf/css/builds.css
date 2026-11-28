@@ -83,6 +83,11 @@
    read or unread moves nothing on the row. The number keeps its weight: every run's number is bold already. */
 .tf-runs .tf-run-no { position: relative; padding-left: 18px; }
 .tf-runtbl .tf-unread { position: absolute; left: 7px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--err); }
+/* The dot is in the colour of the bubble that counts its run (#2572, ADR-0063); red is the dot's own. */
+.tf-runtbl .tf-unread.tf-u-blue { background: var(--info); }
+.tf-runtbl .tf-unread.tf-u-green { background: var(--ok); }
+.tf-runtbl .tf-unread.tf-u-yellow { background: var(--warn); }
+.tf-runtbl .tf-unread.tf-u-grey { background: var(--muted); }
 .tf-runs.tf-bsettings { padding-top: 16px; }
 .tf-bsettings > p { font-size: calc(var(--t-sm) * var(--fs)); margin: 0 0 8px; }
 .tf-bsettings > .tf-tbl + p { margin: 12px 0 0; }
@@ -414,19 +419,47 @@
   background: var(--sheet); border-bottom: 1px solid var(--rule); position: sticky; top: 0; z-index: 5;
 }
 .tf-recentbar > .tf-fbar { position: static; border-bottom: 0; background: none; padding: 10px 0; flex: 1 1 auto; min-width: 0; }
-/* The run's state leads: the chip alone, the unread dot in its gutter. */
-.tf-runs.tf-recent .tf-run-no { width: 104px; }
-/* The pipeline's cell takes what the others leave, with the branch: the name in ink (never under 12 characters), the
-   number after it (never cut), then the folders, dim, cut at their start so the folder nearest the pipeline stays. */
-.tf-runs.tf-recent .tf-run-br { width: 22%; }
+/* The run's state leads: the chip alone, the bubble's dot in its gutter. */
+.tf-runs.tf-recent .tf-run-no { width: 96px; }
+/* Who ran (#2572, the mockup's *The run row*): the folders end at one line and the name starts at it, on every row, so
+   the names stand in one column and the folder that tells two *Build*s apart is the word beside the name. The line is
+   the grid's: its columns are fractions of a cell every row has at one width. The folders are cut at their start (`rtl`),
+   so the one nearest the name stays; they are a link to that folder. At a folder they are said from it down, so their
+   column narrows (`short`), or goes where no pipeline sits deeper (`none`). */
 .tf-run-pipe { white-space: nowrap; overflow: hidden; }
-.tf-run-pipein { display: flex; align-items: baseline; gap: 1ch; min-width: 0; }
-.tf-run-pname { flex: 0 1 auto; min-width: min(12ch, 100%); overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
-.tf-run-pno { flex: none; color: inherit; text-decoration: none; }
-.tf-run-place { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; color: var(--ink-2); font-size: calc(var(--t-xs) * var(--fs)); }
-.tf-run-place > bdi { direction: ltr; unicode-bidi: isolate; }
-/* With a pipeline's cell to hold, the tests go before who started a run (Fable's ruling 4). */
-@container (max-width: 1000px) { .tf-runs.tf-recent .tf-run-no { width: 104px; } }
-@container (max-width: 960px) { .tf-runs.tf-recent :is(col, td).tf-run-tests { display: none; } }
-@container (max-width: 860px) { .tf-runs.tf-recent td.tf-run-trig { display: table-cell; } .tf-runs.tf-recent col.tf-run-trig { display: table-column; } }
-@container (max-width: 760px) { .tf-runs.tf-recent :is(col, td).tf-run-trig { display: none; } }
+.tf-run-id { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr); column-gap: 7px; align-items: baseline; min-width: 0; }
+.tf-runs.tf-recent[data-paths="short"] .tf-run-id { grid-template-columns: minmax(0, .36fr) minmax(0, 1fr); }
+.tf-runs.tf-recent[data-paths="none"] .tf-run-id { grid-template-columns: minmax(0, 1fr); }
+.tf-runs.tf-recent[data-paths="none"] .tf-run-path { display: none; }
+.tf-run-path {
+  justify-self: end; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl;
+  font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); text-decoration: none;
+}
+.tf-run-path > bdi { direction: ltr; unicode-bidi: isolate; }
+.tf .tf-run-path:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+/* The name gives up its lead first, down to its ellipsis, and its last word only where that alone is wider than the
+   cell (`nameParts`); `pre` keeps a name's own space at the seam. The number after it is never cut. */
+.tf-run-who { display: flex; align-items: baseline; gap: 1ch; min-width: 0; }
+.tf-run-nm { display: flex; min-width: 0; white-space: pre; font-weight: 500; color: var(--ink); }
+.tf-run-nmh { flex: 0 1 auto; min-width: 2.4em; overflow: hidden; text-overflow: ellipsis; }
+.tf-run-nmt { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tf-run-nmh + .tf-run-nmt { max-width: calc(100% - 2.4em); }
+.tf-run-pno { flex: none; color: var(--ink-2); text-decoration: none; font-variant-numeric: tabular-nums; }
+.tf .tf-run-pno:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+/* The table sheds by its own width, later than a pipeline's runs do, so the name's cell keeps about 300 px (#2572, the
+   mockup's *Narrow and wide*): the duration's bar goes under 1300, the tests under 1180, who started it under 1000. The
+   tests go before who started it (Fable's ruling 4). */
+.tf-runs.tf-recent .tf-run-br { width: 22%; }
+.tf-runs.tf-recent .tf-run-trig { width: 150px; }
+.tf-runs.tf-recent .tf-run-tests { width: 130px; }
+.tf-runs.tf-recent .tf-run-dur { width: 150px; }
+@container (max-width: 1299px) {
+  .tf-runs.tf-recent .tf-run-br { width: 180px; }
+  .tf-runs.tf-recent .tf-run-dur { width: 78px; }
+  .tf-runs.tf-recent :is(.tf-durbar, .tf-run-dur .tf-progress) { display: none; }
+}
+@container (max-width: 1179px) { .tf-runs.tf-recent :is(col, td).tf-run-tests { display: none; } }
+@container (max-width: 999px) {
+  .tf-runs.tf-recent :is(col, td).tf-run-trig { display: none; }
+  .tf-runs.tf-recent .tf-run-br { width: 150px; }
+}

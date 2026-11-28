@@ -571,7 +571,7 @@ test("at a folder the folders are said from it down, and none where the pipeline
 });
 
 test("a row's dot is in the colour of the bubble that counts its run, with its words; a row in none has none (#2572)", async () => {
-  draw({}, { first: { runs: [at(DEPLOY, run(16, "info", today(0, 58), { state: { text: "running", tone: "info" }, finished: null, duration_seconds: null })), ...PAGE.runs], pipelines: [LINT, DEPLOY], next: null } });
+  draw({}, { first: { runs: [at(DEPLOY, run(16, "ok", today(0, 58), { state: { text: "running", tone: "info" }, finished: null, duration_seconds: null })), ...PAGE.runs], pipelines: [LINT, DEPLOY], next: null } });
   await settle();
   const dot = (at: number) => rows()[at]!.querySelector(".tf-unread");
   expect(dot(0)?.className).toContain("tf-u-blue");

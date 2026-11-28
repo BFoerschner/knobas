@@ -257,6 +257,8 @@ const PLACES = [
   // Builds' *Recent* (2026-11-25): every pipeline's runs in one table, by its address; a run opened from it and Esc back.
   { name: "builds-recent", start: "#/time", go: "#/builds/recent", hash: "#/builds/recent", away: "#/time" },
   { name: "recent-run", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-pno`, hash: "#/build/", away: "Escape" },
+  // A run's folders pressed (#2572): the folder's table, and the rail revealing its fold, held unseen while it scrolls.
+  { name: "builds-folder-link", start: "#/builds/recent", press: `${shown} .tf-recent a.tf-run-path`, hash: "#/builds/folder/", away: "Escape" },
   { name: "docs", start: "#/time", nav: "docs", hash: "#/docs", away: "time" },
   { name: "docs-space", start: "#/docs", press: `${shown} a.tf-dh-spacelink[href="#/docs/space/${SPACE}"], ${shown} a.tf-dh-spacelink`, hash: "#/docs/space/", away: "Escape" },
   { name: "docs-page", start: `#/docs/space/${SPACE}`, press: `${shown} a.tf-dh-rowt[href^="#/page/"]`, hash: "#/page/", away: "Escape" },
