@@ -198,7 +198,7 @@
 //                 `held` also needs *Show N new* up afterwards, and pressing it must bring the rows in; `rest`, a selector, rests the
 //                 pointer on the first such element before the sync, and `pill` names the button the rows wait behind in place of the
 //                 bar's *Show N new*: Builds' runs, which hold only under a resting pointer), launcher (from `via` by ⌘K and `words`),
-//                 palette (⌘K on the page: the launcher's own rows). `prep` runs on the page first, for every way but first and launcher.
+//                 palette (⌘K on the page: the launcher's own rows). `prep` (wait, click, eval) runs on the page first, for every way but first and launcher.
 //                 `tail` is how long past quiet it still records (600 ms): longer for a page that reads again a while after a run ends.
 //                 `touch`: under Chrome's touch emulation, so `hover: none` matches and a row's actions stand in the row, as on a touch
 //                 screen or in headless Chrome on Linux (headless Chrome on macOS reports `hover: hover`).
@@ -239,6 +239,8 @@ const FITS = (sel) => String.raw`(() => {
 })()`;
 // The roster's monitors not hidden: a hidden one is drawn after them (the monitors-page pass), so a Hide leaves this count.
 const MONITOR_ROWS = ".tf-mon-row:not(.tf-mon-hid)";
+/** Scrolls the Inbox's list 600 px down among older rows, where new ones wait behind *Show N new* (#2527). */
+const INBOX_DOWN = `(() => { let s = document.querySelector(".tf-ib"); while (s && !/auto|scroll/.test(getComputedStyle(s).overflowY)) s = s.parentElement; if (s) s.scrollTop = 600; return s?.scrollTop ?? 0; })()`;
 const RUN = "build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187";
 
 // The application page's trips start with its name and command typed.
@@ -490,7 +492,7 @@ const RIGHT_CLICK = [
     { id: "rc-monitor", kind: "right-click", finding: "right-click", on: { sel: ".tf-mon-row .tf-mon-state" }, starts: ["open"] },
   ] },
   { page: "Right-click, a run", route: RUN, trips: [
-    { id: "rc-run-heading", kind: "right-click", finding: "right-click", on: { sel: ".tf-main h1" }, starts: ["log", "tests", "rerun"] },
+    { id: "rc-run-heading", kind: "right-click", finding: "right-click", on: { sel: ".tf-main h1" }, starts: ["pipeline", "log", "tests", "rerun"] },
   ] },
 ];
 
@@ -554,9 +556,11 @@ const PAGES = [
     { id: "list-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "inbox", ways: ["return", "sync", "shown"], prep: [{ click: "button, a, [role=tab]", text: "List" }, { wait: 500 }], rows: ".tf-main tbody tr", held: true, query: STILL_Q, grow: GROW_TICKET },
   ] },
   { page: "Inbox", route: "inbox", trips: [
-    { id: "inbox-show-new-key", kind: "enter-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: "window.__fake.inboxNew(), window.__fake.endRuns(), 1" }, { wait: 2000 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: ".tf-ib" },
-    { id: "inbox-show-new-pointer", kind: "pointer-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: "window.__fake.inboxNew(), window.__fake.endRuns(), 1" }, { wait: 2000 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: ".tf-ib" },
-    { id: "inbox-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "code", words: "inbox", rows: ".tf-ib", held: true, query: STILL_Q, grow: "window.__fake.inboxNew(), 1" },
+    // New rows wait behind *Show N new* only while the list is scrolled down among older ones; at its top they come straight in (#2527).
+    { id: "inbox-show-new-key", kind: "enter-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: INBOX_DOWN }, { wait: 300 }, { eval: "window.__fake.inboxNew(), window.__fake.endRuns(), 1" }, { wait: 2000 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: ".tf-ib" },
+    { id: "inbox-show-new-pointer", kind: "pointer-twice", strict: true, finding: "still-rows", query: STILL_Q, prep: [{ wait: 800 }, { eval: INBOX_DOWN }, { wait: 300 }, { eval: "window.__fake.inboxNew(), window.__fake.endRuns(), 1" }, { wait: 2000 }], press: { sel: ".tf-fheld", starts: "Show" }, rows: ".tf-ib" },
+    { id: "inbox-rows-still", kind: "rows-still", strict: true, finding: "still-rows", via: "code", words: "inbox", ways: ["first", "return", "sync", "launcher"], rows: ".tf-ib", query: STILL_Q, grow: "window.__fake.inboxNew(), 1" },
+    { id: "inbox-rows-still-down", kind: "rows-still", strict: true, finding: "still-rows", via: "code", ways: ["return", "sync", "shown"], prep: [{ wait: 800 }, { eval: INBOX_DOWN }, { wait: 300 }], rows: ".tf-ib", held: true, query: STILL_Q, grow: "window.__fake.inboxNew(), 1" },
     { id: "launcher-rows-still", kind: "rows-still", strict: true, finding: "still-rows", ways: ["palette"], rows: "[role=option]", query: STILL_Q },
   ] },
   { page: "Builds", route: "builds", trips: [
@@ -3648,6 +3652,7 @@ async function startBrowser() {
       for (const s of t.prep ?? []) {
         if (s.wait) await sleep(s.wait);
         if (s.click && !(await evaluate(`window.__trip.click(${JSON.stringify({ sel: s.click, text: s.text, starts: s.starts })})`))) throw new Error(`prep can't find ${s.click} "${s.text ?? s.starts ?? ""}"`);
+        if (s.eval) await evaluate(s.eval);
       }
       if (t.prep) await opener.settleAfterChange();
     };
