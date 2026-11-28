@@ -427,6 +427,10 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
         // a commit, and a sha invented here would match no mirrored commit
         // anyway. An empty list, the shape of a build with no VCS root.
         "revisions": { "revision": [] },
+        // The builds a build waits on (#2594, crate deviation 21), none: the
+        // dataset chains no configuration. The shape of a build with no
+        // snapshot dependency once `fields=` names the list.
+        "snapshot-dependencies": { "count": 0, "build": [] },
         // `triggered` is the only place TeamCity names the person who started
         // a build, and it is what `knobas-source-teamcity` reads for
         // `SyncItem::author`.

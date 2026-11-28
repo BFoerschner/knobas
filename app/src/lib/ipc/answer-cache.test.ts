@@ -116,6 +116,15 @@ describe("the answer cache", () => {
     expect(asked("run_counts"), "read fresh each time").toBe(2);
   });
 
+  it("drops nothing when a source is asked for a run: the run's end drops by its own event (#2569)", async () => {
+    // Recent asks each idle CI source for a run once it has drawn, which at start is every one of them: unknown here,
+    // that ask dropped every kept answer and every start-up read still on its way, the pipelines' 571 KB among them.
+    await ask("pipelines");
+    await ask("sync_now", { sourceId: "live-teamcity" });
+    await ask("pipelines");
+    expect(asked("pipelines")).toBe(1);
+  });
+
   it("drops nothing on a compare's reads of git and the source, a page at a time or called off", async () => {
     // The compare pass (2026-11-13): a diff of thousands of files reads a file's lines per card, and dropped every kept
     // answer each time; so did the check behind a predicted compare.

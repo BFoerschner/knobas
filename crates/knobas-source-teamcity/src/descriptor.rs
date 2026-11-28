@@ -88,9 +88,12 @@ pub fn descriptor_template() -> SourceDescriptor {
                 plural: "Build configurations".to_owned(),
                 monogram: "BC".to_owned(),
                 full_sync_exhaustive: false,
-                // `refresh` answers a configuration not offered: the run that
-                // follows its one write is all it needs (#2146).
-                refreshes: false,
+                // Read with its newest builds, not by itself (#2564,
+                // ADR-0047 as amended 2026-11-27): `refresh` answers it not
+                // offered and `refresh_under` walks it, so its page draws
+                // *Refresh* and ⌘R on a repository's Builds tab finds its new
+                // builds.
+                refreshes: true,
                 title_stays_in_mirror: false,
             },
         ],
@@ -175,6 +178,10 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// one full sha per VCS root, which is what the detail of a pull request, a
 /// branch or a commit finds the builds of its commit by.
 ///
+/// **A run waits on its snapshot dependencies' builds** (#2594): `waitsOn`,
+/// their keys, which `map` writes beside the record off its own
+/// `snapshot-dependencies`. A build a write started brings them with it.
+///
 /// **No blocked-like and no done-like set** (#1501): a build or a
 /// configuration has an outcome and a state chip, not a workflow status, so
 /// no job context anchored on one is archived by its status.
@@ -220,6 +227,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             tests_failed: vec![PayloadPath::of(["testOccurrences", "failed"])],
             tests_passed: vec![PayloadPath::of(["testOccurrences", "passed"])],
             tests_ignored: vec![PayloadPath::of(["testOccurrences", "ignored"])],
+            waits_on: vec![ListPath {
+                at: PayloadPath::of(["waitsOn"]),
+                entry: PayloadPath::default(),
+            }],
             ..KindPaths::default()
         },
         KindPaths {

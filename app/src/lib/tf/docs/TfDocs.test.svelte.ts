@@ -3,7 +3,7 @@
  * what the backend reads is `crates/knobas-app/tests/it/docs_ipc.rs`'s.
  */
 import { createRawSnippet, flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, type MockInstance, onTestFinished, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, type MockInstance, onTestFinished, test, vi } from "vitest";
 
 import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, TableCell, Unfilled, WriteAsk } from "../../ipc/entity";
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
@@ -19,8 +19,15 @@ import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
 import { drafts } from "../drafts.svelte";
+import { docViewModule } from "../render/doc/doc-module";
 import { forgetReading, OUTLINE_ROOM, READER_DRAWER, READING_MIN, readingAt } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
+
+// A code block's views (API, Schema, XML view) load their code on the first press: held before the tests, as
+// `TfFileViewer`'s are. A cold import of the XML view on a busy machine outlasted `vi.waitFor`'s second (#2604's gate, load 60).
+beforeAll(async () => {
+  await Promise.all([docViewModule(), import("../render/TfOasInline.svelte"), import("../render/xsd/TfXsdInline.svelte")]);
+});
 
 const TREE: DocsTree = {
   spaces: [

@@ -294,6 +294,17 @@ test("the rest of the first page is asked once the first rows have had their fra
   }
 });
 
+test("the Builds list is told the first page drew once its rows have had their frame, not in the task that lays them (#2569b)", async () => {
+  // The list's read (571 KB at Björn's scale) went out beside the first rows' render and could land before their frame.
+  let told = 0;
+  draw({}, { ondrawn: () => (told += 1) });
+  await turns();
+  expect(numbers()).toEqual(["#12", "#11", "#10"]);
+  expect(told).toBe(0);
+  await settle();
+  expect(told).toBe(1);
+});
+
 test("a head read again while the rest of the first page is out leaves older pages readable, not stuck on Reading (#2569)", async () => {
   const cursor = { made: "2026-08-22 10:20:00+00", entity_id: "tc:build:10" };
   let answer: (page: RecentRuns) => void = () => {};

@@ -284,7 +284,8 @@ async function draw(rest: string[], stand: RepoPorts = ports()) {
 async function settle() {
   for (let round = 0; round < 4; round += 1) {
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+    else await new Promise((resolve) => setTimeout(resolve, 0));
     flushSync();
   }
 }
@@ -296,7 +297,14 @@ test("the header and the tabs draw once, whole: unseen in their room until the f
   let answer!: () => void;
   const late = new Promise<void>((resolve) => (answer = resolve));
   const stand = ports();
-  await draw([REPO], { ...stand, codeFacts: async (ids) => (await late, stand.codeFacts(ids)) });
+  // The hold lets go after `HEAD_HOLD_MS` whatever is out: on a fake clock that time passes only when the test says, so a
+  // loaded machine's slow `draw()` cannot spend it before the hold is asserted (#2552).
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await draw([REPO], { ...stand, codeFacts: async (ids) => (await late, stand.codeFacts(ids)) });
+  } finally {
+    vi.useRealTimers();
+  }
   const head = target.querySelector(".tf-repohead")!;
   const tabs = target.querySelector(".tf-tabs")!;
   expect(head.classList.contains("tf-unread"), "held while the facts are read").toBe(true);
@@ -1677,18 +1685,26 @@ test("the page walks its repository at the forge once it drew, and a walk that b
   const merged = { ...PRS[0]!, state: { text: "merged", tone: "ok" as const } };
   const opened = row(`${REPO}#150`, "pr", "Opened at the forge", { path: "tidewater/payout-service", state: { text: "open", tone: "info" } });
   const base = ports();
-  await draw(
-    [REPO, "prs"],
-    ports({
-      walk: async (id) => (walks.push(id), (walked = true), { outcome: "refreshed" }),
-      // The forge sorts the merged one first now: the drawn list keeps it where it was.
-      listEntities: async (...args) => (walked ? { ...(await base.listEntities(...args)), rows: [opened, PRS[1]!, merged, PRS[2]!] } : base.listEntities(...args)),
-    }),
-  );
   const rows = () => [...target.querySelectorAll(".tf-rprs tbody tr")].map((tr) => [text(tr.querySelector("td")), text(tr.querySelector(".tf-chip"))]);
-  expect(rows()).toEqual([["#142", "Open"], ["#139", "Merged"]]);
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  await settle();
+  // The walk waits `WALK_AFTER_MS` after the page opens: on a fake clock that time passes only when the test says, so a
+  // loaded machine's slow `draw()` cannot spend it before the list as drawn is asserted (#2599).
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await draw(
+      [REPO, "prs"],
+      ports({
+        walk: async (id) => (walks.push(id), (walked = true), { outcome: "refreshed" }),
+        // The forge sorts the merged one first now: the drawn list keeps it where it was.
+        listEntities: async (...args) => (walked ? { ...(await base.listEntities(...args)), rows: [opened, PRS[1]!, merged, PRS[2]!] } : base.listEntities(...args)),
+      }),
+    );
+    expect(walks, "nothing walked before its time").toEqual([]);
+    expect(rows()).toEqual([["#142", "Open"], ["#139", "Merged"]]);
+    await vi.advanceTimersByTimeAsync(120);
+    await settle();
+  } finally {
+    vi.useRealTimers();
+  }
   expect(walks).toEqual([REPO]);
   expect(rows()).toEqual([["#150", "Open"], ["#142", "Merged"], ["#139", "Merged"]]);
 });
@@ -1787,6 +1803,144 @@ test("Branches says each branch's builds, linking to the Builds tab at it; the t
   expect(failing.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/builds/${encodeURIComponent("feature/PAY-231-sepa-retry")}`);
   const tab = [...target.querySelectorAll(".tf-tabs a")].find((a) => a.textContent?.startsWith("Builds"))!;
   expect(text(tab)).toBe("Builds 1");
+});
+
+// ---- A running build moves on the Builds tab as it does on the Builds page (#2558) ----
+
+/** Run 3 of the fixture's pipeline on `main`, running until `done` says it finished, passed. */
+function runningOnMain() {
+  const state = { done: false, reads: 0 };
+  const run = () => ({
+    ...built("3", "main", false),
+    state: state.done ? { text: "SUCCESS", tone: "ok" as const } : { text: "running", tone: "info" as const },
+    finished: state.done ? "2026-08-22T10:05:00Z" : null,
+    duration_seconds: state.done ? 300 : null,
+  });
+  const repoPipelines = async () => {
+    state.reads += 1;
+    return {
+      pipelines: [
+        { entity_id: "tc:buildType:Payout_Build", source_id: "tc", source_name: "TeamCity", name: "Payout_Build", group: null, path: [], web_url: null, latest: [run()] },
+        { entity_id: "tc:buildType:Payout_Lint", source_id: "tc", source_name: "TeamCity", name: "Payout_Lint", group: null, path: [], web_url: null, latest: [built("1", "main", false)] },
+      ],
+      pull_requests: [],
+    };
+  };
+  return { state, repoPipelines };
+}
+
+/** The window's events as a test sends them: each handler the page listened with, by event. */
+function ears() {
+  const heard = new Map<string, ((event: { payload: unknown }) => void)[]>();
+  return {
+    listen: (async (event: string, handler: (event: { payload: unknown }) => void) => {
+      heard.set(event, [...(heard.get(event) ?? []), handler]);
+      return () => heard.set(event, (heard.get(event) ?? []).filter((one) => one !== handler));
+    }) as NonNullable<RepoPorts["listen"]>,
+    send: (event: string, payload: unknown) => {
+      for (const hear of heard.get(event) ?? []) hear({ payload });
+    },
+  };
+}
+
+const verdict = () => text(target.querySelector(".tf-rbp-ok > span"));
+
+test("a running build on the Builds tab moves when a read of it at its source moved it (#2558)", async () => {
+  const { state, repoPipelines } = runningOnMain();
+  const { listen, send } = ears();
+  await draw([REPO, "builds", "main"], ports({ repoPipelines, listen, follow: async () => ({ outcome: "refreshed" }) }));
+  expect(verdict()).toBe("Every pipeline that ran on main passed, and 1 still running.");
+
+  state.done = true;
+  // Another item's refresh moves nothing here.
+  send("item:refreshed", { entity_id: "tc:build:99", write_id: null, ended: "refreshed" });
+  await settle();
+  expect(verdict()).toBe("Every pipeline that ran on main passed, and 1 still running.");
+
+  send("item:refreshed", { entity_id: "tc:build:3", write_id: null, ended: "refreshed" });
+  await settle();
+  expect(verdict()).toBe("Every pipeline that ran on main passed.");
+});
+
+test("a CI source's run that brought news reads the Builds tab again; another source's does not (#2558)", async () => {
+  const { state, repoPipelines } = runningOnMain();
+  const { listen, send } = ears();
+  await draw([REPO, "builds", "main"], ports({ repoPipelines, listen, follow: async () => ({ outcome: "refreshed" }) }));
+  state.done = true;
+  send("sync:state", { source_id: "jira", running: false, last_changed: true });
+  await settle();
+  expect(verdict()).toBe("Every pipeline that ran on main passed, and 1 still running.");
+
+  send("sync:state", { source_id: "tc", running: false, last_changed: true });
+  await settle();
+  expect(verdict()).toBe("Every pipeline that ran on main passed.");
+});
+
+test("the Builds tab reads the runs it draws in flight at their source once it has drawn, and no finished one (#2558)", async () => {
+  const { repoPipelines } = runningOnMain();
+  const followed: string[] = [];
+  await draw([REPO, "builds", "main"], ports({ repoPipelines, listen: ears().listen, follow: async (id) => (followed.push(id), { outcome: "refreshed" }) }));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await settle();
+  expect(followed).toEqual(["tc:build:3"]);
+});
+
+test("⌘R on the Builds tab reads that repository and its runs in flight at their source, and syncs no source (#2558)", async () => {
+  const { state, repoPipelines } = runningOnMain();
+  const probe = refreshProbe();
+  const followed: string[] = [];
+  // The run's refresh answers a moment later, having moved it: the tab's read after it is what draws it finished.
+  const follow = async (id: string) => {
+    followed.push(id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    state.done = true;
+    return { outcome: "refreshed" as const };
+  };
+  await draw([REPO, "builds", "main"], ports({ getEntity: repoDetail(), refresh: probe.ports, repoPipelines, listen: ears().listen, follow }));
+  // What the tab's own open asked is not the press's.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await settle();
+  followed.length = 0;
+  state.done = false;
+
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed).toEqual([REPO]);
+  expect(followed).toEqual(["tc:build:3"]);
+  expect(probe.synced).toEqual([]);
+  expect(verdict()).toBe("Every pipeline that ran on main passed.");
+});
+
+test("⌘R on the Builds tab reads each of that repository's pipelines at its source, one at a time, and draws what it found (#2564)", async () => {
+  const { state, repoPipelines } = runningOnMain();
+  const probe = refreshProbe();
+  const walked: string[] = [];
+  let open = 0;
+  let most = 0;
+  // A pipeline's read at TeamCity finds what the last run had not: Payout_Build's run has finished since.
+  const walkPipeline = async (id: string) => {
+    walked.push(id);
+    open += 1;
+    most = Math.max(most, open);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    open -= 1;
+    if (id === "tc:buildType:Payout_Build") state.done = true;
+    return { outcome: "refreshed" as const };
+  };
+  const follow = async () => ({ outcome: "refreshed" as const });
+  await draw([REPO, "builds", "main"], ports({ getEntity: repoDetail(), refresh: probe.ports, repoPipelines, listen: ears().listen, follow, walkPipeline }));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await settle();
+  expect(walked).toEqual([]);
+
+  pressRefreshKey();
+  await settle();
+  await settle();
+  expect(walked).toEqual(["tc:buildType:Payout_Build", "tc:buildType:Payout_Lint"]);
+  // One source's refreshes take its lock in turn: two at once would find it held, and the second would read nothing.
+  expect(most).toBe(1);
+  expect(probe.synced).toEqual([]);
+  expect(verdict()).toBe("Every pipeline that ran on main passed.");
 });
 
 // ---- The working tree in the branch box (2026-11-21; Björn: "I would like to be able to select the current work tree in

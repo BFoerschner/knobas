@@ -16,6 +16,10 @@
     last one tried, else the first), and the file, commit or pull request
     picked from it. A range is the commit picked and the one before it.
     With no checkout anywhere it says so and how to get one.
+  - **Try it on** (`TfTryOn`, #2562) also takes pasted text (written to a
+    throwaway file of its name), a file or a folder chosen anywhere on this
+    disk: its *Try it* saves the draft and opens the application there, as on
+    a checkout (`open_try`).
   - **Try it** beside each line saves the draft and runs that command by the
     id the save gave it: only a saved template ever runs (ADR-0016, #1643).
     Leaving without *Save* (Cancel, Esc, Back, any other address) takes the
@@ -57,18 +61,25 @@
   import { realTryReads, type TryCommit, type TryPr, type TryReads, type TryRepo } from "./try-reads";
   import { TryRepos } from "./try-repos.svelte";
   import TfTryMore from "./TfTryMore.svelte";
+  import { openTry as openTryIpc } from "../../ipc/entity";
+  import type { TryOn } from "../../ipc/app";
+  import TfTryOn from "../settings/TfTryOn.svelte";
+  import { tryName } from "../settings/try-on";
   import { LAND_ADD, landOn } from "../settings/landing";
 
   let {
     at,
     apps = sharedApps,
     reads = realTryReads,
+    openTry = openTryIpc,
     back = null,
     leave = undefined,
   }: {
     at: AppPageAt;
     apps?: Apps;
     reads?: TryReads;
+    /** *Try it on* outside a repository (#2562): the bridge's `open_try`, a fake in tests. */
+    openTry?: (application: string, on: TryOn) => Promise<string[]>;
     /** Where the page goes once it is done: the shell's way back. */
     back?: (Pick<EscTargetOf, "name"> & Partial<EscTargetOf>) | null;
     /** Tests: how it goes there. */
@@ -343,6 +354,33 @@
     await apps.runObject(picked.entityId, entry.name, id, object, object.kind === "repository" ? lastName(picked.title) : undefined);
   }
 
+  /** *Try it* on the person's own example (#2562): the draft saved, then the application opened on it. */
+  async function tryOnOwn(on: TryOn) {
+    if (!ready) return;
+    busy = true;
+    error = null;
+    const first = tried === null;
+    const own = await entryId();
+    const entry = entryOf(draft, own);
+    const list = withEntry(apps.settings?.applications ?? [], entry);
+    const saving = store(list).then(() => (own !== "" ? own : (apps.settings?.applications.at(-1)?.id ?? null)));
+    if (first) tried = { before: saved, id: saving.catch(() => null) };
+    else tried = { ...tried!, id: saving.catch(() => null) };
+    let id: string | null;
+    try {
+      id = await saving;
+    } catch (cause) {
+      error = ipcErrorMessage(cause);
+      if (first) tried = null;
+      busy = false;
+      return;
+    }
+    busy = false;
+    if (gone || id === null) return;
+    await openTry(id, on);
+    push({ text: `Opened ${tryName(on)} in ${entry.name}` });
+  }
+
   /** Put the list back as it was before the first try. */
   function takeBack() {
     const was = tried;
@@ -475,61 +513,69 @@
       </div>
     </div>
 
-    <div class="tf-stg-sec">
-      <h2>Try it on</h2>
-      <!-- Every row a command needs is drawn before the first checkout answers, so an answer only fills them in, and with no
-           checkout anywhere the rows stay and say so (2026-11-17). -->
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-app-repo">Repository<small>One with a checkout on this disk. It and the objects below fill each command in.</small></label>
-        <div class="tf-stg-c tf-stg-inl">
-          <select id="tf-app-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none}>
-            {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}>{tryOn.failed !== null ? "Could not read the repositories" : "No repository is cloned on this computer"}</option>{/if}
-            {#each tryOn.list ?? [] as one (one.entityId)}
-              <option value={one.entityId}>{one.title}</option>
-            {/each}
-          </select>
-          <TfTryMore {tryOn} />
-        </div>
-      </div>
-      {#if draft.file.trim() !== "" || draft.command.includes("{file}")}
+    <TfTryOn
+      id="tf-app-try"
+      sources={["repo", "text", "file", "folder"]}
+      why={named ? null : (why ?? "Saving…")}
+      name="notes.md"
+      title="Saves it, then opens what you chose in it"
+      ontry={tryOnOwn}
+    >
+      {#snippet repoRows()}
+        <!-- Every row a command needs is drawn before the first checkout answers, so an answer only fills them in, and with no
+             checkout anywhere the rows stay and say so (2026-11-17). -->
         <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-app-tryfile">File<small>A path inside the checkout.</small></label>
-          <div class="tf-stg-c">
-            <input id="tf-app-tryfile" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-app-files" disabled={repo === null} bind:value={file} />
-            <datalist id="tf-app-files">
-              {#each (files ?? []).slice(0, FILES_SHOWN) as one (one)}<option value={one}></option>{/each}
-            </datalist>
-          </div>
-        </div>
-      {/if}
-      {#if draft.commit.trim() !== "" || draft.range.trim() !== ""}
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-app-trycommit">Commit<small>A range is this commit and the one before it.</small></label>
-          <div class="tf-stg-c">
-            <select id="tf-app-trycommit" class="tf-stg-in" bind:value={commit} disabled={commits === null || commits.length === 0}>
-              {#if commits === null}<option value={commit}>{tryOn.none ? "" : "Reading…"}</option>{:else if commits.length === 0}<option value={null}>No commits</option>{/if}
-              {#if commit !== null && commits !== null && !commits.some((one) => one.sha === commit)}<option value={commit}>{commit.slice(0, 12)}</option>{/if}
-              {#each (commits ?? []).slice(0, COMMITS_SHOWN) as one (one.sha)}
-                <option value={one.sha}>{one.sha.slice(0, 7)} {one.title}</option>
+          <label class="tf-stg-l" for="tf-app-repo">Repository<small>One with a checkout on this disk. It and the objects below fill each command in.</small></label>
+          <div class="tf-stg-c tf-stg-inl">
+            <select id="tf-app-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none}>
+              {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}>{tryOn.failed !== null ? "Could not read the repositories" : "No repository is cloned on this computer"}</option>{/if}
+              {#each tryOn.list ?? [] as one (one.entityId)}
+                <option value={one.entityId}>{one.title}</option>
               {/each}
             </select>
+            <TfTryMore {tryOn} />
           </div>
         </div>
-      {/if}
-      {#if draft.pr.trim() !== ""}
-        <div class="tf-stg-row">
-          <label class="tf-stg-l" for="tf-app-trypr">Pull request</label>
-          <div class="tf-stg-c">
-            <select id="tf-app-trypr" class="tf-stg-in" bind:value={prPick} disabled={prs === null || prs.length === 0}>
-              {#if prs === null}<option value={prPick}>{tryOn.none ? "" : "Reading…"}</option>{:else if prs.length === 0}<option value={null}>No pull requests</option>{/if}
-              {#each (prs ?? []).slice(0, PRS_SHOWN) as one (one.id)}
-                <option value={one.number}>#{one.number} {one.title}</option>
-              {/each}
-            </select>
+        {#if draft.file.trim() !== "" || draft.command.includes("{file}")}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-app-tryfile">File<small>A path inside the checkout.</small></label>
+            <div class="tf-stg-c">
+              <input id="tf-app-tryfile" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-app-files" disabled={repo === null} bind:value={file} />
+              <datalist id="tf-app-files">
+                {#each (files ?? []).slice(0, FILES_SHOWN) as one (one)}<option value={one}></option>{/each}
+              </datalist>
+            </div>
           </div>
-        </div>
-      {/if}
-    </div>
+        {/if}
+        {#if draft.commit.trim() !== "" || draft.range.trim() !== ""}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-app-trycommit">Commit<small>A range is this commit and the one before it.</small></label>
+            <div class="tf-stg-c">
+              <select id="tf-app-trycommit" class="tf-stg-in" bind:value={commit} disabled={commits === null || commits.length === 0}>
+                {#if commits === null}<option value={commit}>{tryOn.none ? "" : "Reading…"}</option>{:else if commits.length === 0}<option value={null}>No commits</option>{/if}
+                {#if commit !== null && commits !== null && !commits.some((one) => one.sha === commit)}<option value={commit}>{commit.slice(0, 12)}</option>{/if}
+                {#each (commits ?? []).slice(0, COMMITS_SHOWN) as one (one.sha)}
+                  <option value={one.sha}>{one.sha.slice(0, 7)} {one.title}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        {/if}
+        {#if draft.pr.trim() !== ""}
+          <div class="tf-stg-row">
+            <label class="tf-stg-l" for="tf-app-trypr">Pull request</label>
+            <div class="tf-stg-c">
+              <select id="tf-app-trypr" class="tf-stg-in" bind:value={prPick} disabled={prs === null || prs.length === 0}>
+                {#if prs === null}<option value={prPick}>{tryOn.none ? "" : "Reading…"}</option>{:else if prs.length === 0}<option value={null}>No pull requests</option>{/if}
+                {#each (prs ?? []).slice(0, PRS_SHOWN) as one (one.id)}
+                  <option value={one.number}>#{one.number} {one.title}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        {/if}
+      {/snippet}
+    </TfTryOn>
 
     <div class="tf-stg-sec">
       <h2>Commands</h2>

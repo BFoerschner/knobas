@@ -112,6 +112,11 @@ export const EVENTS = {
   updateState: "update:state",
   /** `LinkHandoffTarget` — an external URL handed off via `knobas://` or the Firefox Native Messaging host (ADR-0061). */
   linkHandoffOpen: "link-handoff:open",
+  /**
+   * `LookingAgain` — a repository's bounded schedule after a branch moved (ADR-0064 rule 2, #2585) started, one of its
+   * sides stopped, or it ended. The repository's Builds tab says *Looking for new builds…* while `builds` is true.
+   */
+  lookingAgain: "looking:again",
 } as const;
 
 /** What every command rejects with — `knobas_app::IpcError`. */

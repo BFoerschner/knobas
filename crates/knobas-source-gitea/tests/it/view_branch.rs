@@ -29,6 +29,9 @@ const FEATURE_WIRE: &str = "feature%2FPAY-231-sepa-retry";
 const TIP: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
 const FIRST: &str = "7be0e4a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
 const MAIN_TIP: &str = "1111111111111111111111111111111111111111";
+/// Where the feature branch was cut from main: the merge base, an ancestor of
+/// `MAIN_TIP` too.
+const FORK: &str = "2222222222222222222222222222222222222222";
 
 /// The compare's diff: two files, one added.
 const DIFF: &str = "diff --git a/src/retry.rs b/src/retry.rs
@@ -107,6 +110,9 @@ struct Served {
     /// Forgejo's compare JSON says no commits and no files, and its web route
     /// answers that with the compare page in HTML (measured on 17.0.0).
     forgejo_nothing_ahead: bool,
+    /// Forgejo's compare JSON lists the branch's commits with their parents,
+    /// as Forgejo 17.0.0 answers it, so the range meets main at `FORK`.
+    forgejo_parents: bool,
 }
 
 impl Default for Served {
@@ -129,6 +135,7 @@ impl Default for Served {
             mirror: false,
             forgejo: None,
             forgejo_nothing_ahead: false,
+            forgejo_parents: false,
         }
     }
 }
@@ -208,6 +215,12 @@ async fn gitea(served: Served) -> MockServer {
     // of two files -- the count is files, not touches.
     let compare_json = if served.forgejo_nothing_ahead {
         json!({"total_commits": 0, "commits": [], "files": []})
+    } else if served.forgejo_parents {
+        let mut tip = listed(TIP, "PAY-231: jitter", "2026-08-22T11:42:00Z", &[]);
+        tip["parents"] = json!([{ "sha": FIRST }]);
+        let mut first = listed(FIRST, "PAY-231: retry", "2026-08-21T17:30:00Z", &[]);
+        first["parents"] = json!([{ "sha": FORK }]);
+        json!({"total_commits": 2, "commits": [tip, first], "files": []})
     } else {
         json!({"total_commits": 2, "commits": [], "files": []})
     }
@@ -1112,4 +1125,54 @@ async fn a_branch_whose_checks_cannot_be_read_still_draws_and_says_so() {
         })
         .collect();
     assert_eq!(drawn, [(true, Some(Tone::Muted), &None)], "{rows:#?}");
+}
+
+/// Forgejo's web route diffs `main...branch` from main's tip, not from where
+/// the branch was cut (measured on 17.0.0, #2540): every file main gained
+/// since is drawn as one the branch deletes. Where the compare's JSON settles
+/// the merge base, the diff is read from it to the branch's tip, which is the
+/// branch's own changes.
+#[tokio::test]
+async fn a_forgejo_diff_is_read_from_the_merge_base_not_from_mains_tip() {
+    let server = gitea(Served {
+        forgejo: Some(true),
+        forgejo_parents: true,
+        ..Served::default()
+    })
+    .await;
+    let from_main_tip = format!(
+        "{DIFF}diff --git a/schemas/partner-order-2.xsd b/schemas/partner-order-2.xsd
+deleted file mode 100644
+index 5786b13..0000000
+--- a/schemas/partner-order-2.xsd
++++ /dev/null
+@@ -1 +0,0 @@
+-<xs:schema/>
+"
+    );
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/tidewater/payout-service/compare/main...{FEATURE_WIRE}.diff"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_string(from_main_tip))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/tidewater/payout-service/compare/{FORK}...{TIP}.diff"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(FEATURE, Some("diff"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["src/retry.rs", "CHANGELOG.md"], "the branch's own");
 }

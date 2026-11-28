@@ -11,9 +11,20 @@
  * (`repo.ts`'s `branchStanding`); the sentences the source wrote are drawn as
  * it wrote them.
  */
-import type { SourceView, Tone, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../ipc/entity";
+import type { EntityFilter, SourceView, Tone, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../ipc/entity";
 import { viewStamp } from "../../time/format";
 import { stateWord } from "../state-word";
+
+/** How many repositories one read asks for: a source with more is read on with `offset` (#1825). */
+export const PR_REPOS_LIMIT = 1000;
+
+/**
+ * The read of the repositories the pull request's page finds its own among (`TfPr.svelte`'s `readRepo`): the source's
+ * repositories, newest first. One place, so a read made ahead of the page (`TfPrCreating.svelte`) is the page's own.
+ */
+export function prReposFilter(row: { source_id: string }): EntityFilter {
+  return { sources: [row.source_id], kinds: ["repo"], updated_within_days: null, order: "updated_desc", context: null, project: null, include_deleted: false, reach: null };
+}
 
 /** The page's tabs, in prototype-6's order; *Files changed* is #842's. */
 export const PR_TABS = [

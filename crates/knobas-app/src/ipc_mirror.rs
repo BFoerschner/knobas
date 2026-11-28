@@ -61,6 +61,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::commands::oneoff::OneOffShell::export_all(cfg)?;
     crate::folder_render::FolderMarks::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderView::export_all(cfg)?;
+    crate::try_on::TryOn::export_all(cfg)?;
     crate::folder_render::runs::FolderRenderMoved::export_all(cfg)?;
     crate::folder_render::runs::Ask::export_all(cfg)?;
     crate::folder_render::made::MadeTree::export_all(cfg)?;
@@ -410,6 +411,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::sources::installed::Removal::export_all(cfg)?;
     knobas_sync::SyncReport::export_all(cfg)?;
     knobas_sync::scheduler::RefreshEnded::export_all(cfg)?;
+    knobas_sync::scheduler::LookingAgain::export_all(cfg)?;
     knobas_sync::progress::SyncProgress::export_all(cfg)?;
     knobas_sync::run_log::SourceSyncStatus::export_all(cfg)?;
     knobas_sync::stats::DbStats::export_all(cfg)?;

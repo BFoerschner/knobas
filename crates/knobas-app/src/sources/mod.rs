@@ -7,12 +7,14 @@
 
 pub mod crud;
 pub mod demo;
+pub mod effects;
 pub mod files_on_sync;
 pub mod follow_run;
 pub mod held;
 pub mod install;
 pub mod installed;
 pub mod live;
+pub mod look_again;
 pub mod paths;
 pub mod pick_on_sync;
 pub mod progress;

@@ -409,6 +409,27 @@ export function addFakeRuns(now: Date = new Date()): void {
   }
 }
 
+/**
+ * `?fake-run-ends` (#2558): a running fixture run read at its source by id (`refresh_entity`) has finished, passed, as a
+ * TeamCity read finds a build that ended since the last sync, so a page that reads its runs in flight shows one move.
+ * The answer says whether `id` was a running run it ended.
+ */
+export function endFakeRun(id: string, now: Date = new Date()): boolean {
+  history(now);
+  for (const runs of built!.runs.values()) {
+    const run = runs.find((one) => one.entity_id === id);
+    if (run === undefined) continue;
+    if (run.finished !== null || run.started === null) return false;
+    run.state = STATE.success;
+    run.finished = now.toISOString();
+    run.updated_at = run.finished;
+    run.duration_seconds = Math.max(1, Math.round((now.getTime() - Date.parse(run.started)) / 1000));
+    run.current_step = null;
+    return true;
+  }
+  return false;
+}
+
 onFakeReset(() => {
   built = null;
   longPaths = false;
@@ -1039,6 +1060,12 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // `?fake-branch-pulls` answers it as the real mirror does (`payoutBranchPulls`, the compare-first-open pass).
     repo_branch_pulls: (args) =>
       new URLSearchParams(globalThis.location?.search).has("fake-branch-pulls") ? payoutBranchPulls(String(args["repoId"] ?? "")) : [],
+    // After a branch moved, its repository's bounded schedule (#2585): nothing is looked at, but `?fake-looking`, which
+    // looks for `payout-service`'s builds, so its Builds tab says *Looking for new builds…*.
+    looking_again: () =>
+      new URLSearchParams(globalThis.location?.search).has("fake-looking")
+        ? [{ scope: "mock:tidewater/payout-service", code: true, builds: true }]
+        : [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
     commit_repositories: (args) =>
       ((args["commitIds"] as string[] | undefined) ?? []).flatMap((commitId) => {

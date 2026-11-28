@@ -32,6 +32,10 @@ pub struct Delivery {
     /// The link an arrival draws from what the write made to the job it was
     /// made for, if any.
     pub link: Option<ArrivalLink>,
+    /// What else the write moves, read back at once after it lands, each at
+    /// its own source and in its own place (ADR-0064). Empty for an op that
+    /// moves nothing beyond the item it is read back by.
+    pub effects: &'static [Effect],
 }
 
 /// What a held write compares. Which one an op gets is a statement about
@@ -108,6 +112,21 @@ impl ArrivalLink {
             Self::Documents => "documents",
         }
     }
+}
+
+/// Something a landed write moves beyond the item it is read back by
+/// (`CONTEXT.md` *Effect*, ADR-0064), named in knobas' terms and resolved
+/// from the mirror when the write lands, never from one adapter's keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect {
+    /// The target's declared parent (`sync.item_parent`): a pull request's
+    /// repository, read by the walk under it (ADR-0047), which brings its
+    /// branches' heads, a deleted branch's tombstone and the issues a merge
+    /// closed.
+    Parent,
+    /// The tickets the target is linked to (`knobas.confirmed_link`, either
+    /// end), each refreshed at whichever source holds it.
+    LinkedTickets,
 }
 
 #[cfg(test)]

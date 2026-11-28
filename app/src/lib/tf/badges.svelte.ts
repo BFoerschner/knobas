@@ -44,6 +44,11 @@ export interface Badges {
   readonly builds: BubbleCounts | null;
   readonly monitors: number | null;
   refresh(): Promise<void>;
+  /**
+   * The monitors' count alone: the shell's start (#2569b). The builds' counts are read by the runs store's first word
+   * to the backend (`runsRead.started`, `inFront`), so a read here too went out beside Recent's first page.
+   */
+  readMonitors(): Promise<void>;
   /** Subscribe to the events that move the counts. Returns the teardown. */
   start(): () => void;
   /** Tests only: unsubscribe and forget the counts (#1743). */
@@ -134,6 +139,7 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
       return state.monitors;
     },
     refresh,
+    readMonitors,
     start() {
       if (live) return () => {};
       live = true;

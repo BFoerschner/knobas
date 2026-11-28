@@ -112,6 +112,16 @@ impl Source for ViewsExcused {
         self.0.refresh(entity).await
     }
 
+    /// Delegated: a configuration's walk reads `/app/rest/builds` by
+    /// `buildType:`, which mockd serves (#2564).
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        self.0.refresh_under(entity, cursor).await
+    }
+
     async fn view(
         &self,
         entity: &str,
@@ -249,6 +259,47 @@ async fn a_refresh_reads_a_build_by_id_and_a_404_as_gone() {
     }
     let gone = source.refresh("teamcity:build:987654").await;
     assert!(matches!(gone, Ok(RefreshAnswer::Gone)), "{gone:?}");
+    server.assert_no_violations();
+}
+
+/// **⌘R on a repository's Builds tab finds a configuration's new build**
+/// (#2564), over the wire: after a run, a build queued at TeamCity comes back
+/// from the walk of its configuration, as the run would emit it, and the
+/// position stays where the run left it. The locator is one mockd's grammar
+/// accepts (no violation), and asks that configuration alone.
+#[tokio::test]
+async fn a_walk_of_a_configuration_finds_a_build_queued_since_the_run() {
+    use knobas_source::UnderAnswer;
+    let server = spawn_mock_teamcity().await;
+    let cfg = quiet_build_type();
+    let source = adapter(&server.base_url(), serde_json::json!({}));
+    let (_, cursor) = sync(source.as_ref(), None).await;
+    let entity = format!("teamcity:buildType:{cfg}");
+    match source.refresh_under(&entity, Some(&cursor)).await {
+        Ok(UnderAnswer::Walked {
+            items,
+            cursor: None,
+        }) => {
+            assert!(items.is_empty(), "nothing new yet; got {:?}", keys(&items));
+        }
+        other => panic!("the walk of {entity}, not {other:?}"),
+    }
+
+    let queued = server.state().queue_build(&cfg, "main");
+    let walked = match source.refresh_under(&entity, Some(&cursor)).await {
+        Ok(UnderAnswer::Walked {
+            items,
+            cursor: None,
+        }) => items,
+        other => panic!("the walk of {entity}, not {other:?}"),
+    };
+    assert_eq!(keys(&walked), [format!("build:{queued}")]);
+    let (synced, _) = sync(source.as_ref(), Some(cursor)).await;
+    let by_run = synced
+        .iter()
+        .find(|i| i.entity.key == format!("build:{queued}"))
+        .expect("the run emits the queued build");
+    assert_eq!(walked[0].payload, by_run.payload);
     server.assert_no_violations();
 }
 

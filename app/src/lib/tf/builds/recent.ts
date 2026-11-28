@@ -178,9 +178,19 @@ export function recentMarks(
   return { ...runMarks(run, pairs), name: fields.cut(pairs, 1), place: fields.cut(pairs, 2) };
 }
 
-/** The pipelines of a page by id, laid over those held: a page names only the pipelines of its own runs. */
-export function withPipelines(held: ReadonlyMap<string, RecentPipeline>, page: readonly RecentPipeline[]): Map<string, RecentPipeline> {
+/**
+ * The pipelines of a page by id, laid over those held: a page names only the pipelines of its own runs. A page that
+ * names none new or changed keeps `held` itself, so the rows already drawn are not drawn again: the rest of Recent's
+ * first page, laid behind its first rows, named the same pipelines and re-derived every drawn row (#2569b).
+ */
+export function withPipelines(held: ReadonlyMap<string, RecentPipeline>, page: readonly RecentPipeline[]): ReadonlyMap<string, RecentPipeline> {
+  if (page.every((pipeline) => samePipeline(held.get(pipeline.entity_id), pipeline))) return held;
   const all = new Map(held);
   for (const pipeline of page) all.set(pipeline.entity_id, pipeline);
   return all;
+}
+
+/** Whether `held` is `page`'s pipeline as it is: every field the same. */
+function samePipeline(held: RecentPipeline | undefined, page: RecentPipeline): boolean {
+  return held !== undefined && (held === page || JSON.stringify(held) === JSON.stringify(page));
 }

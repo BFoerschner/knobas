@@ -126,6 +126,7 @@ import type { QueuedWrite, WriteOpPayload } from "./sources";
 // `DayWindow` the timesheet does rather than declaring a second shape for one
 // wire format, which is the rule the import above follows for the queue's.
 import type { DayWindow } from "./time";
+import type { TryOn } from "./generated/app";
 
 export type {
   BubbleCounts,
@@ -1753,6 +1754,14 @@ export function openObject(entityId: string, application: string | null, object:
  */
 export function openFolder(entityId: string, application: string | null, folder: string): Promise<string[]> {
   return invoke<string[]>("open_folder", { entityId, application, folder });
+}
+
+/**
+ * *Try it on* (#2562): saved application `application` on pasted text (a throwaway file of its name), a chosen file or a
+ * chosen folder, as on a checkout. Answers the argument vector it started.
+ */
+export function openTry(application: string, on: TryOn): Promise<string[]> {
+  return invoke<string[]>("open_try", { application, on });
 }
 
 /**

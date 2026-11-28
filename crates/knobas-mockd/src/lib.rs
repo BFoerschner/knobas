@@ -276,6 +276,12 @@
 //!     `knobas-source-jira`, and the rest by `live_jira_seeded`. Because the
 //!     adapter reads `text/html` without a disposition as that page, an HTML
 //!     file in mockd's fixture would read as refused; none is listed.
+//! 21. **No TeamCity build waits on another (#2594).** The dataset chains no
+//!     configuration, and `BUILD_FIELDS` asks for
+//!     `snapshot-dependencies(build(id))`, which would otherwise be an
+//!     `UnknownField` 400. mockd serves every build an empty list, the shape
+//!     of a build with no snapshot dependency. The chain itself is witnessed
+//!     against the real seeded server (`teamcity-live-seeded`), never here.
 //!
 //! ## The shared credentials
 //!

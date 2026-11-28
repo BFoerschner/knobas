@@ -102,6 +102,7 @@ an SSH tunnel.
 | `frame-budget.sh` | what `just frame-budget` runs |
 | `open.mjs`, `open-probe.js` | how long a press takes to show a page's content, first visit to after a sync (below) |
 | `budget-open.json`, `open-budget.sh` | the opens' lines and what `just open-budget` runs (`--inner`, `--forge`: below) |
+| `open-cold.sh` | Recent's first open on a cold start, a fresh backend each round (`just open-cold`, *Opening a page*, below) |
 | `inner-items.json`, `slow-forge.mjs` | the inner pages' items per throttle, and the proxy that slows the forge (below) |
 | `extremes.mjs`, `extremes-items.json` | the extremes an `--extremes` run seeds, syncs, presses and removes (*The extremes*, below) |
 | `big-folders.mjs`, `folders.mjs` | the big folders an `--inner` run makes, presses and removes, and one folder's press broken down (*Big folders*, below) |
@@ -149,7 +150,9 @@ check, and the probe goes on with the next case. Calls from the attempt that was
 cannot act on the fresh page, and so does every later call of an attempt that stalled, so a probe that catches the
 error and goes on cannot wait out each deadline in turn. A soak's lap is not tried again (a fresh page would not read
 what the session grew): the soak ends failed-to-run. `compare.mjs` keeps its own way, a fresh Chrome for the next step.
-`KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit; `watchdog-test.sh` runs the tests at 0.01 in about 12 s.
+`KNOBAS_PERF_WATCHDOG_SCALE` multiplies every limit; `watchdog-test.sh` runs the tests at 0.01 in about 12 s, with the
+launch and connect limits at 60 s (`KNOBAS_PERF_START_MS`): a loaded machine takes longer than 300 ms to start a
+process and 150 ms for it to list its page (#2546).
 
 ## A layer over a list (the ux24 pass, 2026-11-20)
 
@@ -232,6 +235,12 @@ HOME="$TMPDIR/home" cargo run --release -p knobas-app --features test-util --exa
 just open-budget --real 5411
 curl -X POST http://127.0.0.1:5411/quit
 ```
+
+Every place above reloads the page on a backend that has been up for minutes, which no start of the app does: its
+bring-up work (the fills, the picker's names, the sync engine's first runs) has long ended. `just open-cold --backend
+<release headless_ipc> --home <a copy of the saved home>` starts the backend afresh each round, loads the page the moment
+it answers and presses Recent as soon as the nav draws (`builds-recent-start`, at 1x unless `--throttle` says otherwise),
+so Recent's first read meets the start-up reads and whatever bring-up left running (#2569b).
 
 `--timings` makes the windowless backend append one line a command (its name, its arguments, when it arrived and
 left, the backend's time on it, the answer's bytes), which splits an open into what the backend spent and what the

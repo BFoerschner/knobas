@@ -1132,6 +1132,98 @@ pub(crate) async fn refresh(
     )))
 }
 
+/// How many of a configuration's newest builds a walk asks for, in each of
+/// its two reads (#2564). A repository's Builds tab draws each pipeline's
+/// newest run per branch; a walk finds what started or finished since the
+/// last run, which at a five-minute interval is a handful. Fewer than
+/// `builds_per_config` when that is set lower.
+pub(crate) const WALK_BUILDS: u32 = 25;
+
+/// **The walk of one build configuration** (#2564, ADR-0047 as amended
+/// 2026-11-27): what ⌘R on a repository's Builds tab asks of each of its
+/// pipelines, so a run started at TeamCity since the last run shows.
+///
+/// Two reads of that configuration alone, each its newest [`WALK_BUILDS`]
+/// above the stored watermark: the finished ones, with the facets the run's
+/// item-producing queries open ([`window`]), and the queued and running
+/// ones. The builds above the watermark are what the next run emits anyway:
+/// every build the last run saw in flight is above it (`cursor::advance`
+/// clamps it under them), and so is every build since. So the walk writes
+/// nothing a run would not, and from the position a run just left on an
+/// unchanged server it finds nothing (battery clause 13).
+///
+/// **It moves no watermark** (`cursor: None`): it saw one configuration, and
+/// the watermark is the server's. The next run reads from where it stood and
+/// writes the same builds again.
+///
+/// No position, or one taken under another scope, is
+/// [`NotOffered`](knobas_source::UnderAnswer::NotOffered): that run owes the
+/// scope its window. A configuration outside the scope walks to nothing.
+pub(crate) async fn refresh_under(
+    source_id: &str,
+    base_url: &str,
+    cfg: &TeamCityConfig,
+    rest: &dyn Rest,
+    build_type_id: &str,
+    cursor: Option<&str>,
+) -> Result<knobas_source::UnderAnswer, SourceError> {
+    use knobas_source::UnderAnswer;
+    let Some(position) = cursor
+        .and_then(cursor::parse)
+        .filter(|p| p.scope == cursor::scope(cfg))
+    else {
+        return Ok(UnderAnswer::NotOffered);
+    };
+    let watermark = position.since_build_id;
+    let count = cfg.builds_per_config.min(WALK_BUILDS);
+    let finished = rest
+        .builds(&Locator {
+            build_type_id: Some(build_type_id.to_owned()),
+            state: Some(StateFilter::Finished),
+            since_build_id: Some(watermark),
+            canceled_any: true,
+            failed_to_start_any: true,
+            branch_any: true,
+            count,
+            ..Locator::default()
+        })
+        .await?
+        .items;
+    let in_flight = rest
+        .builds(&Locator {
+            build_type_id: Some(build_type_id.to_owned()),
+            state: Some(StateFilter::InFlight),
+            since_build_id: Some(watermark),
+            count,
+            ..Locator::default()
+        })
+        .await?
+        .items;
+    // By id, oldest first as a run emits; the finished observation last so it
+    // wins, as in the run. Above the watermark only, whatever the server did
+    // with `sinceBuild`.
+    let mut above: BTreeMap<i64, &Rec<Build>> = BTreeMap::new();
+    for b in in_flight.iter().chain(finished.iter()) {
+        if b.rec.id > watermark && type_id_of(&b.rec) == Some(build_type_id) {
+            above.insert(b.rec.id, b);
+        }
+    }
+    let mut tree = None;
+    if !cfg.project_ids.is_empty() && !above.is_empty() {
+        read_tree(rest, &mut tree).await?;
+    }
+    let no_tree = ProjectTree::default();
+    let items = above
+        .values()
+        .filter(|b| in_scope_build(cfg, tree.as_ref().unwrap_or(&no_tree), &b.rec))
+        .map(|b| map::build_item(source_id, base_url, &b.raw, &b.rec))
+        .collect();
+    Ok(UnderAnswer::Walked {
+        items,
+        cursor: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,6 +1260,9 @@ mod tests {
         /// A server whose ceiling probe misses `sinceBuild` -- see
         /// [`FakeRest::probe_misses_since_build`].
         probe_misses_since_build: bool,
+        /// A server that ignores `buildType` and `sinceBuild` on every
+        /// builds query -- see [`FakeRest::deaf_to_config_and_since`].
+        deaf_to_config_and_since: bool,
         /// What the by-id record read fails with instead of answering
         /// (a refresh's failure, #2099). `None` answers.
         fault: Option<fn() -> SourceError>,
@@ -1207,6 +1302,7 @@ mod tests {
                 projects: None,
                 silent: false,
                 probe_misses_since_build: false,
+                deaf_to_config_and_since: false,
                 fault: None,
                 calls: Mutex::new(Vec::new()),
             }
@@ -1271,6 +1367,15 @@ mod tests {
         /// `refuse_a_replaced_server` keeps for exactly such a server.
         fn probe_misses_since_build(mut self) -> Self {
             self.probe_misses_since_build = true;
+            self
+        }
+
+        /// A server that **ignores `buildType` and `sinceBuild`** on every
+        /// builds query, as no measured TeamCity does: the one way to reach
+        /// the configuration walk's own filters (#2564), which keep such a
+        /// server's other configurations and older builds out of its answer.
+        fn deaf_to_config_and_since(mut self) -> Self {
+            self.deaf_to_config_and_since = true;
             self
         }
 
@@ -1435,13 +1540,15 @@ mod tests {
                             != Some(false)
                 })
                 .filter(|r| {
-                    locator
-                        .build_type_id
-                        .as_deref()
-                        .is_none_or(|id| r.rec.build_type_id.as_deref() == Some(id))
+                    self.deaf_to_config_and_since
+                        || locator
+                            .build_type_id
+                            .as_deref()
+                            .is_none_or(|id| r.rec.build_type_id.as_deref() == Some(id))
                 })
                 .filter(|r| {
-                    (self.probe_misses_since_build && is_ceiling_probe(locator))
+                    self.deaf_to_config_and_since
+                        || (self.probe_misses_since_build && is_ceiling_probe(locator))
                         || locator.since_build_id.is_none_or(|since| r.rec.id > since)
                 })
                 .collect();
@@ -4171,5 +4278,175 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
+    }
+
+    // -- the walk of one configuration: its newest builds (#2564, ADR-0047) --
+
+    async fn walk(
+        rest: &FakeRest,
+        cfg: &TeamCityConfig,
+        config: &str,
+        cursor: Option<&str>,
+    ) -> knobas_source::UnderAnswer {
+        refresh_under("teamcity", TEST_BASE_URL, cfg, rest, config, cursor)
+            .await
+            .expect("walk")
+    }
+
+    fn walked(answer: knobas_source::UnderAnswer) -> Vec<SyncItem> {
+        match answer {
+            knobas_source::UnderAnswer::Walked { items, cursor } => {
+                assert_eq!(cursor, None, "a walk of a configuration moves no watermark");
+                items
+            }
+            other @ knobas_source::UnderAnswer::NotOffered => {
+                panic!("expected the walk, got {other:?}")
+            }
+        }
+    }
+
+    /// **⌘R on a repository's Builds tab finds the new runs of its
+    /// pipelines** (#2564): the walk of one configuration reads its newest
+    /// builds, finished and in flight, and answers the ones above the
+    /// watermark the run left -- a build started at TeamCity since, and one
+    /// that finished since -- as the run maps them. Another configuration's
+    /// new build is not asked about, and the watermark stays where it was.
+    #[tokio::test]
+    async fn a_walk_of_a_configuration_finds_its_builds_since_the_run() {
+        let cfg = TeamCityConfig::default();
+        let (_, cursor) = run(&tidewater(), &cfg, None).await;
+        let later = FakeRest::new(
+            vec![
+                build_type("Payout_Build", "Payout"),
+                build_type("Payout_IntegrationTests", "Payout"),
+                build_type("Ledger_Deploy_Staging", "Ledger"),
+            ],
+            vec![
+                build(1192, "Payout_IntegrationTests", "Payout", "finished"),
+                build(1191, "Payout_Build", "Payout", "queued"),
+                build(1190, "Payout_Build", "Payout", "running"),
+                build(1189, "Payout_Build", "Payout", "finished"),
+                build(1188, "Payout_Build", "Payout", "finished"),
+                build(1187, "Payout_IntegrationTests", "Payout", "finished"),
+                build(1186, "Payout_Build", "Payout", "finished"),
+                build(412, "Ledger_Deploy_Staging", "Ledger", "finished"),
+            ],
+        );
+        let items = walked(walk(&later, &cfg, "Payout_Build", Some(&cursor)).await);
+        assert_eq!(
+            keys(&items),
+            ["build:1188", "build:1189", "build:1190", "build:1191"],
+            "the configuration's builds above the watermark, oldest first; 1186 is below it \
+             and the run already wrote it"
+        );
+        let (synced, _) = run(&later, &cfg, Some(cursor)).await;
+        for item in &items {
+            let by_run = synced
+                .iter()
+                .find(|i| i.entity == item.entity)
+                .unwrap_or_else(|| panic!("the run emits {}", item.entity));
+            assert_eq!(item.payload, by_run.payload);
+            assert_eq!(item.web_url, by_run.web_url);
+            assert_eq!(item.title, by_run.title);
+        }
+        assert_eq!(
+            later.calls()[..2],
+            [
+                "buildType:(id:Payout_Build),state:finished,sinceBuild:(id:1187),canceled:any,\
+                 failedToStart:any,branch:default:any,count:25",
+                "buildType:(id:Payout_Build),state:(queued:true,running:true),\
+                 sinceBuild:(id:1187),count:25",
+            ],
+            "one configuration's newest builds, never a source-wide read"
+        );
+    }
+
+    /// **From the position a run just left, on an unchanged server, the walk
+    /// emits nothing** (contract battery clause 13): a press with no news
+    /// rewrites no row.
+    #[tokio::test]
+    async fn a_walk_from_the_runs_own_position_finds_nothing() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(1189, "Payout_Build", "Payout", "finished"),
+                build(1188, "Payout_Build", "Payout", "finished"),
+            ],
+        );
+        let cfg = TeamCityConfig::default();
+        let (_, cursor) = run(&rest, &cfg, None).await;
+        assert!(walked(walk(&rest, &cfg, "Payout_Build", Some(&cursor)).await).is_empty());
+    }
+
+    /// **No position, no walk** (ADR-0047): with none stored, or one taken
+    /// under another scope, the run owes the scope its window, which a walk
+    /// may not stand in for.
+    #[tokio::test]
+    async fn a_walk_with_no_position_of_this_scope_is_not_offered() {
+        let cfg = TeamCityConfig::default();
+        let (_, cursor) = run(&tidewater(), &cfg, None).await;
+        let scoped = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": ["Payout_Build"]
+        }))
+        .expect("config");
+        for (cfg, cursor) in [
+            (&cfg, None),
+            (&cfg, Some("not a cursor")),
+            (&scoped, Some(cursor.as_str())),
+        ] {
+            let answer = walk(&tidewater(), cfg, "Payout_Build", cursor).await;
+            assert!(
+                matches!(answer, knobas_source::UnderAnswer::NotOffered),
+                "{cursor:?}: {answer:?}"
+            );
+        }
+    }
+
+    /// **A server that ignores `buildType` and `sinceBuild` still walks to
+    /// the configuration's builds above the watermark** (#2564): another
+    /// configuration's new build and the configuration's own build below the
+    /// watermark, which the run already wrote, are left out by the walk
+    /// itself, not by the server.
+    #[tokio::test]
+    async fn a_walk_keeps_a_deaf_servers_other_and_older_builds_out() {
+        let cfg = TeamCityConfig::default();
+        let (_, cursor) = run(&tidewater(), &cfg, None).await;
+        let deaf = FakeRest::new(
+            vec![
+                build_type("Payout_Build", "Payout"),
+                build_type("Payout_IntegrationTests", "Payout"),
+            ],
+            vec![
+                build(1192, "Payout_IntegrationTests", "Payout", "finished"),
+                build(1191, "Payout_IntegrationTests", "Payout", "running"),
+                build(1189, "Payout_Build", "Payout", "running"),
+                build(1188, "Payout_Build", "Payout", "finished"),
+                build(1186, "Payout_Build", "Payout", "finished"),
+            ],
+        )
+        .deaf_to_config_and_since();
+        let items = walked(walk(&deaf, &cfg, "Payout_Build", Some(&cursor)).await);
+        assert_eq!(
+            keys(&items),
+            ["build:1188", "build:1189"],
+            "the server answered 1191 and 1192 of another configuration and 1186 below the \
+             watermark; the walk keeps only its own above it"
+        );
+    }
+
+    /// **A configuration outside the scope walks to nothing**, as the run
+    /// never emits its builds.
+    #[tokio::test]
+    async fn a_walk_of_a_configuration_outside_the_scope_emits_nothing() {
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({
+            "build_type_ids": ["Ledger_Deploy_Staging"]
+        }))
+        .expect("config");
+        let (_, cursor) = run(&tidewater(), &cfg, None).await;
+        let later = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![build(1300, "Payout_Build", "Payout", "finished")],
+        );
+        assert!(walked(walk(&later, &cfg, "Payout_Build", Some(&cursor)).await).is_empty());
     }
 }

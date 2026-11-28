@@ -10,9 +10,13 @@
     (globs separated by spaces, both empty for every folder), what it makes
     and a timeout. A placeholder other than the two, or a command without
     `{path}`, is said under the field and the backend refuses it too.
-  - **Try it on**: a repository with a checkout on this disk and one of its
-    folders. *Try it* saves the draft (only a saved command runs, ADR-0016)
-    and draws the folder under it with `TfFolderRender`, running it again.
+  - **Try it on** (`TfTryOn`, #2562): a folder chosen anywhere on this disk,
+    pasted text or a chosen file (each as a folder holding only it), or a
+    repository with a checkout on this disk and one of its folders. *Try it*
+    saves the draft (only a saved command runs, ADR-0016) and draws it under
+    it with `TfFolderRender`, running it again. A try outside a repository
+    runs in the tries' own registry (`try_folder_render`): nothing goes to the
+    folder renders' cache or the generated-folders store.
     Leaving without *Save* takes the try back: the entry as it was before
     the first try, or gone if it was new.
   - *Save*, *Cancel* and *Remove* go back where the page was opened from.
@@ -36,6 +40,9 @@
   import TfTryMore from "../openin/TfTryMore.svelte";
   import { LAND_ADD, landOn } from "./landing";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
+  import { TRY_ENTITY, TRY_LANE, tryFolderRender, type Ask, type TryOn } from "../../ipc/app";
+  import TfTryOn from "./TfTryOn.svelte";
+  import { tryName, type TrySource } from "./try-on";
   import { fileHash } from "../repo/repo";
   import {
     commandWhy,
@@ -54,6 +61,7 @@
     folders = folderRenderers,
     reads = realTryReads,
     ports = ipcFolderRenderPorts,
+    tryRender = tryFolderRender,
     back = null,
     leave = undefined,
   }: {
@@ -61,6 +69,8 @@
     folders?: FolderRenderers;
     reads?: Pick<TryReads, "repos" | "checkouts" | "files">;
     ports?: FolderRenderPorts;
+    /** A try outside a repository (#2562): the bridge's `try_folder_render`, a fake in tests. */
+    tryRender?: (renderer: string, on: TryOn, ask: Ask) => Promise<import("../../ipc/app").FolderRenderView>;
     back?: (Pick<EscTargetOf, "name"> & Partial<EscTargetOf>) | null;
     leave?: (() => void) | undefined;
   } = $props();
@@ -165,8 +175,14 @@
 
   /** A try's save: the entry as it was before the first one, and the id the save gave it. */
   let tried = $state<{ before: FolderRenderer | null; id: string } | null>(null);
-  /** What *Try it* draws: the renderer saved for it, the repository and folder, a new key per press. */
-  let trying = $state<{ renderer: FolderRenderer; repo: string; title: string; folder: string; press: number } | null>(null);
+  /** What *Try it* draws: the renderer saved for it, the repository and folder (or the example), a new key per press. */
+  let trying = $state<
+    | { renderer: FolderRenderer; repo: string; title: string; folder: string; press: number; on?: undefined }
+    | { renderer: FolderRenderer; on: TryOn; press: number }
+    | null
+  >(null);
+  /** The sources *Try it on* offers: a folder of the person's own first, a repository's where the page came from one. */
+  const SOURCES: readonly TrySource[] = untrack(() => (at.repo ? ["repo", "folder", "text", "file"] : ["folder", "text", "file", "repo"]));
   let presses = 0;
 
   async function store(list: ReturnType<typeof withFolderDraft>) {
@@ -176,10 +192,8 @@
   /** A *Try it* pressed twice runs once (the press rule): the press holds while it saves and a while after. */
   const tryHold = new PressHold();
 
-  async function tryIt() {
-    const picked = repo;
-    if (!ready || picked === null || tryHold.held()) return;
-    tryHold.hold();
+  /** Save the draft for a try (only a saved command runs, ADR-0016): the entry as saved, or `null` with the refusal said. */
+  async function keepForTry(): Promise<FolderRenderer | null> {
     busy = true;
     error = null;
     const own = tried?.id ?? at.renderer;
@@ -189,19 +203,42 @@
     } catch (cause) {
       error = ipcErrorMessage(cause);
       busy = false;
+      return null;
+    }
+    busy = false;
+    const entry = own !== null ? stored.find((r) => r.id === own) : stored.at(-1);
+    if (entry === undefined) return null;
+    if (tried === null) tried = { before: saved, id: entry.id };
+    return entry;
+  }
+
+  async function tryIt() {
+    const picked = repo;
+    if (!ready || picked === null || tryHold.held()) return;
+    tryHold.hold();
+    const entry = await keepForTry();
+    if (entry === null) {
       // A refused save isn't held, so the corrected command can go at once.
       tryHold.release();
       return;
     }
-    busy = false;
-    const entry = own !== null ? stored.find((r) => r.id === own) : stored.at(-1);
-    if (entry === undefined) return;
-    if (tried === null) tried = { before: saved, id: entry.id };
     noteTried(picked.entityId);
     if (gone) return;
     presses += 1;
     trying = { renderer: entry, repo: picked.entityId, title: picked.title, folder: folder.trim().replace(/^\/+|\/+$/g, ""), press: presses };
   }
+
+  /** *Try it* on a folder, a file or text of the person's own (#2562), in the tries' registry: nothing is kept. */
+  async function tryOnOwn(on: TryOn) {
+    if (!ready) return;
+    const entry = await keepForTry();
+    if (entry === null || gone) return;
+    presses += 1;
+    trying = { renderer: entry, on, press: presses };
+  }
+
+  /** The ports a try outside a repository asks with: the same reads by token, its ask the tries' own. */
+  const tryPorts = (on: TryOn): FolderRenderPorts => ({ ...ports, render: (asked) => tryRender(asked.renderer, on, asked.ask) });
 
   /** Put the list back as it was before the first try. */
   function takeBack() {
@@ -383,44 +420,59 @@
       </div>
     </div>
 
-    <div class="tf-stg-sec">
-      <h2>Try it on</h2>
-      <!-- The rows are drawn while the checkouts are read, and with no checkout anywhere they stay and say so: the answer moves nothing (2026-11-17). -->
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-frp-repo">Repository<small>One with a checkout on this disk.</small></label>
-        <div class="tf-stg-c tf-stg-inl">
-          <select id="tf-frp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none} title={tryOn.failed ?? undefined}>
-            {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}
-                >{tryOn.failed !== null ? `Could not read the repositories: ${tryOn.failed}` : "No repository is cloned on this computer"}</option
-              >{/if}
-            {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
-          </select>
-          <TfTryMore {tryOn} />
-        </div>
-      </div>
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-frp-folder">Folder<small>A path from the top; empty for the top folder.</small></label>
-        <div class="tf-stg-c tf-stg-inl">
-          <input id="tf-frp-folder" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-frp-folders-list" placeholder="flows/orders" bind:value={folder} />
-          <datalist id="tf-frp-folders-list">{#each (folderList ?? []).slice(0, FOLDERS_SHOWN) as one (one)}<option value={one}></option>{/each}</datalist>
-          <button type="button" class="tf-btn tf-sm" disabled={!ready || repo === null} title={ready && repo !== null ? `Saves it, then runs it on ${folder.trim() || "the top folder"} of ${repo.title}` : (why ?? undefined)} onclick={() => void tryIt()}>Try it</button>
-        </div>
-      </div>
-      {#if trying !== null}
-        {#key trying.press}
-          <div class="tf-stg-gap">
-            <TfFolderRender
-              entityId={trying.repo}
-              renderer={trying.renderer}
-              folder={trying.folder}
-              title={trying.title}
-              {ports}
-              fileLink={(to) => fileHash(trying!.repo, to)}
-            />
+    <TfTryOn
+      id="tf-frp-try"
+      sources={SOURCES}
+      why={ready ? null : (why ?? "Saving…")}
+      name="project.lcproj"
+      title="Saves it, then runs it on what you chose"
+      ontry={tryOnOwn}
+    >
+      {#snippet repoRows()}
+        <!-- The rows are drawn while the checkouts are read, and with no checkout anywhere they stay and say so: the answer moves nothing (2026-11-17). -->
+        <div class="tf-stg-row">
+          <label class="tf-stg-l" for="tf-frp-repo">Repository<small>One with a checkout on this disk.</small></label>
+          <div class="tf-stg-c tf-stg-inl">
+            <select id="tf-frp-repo" class="tf-stg-in" bind:value={tryOn.picked} disabled={tryOn.list === null || tryOn.none} title={tryOn.failed ?? undefined}>
+              {#if tryOn.list === null}<option value={null}>Reading…</option>{:else if tryOn.none}<option value={null}
+                  >{tryOn.failed !== null ? `Could not read the repositories: ${tryOn.failed}` : "No repository is cloned on this computer"}</option
+                >{/if}
+              {#each tryOn.list ?? [] as one (one.entityId)}<option value={one.entityId}>{one.title}</option>{/each}
+            </select>
+            <TfTryMore {tryOn} />
           </div>
-        {/key}
-      {/if}
-    </div>
+        </div>
+        <div class="tf-stg-row">
+          <label class="tf-stg-l" for="tf-frp-folder">Folder<small>A path from the top; empty for the top folder.</small></label>
+          <div class="tf-stg-c tf-stg-inl">
+            <input id="tf-frp-folder" class="tf-stg-in tf-mono" type="text" autocomplete="off" spellcheck="false" list="tf-frp-folders-list" placeholder="flows/orders" bind:value={folder} />
+            <datalist id="tf-frp-folders-list">{#each (folderList ?? []).slice(0, FOLDERS_SHOWN) as one (one)}<option value={one}></option>{/each}</datalist>
+            <button type="button" class="tf-btn tf-sm" disabled={!ready || repo === null} title={ready && repo !== null ? `Saves it, then runs it on ${folder.trim() || "the top folder"} of ${repo.title}` : (why ?? undefined)} onclick={() => void tryIt()}>Try it</button>
+          </div>
+        </div>
+      {/snippet}
+      {#snippet result()}
+        {#if trying !== null}
+          {#key trying.press}
+            <div class="tf-stg-gap">
+              {#if trying.on !== undefined}
+                <TfFolderRender entityId={TRY_ENTITY} renderer={trying.renderer} folder="" lane={TRY_LANE} title={tryName(trying.on)} ports={tryPorts(trying.on)} />
+              {:else}
+                {@const shownRepo = trying.repo}
+                <TfFolderRender
+                  entityId={trying.repo}
+                  renderer={trying.renderer}
+                  folder={trying.folder}
+                  title={trying.title}
+                  {ports}
+                  fileLink={(to) => fileHash(shownRepo, to)}
+                />
+              {/if}
+            </div>
+          {/key}
+        {/if}
+      {/snippet}
+    </TfTryOn>
 
     {#if error !== null}<div class="tf-banner tf-err tf-stg-gap" role="alert">{error}</div>{/if}
     <p class="tf-stg-p tf-stg-gap">

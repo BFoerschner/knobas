@@ -171,11 +171,37 @@ export function trackResidue(): ResidueTracker {
     // ceremony around a wrapper that only counts.
   }) as unknown as typeof globalThis.setTimeout;
 
+  // True while jsdom's `requestAnimationFrame` runs: the interval it starts then is its frame clock, not a leak.
+  let framing = false;
   globalThis.setInterval = ((handler: TimerHandler, ms?: number, ...args: unknown[]) => {
     const id = realSetInterval(handler, ms, ...args);
-    timers.set(id, "setInterval");
+    if (!framing) timers.set(id, "setInterval");
     return id;
   }) as typeof globalThis.setInterval;
+
+  // A frame asked for and not yet drawn or called off is armed, as a timeout is; jsdom draws frames on an interval of
+  // its own that it starts at the first request and never stops, which is the environment's and not counted (#2569b).
+  const realRequestFrame = globalThis.requestAnimationFrame;
+  const realCancelFrame = globalThis.cancelAnimationFrame;
+  if (typeof realRequestFrame === "function") {
+    globalThis.requestAnimationFrame = ((run: FrameRequestCallback) => {
+      framing = true;
+      try {
+        const id = realRequestFrame((at) => {
+          timers.delete(frameKey(id));
+          run(at);
+        });
+        timers.set(frameKey(id), "requestAnimationFrame");
+        return id;
+      } finally {
+        framing = false;
+      }
+    }) as typeof globalThis.requestAnimationFrame;
+    globalThis.cancelAnimationFrame = ((id: number) => {
+      timers.delete(frameKey(id));
+      realCancelFrame(id);
+    }) as typeof globalThis.cancelAnimationFrame;
+  }
 
   globalThis.clearTimeout = ((id?: Parameters<typeof clearTimeout>[0]) => {
     timers.delete(id);
@@ -217,6 +243,15 @@ export function trackResidue(): ResidueTracker {
       globalThis.clearTimeout = realClearTimeout;
       globalThis.setInterval = realSetInterval;
       globalThis.clearInterval = realClearInterval;
+      if (typeof realRequestFrame === "function") {
+        globalThis.requestAnimationFrame = realRequestFrame;
+        globalThis.cancelAnimationFrame = realCancelFrame;
+      }
     },
   };
+}
+
+/** A frame's id as a key of the armed timers, apart from the timers' own ids. */
+function frameKey(id: number): string {
+  return `frame ${id}`;
 }

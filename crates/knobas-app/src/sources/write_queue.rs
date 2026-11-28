@@ -305,6 +305,9 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
     }
+    fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
+        self.inner.looking_again(looking);
+    }
     // The files pass's index and progress, passed on wherever this wrapper
     // sits in the stack (`tests/it/files_on_sync.rs`).
     fn files(&self) -> Option<knobas_sync::code_files::Files> {
@@ -892,7 +895,10 @@ fn role_writes(descriptor: &knobas_source::SourceDescriptor) -> Vec<String> {
 /// reporting the follow-up read's failure as the write's would tell the user
 /// their edit did not go when it did. A failed refresh still leaves the run,
 /// and the next scheduled sync re-reads the source either way.
-pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
+pub(crate) async fn after_landing(
+    scheduler: &Scheduler,
+    write: &QueuedWrite,
+) -> Vec<super::effects::EffectRead> {
     let entity = read_back(&scheduler.deps().pool, write).await;
     let refresh = crate::sources::refresh::refresh(
         scheduler,
@@ -909,7 +915,7 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     let refreshed = tokio::select! {
         biased;
         refreshed = &mut refresh => refreshed,
-        () = stand_aside_once_waiting(scheduler, write) => refresh.await,
+        () = stand_aside_once_waiting(scheduler, &write.source_id, write.id) => refresh.await,
     };
     if let Err(error) = refreshed {
         tracing::warn!(
@@ -925,6 +931,16 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
     // fix, 2026-11-25): that run catches the build where it stands then, and
     // the next scheduled one is minutes away.
     super::follow_run::follow_if_in_flight(scheduler, &write.source_id, &entity).await;
+    // What else the write moved, as its op declares it, each read at its own
+    // source before the run (ADR-0064): the run reads only the write's own
+    // source, takes minutes at size, and stands aside for a later write.
+    let declared =
+        serde_json::from_value::<WriteOp>(write.payload.clone()).map_or(&[][..], |op| op.effects());
+    let effects = super::effects::read(scheduler, write, &entity, declared).await;
+    // What the source does after a write that moves a branch (CI queues a
+    // build, the forge finishes the merge) is looked for on a short,
+    // bounded schedule, beside the run (ADR-0064 rule 2, #2585).
+    super::look_again::after_write(scheduler, write, declared).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
@@ -933,6 +949,7 @@ pub(crate) async fn after_landing(scheduler: &Scheduler, write: &QueuedWrite) {
             "a write landed but the mirror could not be re-read for it"
         );
     }
+    effects
 }
 
 /// How long a landed write's read-back is watched for its wait on the run's
@@ -943,8 +960,12 @@ const ASIDE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 /// Stop the run of `write`'s source in flight, where one that may stand
 /// aside goes and the read-back's ask for the lock is waiting on it
 /// ([`Scheduler::stand_aside`]); answers once that is done or given up on.
-async fn stand_aside_once_waiting(scheduler: &Scheduler, write: &QueuedWrite) {
-    if !scheduler.may_stand_aside(&write.source_id).await {
+pub(super) async fn stand_aside_once_waiting(
+    scheduler: &Scheduler,
+    source_id: &str,
+    write_id: i64,
+) {
+    if !scheduler.may_stand_aside(source_id).await {
         return;
     }
     let pool = &scheduler.deps().pool;
@@ -956,10 +977,10 @@ async fn stand_aside_once_waiting(scheduler: &Scheduler, write: &QueuedWrite) {
         .fetch_one(pool)
         .await;
         if matches!(waiting, Ok(true)) {
-            if scheduler.stand_aside(&write.source_id, write.id).await {
+            if scheduler.stand_aside(source_id, write_id).await {
                 tracing::info!(
-                    source = %write.source_id,
-                    write_id = write.id,
+                    source = %source_id,
+                    write_id,
                     "a run stood aside so the landed write's read-back went first"
                 );
             }
@@ -1013,6 +1034,9 @@ pub(crate) struct FollowLandings {
     /// ([`super::follow_run`], the TeamCity run fix). Not counted in
     /// `following`: a run that follows a write does not wait out a build.
     runs: super::follow_run::RunFollows,
+    /// The scopes looked at again after a branch moved
+    /// ([`super::look_again`], #2585).
+    lookouts: super::look_again::Lookouts,
 }
 
 /// How many landed writes of each source are still being followed: counted up
@@ -1107,6 +1131,7 @@ impl FollowLandings {
                 scheduler_slot,
                 following: Following::default(),
                 runs: super::follow_run::RunFollows::default(),
+                lookouts: super::look_again::Lookouts::default(),
             },
             slot,
         )
@@ -1118,10 +1143,28 @@ impl FollowLandings {
     pub(crate) fn runs(&self) -> super::follow_run::RunFollows {
         self.runs.clone()
     }
+
+    /// The scopes looked at again ([`super::look_again`]).
+    pub(crate) fn lookouts(&self) -> super::look_again::Lookouts {
+        self.lookouts.clone()
+    }
 }
 
 impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        // A run that ended `ok` and wrote something may have found a branch
+        // moved by a push knobas did not make: its repository is looked at
+        // again on the bounded schedule (ADR-0064 rule 2, #2585).
+        if !status.running
+            && status.last_outcome == Some(knobas_sync::SyncOutcome::Ok)
+            && let Some(scheduler) = self.scheduler_slot.get().and_then(|weak| weak.upgrade())
+        {
+            let (task, source) = (scheduler.clone(), status.source_id.clone());
+            let changed = status.last_changed != Some(false);
+            scheduler.background().spawn(async move {
+                super::look_again::after_run(&task, &source, changed).await;
+            });
+        }
         self.inner.sync_state(status);
     }
     fn source_health(&self, health: knobas_sync::CredentialHealth) {
@@ -1156,6 +1199,9 @@ impl knobas_sync::scheduler::SyncEvents for FollowLandings {
     }
     fn refresh_ended(&self, ended: &knobas_sync::scheduler::RefreshEnded) {
         self.inner.refresh_ended(ended);
+    }
+    fn looking_again(&self, looking: &knobas_sync::scheduler::LookingAgain) {
+        self.inner.looking_again(looking);
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)

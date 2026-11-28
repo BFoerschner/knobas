@@ -18,6 +18,7 @@ import {
   oneoffLines,
   oneoffResult,
   oneoffRun,
+  oneoffTry,
   oneoffRuns,
   oneoffSave,
   oneoffStop,
@@ -39,6 +40,7 @@ import {
   type OneOffStarted,
   type OneOffTarget,
 } from "../ipc/oneoff";
+import { TRY_ENTITY, type TryOn } from "../ipc/app";
 import { EVENTS } from "../ipc";
 import { listen } from "@tauri-apps/api/event";
 import { push } from "../shell/toasts.svelte";
@@ -62,6 +64,8 @@ export interface OneOffPorts {
   copyRepoCommands(entityId: string, names: string[]): Promise<OneOff[]>;
   /** Hears `oneoff:moved` until the answer is called. */
   moved(handler: (row: OneOffRunRow) => void): () => void;
+  /** *Try it on* (#2562): a saved command on pasted text, a chosen file or a chosen folder. */
+  tryRun?(command: string, on: TryOn, onbatch: (batch: OneOffBatch) => void): Promise<{ started: OneOffStarted; stop: () => void }>;
 }
 
 const channelled = <T>(start: (channel: Channel<OneOffBatch>) => Promise<T>, onbatch: (batch: OneOffBatch) => void) => {
@@ -75,6 +79,7 @@ const channelled = <T>(start: (channel: Channel<OneOffBatch>) => Promise<T>, onb
 export const realOneOffPorts: OneOffPorts = {
   commands: () => oneoffCommands(),
   run: (entityId, command, target, madeToken, onbatch) => channelled((ch) => oneoffRun(entityId, command, target, madeToken, ch), onbatch).then(({ answer, stop }) => ({ started: answer, stop })),
+  tryRun: (command, on, onbatch) => channelled((ch) => oneoffTry(command, on, ch), onbatch).then(({ answer, stop }) => ({ started: answer, stop })),
   stop: (run) => oneoffStop(run),
   runs: (entityId) => oneoffRuns(entityId),
   lines: (run, from, count) => oneoffLines(run, from, count),
@@ -194,6 +199,8 @@ export class Run {
   madeChanged = $state<string[] | null>(null);
   /** The kept folder a run on a generated folder ran in. */
   made: MadeKept | null = null;
+  /** What a try (#2562) ran on: *Run again* tries it on the same example. */
+  tried: TryOn | null = null;
   /** The lines, in order, as the window holds them: plain, so a flood costs no proxy. */
   lines: OneOffLine[] = [];
   /** The longest line, in characters: the scroller's width. */
@@ -373,6 +380,8 @@ export class OneOffs {
   }
 
   private moved(row: OneOffRunRow): void {
+    // A try (#2562) is no row in the list of runs: its dialog reads it by its channel.
+    if (row.entity_id === TRY_ENTITY) return;
     const at = this.rows.findIndex((r) => r.id === row.id);
     if (at >= 0) this.rows[at] = row;
     else this.rows = [row, ...this.rows];
@@ -413,6 +422,40 @@ export class OneOffs {
         this.mine.add(started.run);
         if (run.ended !== null || this.open !== run) stop();
         else run.hold(stop);
+      })
+      .catch((error: unknown) => {
+        run.refused = (error as { message?: string } | null)?.message ?? String(error);
+      });
+    return run;
+  }
+
+  /**
+   * *Try it on* (#2562): opens the dialog on a run of saved `command` on the person's own example, with the chosen folder
+   * (a file's own, or a throwaway one holding pasted text) in the checkout's place. A command for a file runs on the file,
+   * any other on the folder; the backend refuses what cannot be tried outside a repository, and the dialog says so.
+   */
+  openTry(command: OneOff, on: TryOn): Run {
+    this.close();
+    const name = on.kind === "text" ? on.name : on.path.slice(Math.max(on.path.lastIndexOf("/"), on.path.lastIndexOf("\\")) + 1);
+    const kind = kindOf(command.command, command.stdin);
+    const target: OneOffTarget =
+      kind === "file" ? { kind: "file", path: name, lines: null, at: null } : kind === "repository" ? { kind: "repository" } : { kind: "folder", path: "" };
+    const run = new Run(command, TRY_ENTITY, name, target, filledArgv(command, target, name));
+    run.tried = on;
+    this.open = run;
+    const start = this.ports.tryRun ?? realOneOffPorts.tryRun!;
+    void start(command.id, on, (batch) => run.take(batch))
+      .then(({ started, stop }) => {
+        run.id = started.run;
+        run.argv = started.argv.length > 0 ? started.argv : run.argv;
+        run.cwd = started.cwd;
+        run.branch = null;
+        run.startedAt = started.started_at;
+        if (run.ended !== null || this.open !== run) {
+          stop();
+          // Its dialog closed before the run started: nothing shows it, so it stops, as `close` stops one.
+          if (run.ended === null && this.open !== run) void this.ports.stop(started.run);
+        } else run.hold(stop);
       })
       .catch((error: unknown) => {
         run.refused = (error as { message?: string } | null)?.message ?? String(error);
@@ -476,8 +519,11 @@ export class OneOffs {
 
   /** Closes the dialog; a run still going goes on. */
   close(): void {
-    this.open?.let();
+    const open = this.open;
+    open?.let();
     this.open = null;
+    // A try (#2562) is no row in the list of runs, so nothing would show it running once its dialog closed: it stops.
+    if (open?.tried != null && open.running && open.id !== null) void this.ports.stop(open.id);
   }
 
   /** Stops the dialog's run with everything it started; a batch's runs, and it starts no more. */
@@ -566,6 +612,8 @@ export class OneOffs {
   /** Runs the dialog's command again on the same thing, as saved now. */
   again(run: Run, root: string | null = null): Run {
     const command = this.commands.find((c) => c.id === run.command.id) ?? run.command;
+    // A try runs again on what it was tried on: it has no checkout to run in (#2562).
+    if (run.tried !== null) return this.openTry(command, run.tried);
     const of = run.target.kind === "made_files" ? { renderer: run.target.renderer, folder: run.target.folder } : null;
     if (run.batch !== null) return this.openBatch(command, run.entityId, run.repo, run.batch.map((item) => item.path), root, of);
     return this.openRun(command, run.entityId, run.repo, run.target, root);

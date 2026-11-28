@@ -11,9 +11,9 @@
  * - **said**: the bar's line about what happened to a link, for 6 seconds (decisions §16);
  * - **armed**: until when the first Esc's cap is drawn down;
  * - **opened**: the address knobas last pointed the site at (`openSiteAt`), whose item is the one it was opened at;
- * - **landing**: the page knobas holds for where the site stands now, when that is another item than the one it was
- *   opened at, which `Esc` twice and *Back to* land on (Björn and Fable's ruling, 2026-11-25), and **pending** while the
- *   mirror is still asked what the address names.
+ * - **landing**: the page knobas holds for where the site stands now, else for the item it was opened at, which `Esc`
+ *   twice and *Back to* land on (Björn and Fable's ruling, 2026-11-25; #2559), and **pending** while the mirror is still
+ *   asked what the address names.
  *
  * Every text here came from a remote system or a person, and the page draws it as text.
  */
