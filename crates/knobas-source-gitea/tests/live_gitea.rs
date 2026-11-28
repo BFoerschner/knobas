@@ -8383,7 +8383,7 @@ async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
                 Some(Block::Diff { files, .. }) => Some(
                     files
                         .iter()
-                        .map(|f| (f.change.clone(), f.path.clone()))
+                        .map(|f| (f.change, f.path.clone()))
                         .collect::<Vec<_>>(),
                 ),
                 _ => None,
@@ -8397,7 +8397,11 @@ async fn a_branch_that_merged_its_base_back_diffs_its_own_files_only() {
             .and_then(|v| v.sections.first())
             .and_then(|s| s.count);
         println!("merged back  {section}: count {count:?}, files {files:?}");
-        drawn.push((section, files, view.map(|_| ()).map_err(|e| format!("{e:?}"))));
+        drawn.push((
+            section,
+            files,
+            view.map(|_| ()).map_err(|e| format!("{e:?}")),
+        ));
     }
     remove().await;
 

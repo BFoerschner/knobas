@@ -1245,14 +1245,24 @@ async fn merged_back_diff(oldest_first: bool) -> Vec<String> {
     })
     .await;
     let token = format!("token {TOKEN}");
-    let ancestry = [(MERGED, FORK, 0, vec![]), (FORK, MERGED, 1, vec![listed(MERGED, "PAY-228", "2026-08-21T16:00:00Z", &[])])];
+    let ancestry = [
+        (MERGED, FORK, 0, vec![]),
+        (
+            FORK,
+            MERGED,
+            1,
+            vec![listed(MERGED, "PAY-228", "2026-08-21T16:00:00Z", &[])],
+        ),
+    ];
     for (from, to, total, commits) in ancestry {
         Mock::given(method("GET"))
             .and(path(format!("{REPO}/compare/{from}...{to}")))
             .and(header("Authorization", token.as_str()))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                json!({ "total_commits": total, "commits": commits, "files": [] }),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({ "total_commits": total, "commits": commits, "files": [] }),
+                ),
+            )
             .mount(&server)
             .await;
     }
