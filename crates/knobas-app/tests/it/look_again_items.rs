@@ -646,7 +646,8 @@ async fn a_merged_pull_requests_linked_ticket_that_moves_later_shows_within_the_
     )
     .await;
     eventually("the repository is looked at, its items with it", || async {
-        looking_at(&state, REPO).is_some_and(|each| each.code && each.items.iter().any(|item| item == PR))
+        looking_at(&state, REPO)
+            .is_some_and(|each| each.code && each.items.iter().any(|item| item == PR))
     })
     .await;
     assert!(

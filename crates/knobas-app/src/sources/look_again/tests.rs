@@ -251,7 +251,15 @@ async fn the_quit_during_a_step_reads_none_of_its_sides_left() {
     let (c, q) = (Arc::clone(&clock), Arc::clone(&closed));
     let task = tokio::spawn(async move {
         let closed = move || q.load(Ordering::SeqCst);
-        run(c.as_ref(), Duration::ZERO, sides, stopped, &closed, &|_: &[SideKind]| {}).await
+        run(
+            c.as_ref(),
+            Duration::ZERO,
+            sides,
+            stopped,
+            &closed,
+            &|_: &[SideKind]| {},
+        )
+        .await
     });
     move_to(&clock, &[5]).await;
     assert!(!task.await.unwrap(), "stopped by the quit, not ended");
