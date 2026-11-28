@@ -532,7 +532,9 @@ test("the lists of code's lines hear code's size, and the text measured in scrip
   // and JSON views, #2533): its rows hear code's size, and so does a
   // view's one height of its own, given at 100 % (`TfLines.rows.test.svelte.ts`).
   expect(source("lib/tf/code/TfLines.svelte")).toMatch(/const rowsOf = codeRows\(13, 1\.6\);[\s\S]*?const win = new Windowed<\w+>\(\{[^}]*estimate: tall \?\? rowsOf\.estimate[^}]*textSize:\s*fixed === null\s*\?\s*rowsOf\.textSize\s*:\s*\(heard\) =>\s*fonts\.onCodeRows\(/);
-  expect(source("lib/tf/repo/TfRepoFiles.svelte")).toMatch(/<TfLines\b/);
+  // The Code page draws a file's Source through the dispatch it shares with *Try it on* (#2581).
+  expect(source("lib/tf/repo/TfRepoFiles.svelte")).toMatch(/<TfFileDraw\b/);
+  expect(source("lib/tf/render/TfFileDraw.svelte")).toMatch(/<TfLines\b/);
   // A run's step names and the day strip's labels are fitted by a canvas: at the role's size, again when it changes.
   expect(source("lib/tf/builds/TfRun.svelte")).toMatch(/const px = \(\(command \? 11 : 12\) \* fonts\.size\(role\)\) \/ 100;\s*void fonts\.family\(role\);/);
   expect(source("lib/tf/time/TfDay.svelte")).toMatch(/const scale = fonts\.size\(role\) \/ 100;\s*void fonts\.family\(role\);[\s\S]*getPropertyValue\("--t-2xs"\)\) \* scale/);

@@ -1463,6 +1463,15 @@
     return { hash: up, name: route.tab === "edit" && route.path !== null ? (route.path.split("/").pop() ?? repo.title) : repo.title };
   });
 
+  /**
+   * *Back to* waits on the repository's name: an address inside it (a file, a tab) goes up to the repository, which the
+   * shell names by its title once it is read, so until then the hint is held unseen in its room, as the pull request's is
+   * (#2602). The landing goes up to Code, known from the start; a failed read leaves Code named.
+   */
+  const backWaits = $derived(
+    repoId !== null && failed === null && repo === null && (parentOf({ view: "full", section: "code", head: "repo", rest })?.startsWith(repoHash(repoId)) ?? false),
+  );
+
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
 
@@ -1487,7 +1496,7 @@
 </script>
 
 <div class="tf-full" bind:this={page} {@attach watchCompareLinks}>
-  <TfCrumbs parts={crumbs} {back} />
+  <TfCrumbs parts={crumbs} {back} backHeld={backWaits} />
 
   {#if repoId === null || failed !== null}
     {#if failed !== null && !missing}

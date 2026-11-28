@@ -677,6 +677,30 @@ test("the landing draws the branch's last commit above the README; a file opened
   expect(target.querySelector(".tf-lastc")).toBeNull();
 });
 
+test("Back to is held unseen on a file while the repository's read is out, so it never widens by the repository's name once drawn", async () => {
+  // `just moves` (xsd-open, json-export, xml-plain, …): a file opened cold drew *Back to Code*, then the repository's
+  // name 111 px wider once its read landed, as the pull request's page did before #2602.
+  const back = { name: "Code", hash: "#/code" };
+  const heldNow = () => target.querySelector(".tf-crumbs .tf-esc")!.classList.contains("tf-held");
+  for (const [rest, waits] of [
+    [[REPO, "files", "src", "lib.rs"], true],
+    [[REPO], false],
+  ] as const) {
+    let answer!: () => void;
+    const late = new Promise<void>((resolve) => (answer = resolve));
+    const base = ports();
+    view = mount(TfRepo, { target, props: { ready: true, rest: [...rest], job: null, ports: { ...base, getEntity: async (id) => (await late, base.getEntity(id)) }, now: NOW, back } });
+    await settle();
+    // The landing goes up to Code, which it knows from the start.
+    expect(heldNow(), `${rest.join("/")} while the repository is read`).toBe(waits);
+    answer();
+    await settle();
+    expect(heldNow(), `${rest.join("/")} once it answered`).toBe(false);
+    unmount(view!);
+    view = null;
+  }
+});
+
 test("the mirror's answer, with no count, draws the count read before, and the way to the history keeps its room (the ux21 pass)", async () => {
   forgetCounts();
   const base = ports();

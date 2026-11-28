@@ -85,9 +85,6 @@
   import { heldOrder, MOST_RANKED } from "../filter/ranked.svelte";
   import { goAcross, replaceAddress } from "../opener";
   import type { SpecOpener } from "../render/oas-open.svelte";
-  import { explorerModule } from "../render/oas-module";
-  import { docViewModule } from "../render/doc/doc-module";
-  import { xsdModule } from "../render/xsd/xsd-module";
   import { exampleFileName, exampleOfPlace, heldOptions, shown as exampleShown } from "../render/xsd/example-held.svelte";
   import { contentOf } from "../../render/content-key";
   import { xsdSaveExample } from "../../ipc/api";
@@ -109,23 +106,16 @@
   import { defaultPipeline, MADE_DEFAULTS, makeDefaultPattern, openWith, withDefault, withPipeline } from "../../render/defaults";
   import { rendererDefaults as appDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import TfRendererSwitch from "../render/TfRendererSwitch.svelte";
-  import TfMarkdown from "../markdown/TfMarkdown.svelte";
-  import TfDiagram from "../render/TfDiagram.svelte";
-  import TfBytesImage from "../render/TfBytesImage.svelte";
-  import TfPdf from "../render/TfPdf.svelte";
   import { echoOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfRunMenu from "../oneoff/TfRunMenu.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
-  import TfLines from "../code/TfLines.svelte";
-  import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
   import type { PipeRun, PipeStep } from "../../ipc/entity";
   import { entityFilePipedSave } from "../../ipc/entity";
   import { filesDeclaring, jsonQueryOpen, xmlCheck, xsdLocations } from "../../ipc/api";
   import type { Elsewhere } from "../../render/xsd-locate";
   import { elsewhereOf } from "../render/xsd/xsd-point";
-  import { isDelimited } from "../../render/json-sniff";
   import { inputOf, pipedFile, pipelinePattern, savedAs, sized, stepName, suggestion } from "../../render/pipeline";
   import {
     commandSteps as appCommandSteps,
@@ -133,9 +123,11 @@
     type CommandSteps,
     type NamedPipelines,
   } from "../../render/pipelines.svelte";
-  import { commandIdOf, ipcCommands, type CommandPort } from "../../render/command";
+  import { ipcCommands, type CommandPort } from "../../render/command";
   import type { RepoPorts } from "./TfRepo.svelte";
   import type { JarPorts } from "../render/TfJar.svelte";
+  import TfFileDraw from "../render/TfFileDraw.svelte";
+  import type { FileDrawRepo } from "../render/file-draw";
   import { onRefreshed } from "./refreshed.svelte";
   import { ago } from "../../shell/time";
   import TfRepoLastCommit from "./TfRepoLastCommit.svelte";
@@ -181,9 +173,7 @@
     type MadeIndex,
   } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
-  import TfFindBar from "../TfFindBar.svelte";
   import TfFolderRender, { ipcFolderRenderPorts, type FolderRenderPorts } from "../render/TfFolderRender.svelte";
-  import TfHtmlPage from "../render/TfHtmlPage.svelte";
   import TfMadeBar from "../render/TfMadeBar.svelte";
   import TfMadeOpenIn from "../openin/TfMadeOpenIn.svelte";
   import { folderRenderers as appFolderRenderers, noteMarks, type FolderRenderers } from "../../render/folders.svelte";
@@ -1594,8 +1584,6 @@
   /** How many lines the header says: counted, not split, so a file drawn rendered never splits its text (the ux30 end gate). */
   const linesSaid = $derived(drawn === null || drawn.binary ? 0 : countLines(drawn.text));
 
-  /** A rendered file's words (a README, a diagram, a command's output), for ⌘F's find bar: a person reading it means words, not *Go to file*'s names (Round 17). */
-  let rendered = $state<HTMLElement | null>(null);
 
   /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
   const opened = $derived.by(() => {
@@ -1627,12 +1615,6 @@
       push({ text: `Could not make ${chosen.name} the default: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
-  /** A text file drawn as an image (an SVG): its bytes, for `TfBytesImage`, which sanitizes an SVG. */
-  const image = $derived.by(() => {
-    if (drawAs !== "image" || drawn === null || drawn.binary) return null;
-    const bytes = new TextEncoder().encode(drawn.text);
-    return { bytes, read: () => Promise.resolve(bytes) };
-  });
 
   /** What is typed into *Find in file*: it stays as the reader moves between files (#2299). */
   let typed = $state("");
@@ -2109,6 +2091,84 @@
     const utf8 = new TextDecoder();
     return (p: string): Promise<string | null> => (read === null ? Promise.resolve(null) : read(p).then((bytes) => utf8.decode(bytes), () => null));
   });
+  /** The XML view's schema check: the repository's files as text, what was pointed to, and what opens a schema. */
+  const docSchema = $derived<FileDrawRepo["schema"]>({
+    read: textRead,
+    paths: allPaths,
+    pointed: () => xsdLocations().then((l) => l.pointed, () => []),
+    on: () => xmlCheck().then((c) => c.on, () => true),
+    readOther: otherText,
+    elsewhere: declaringElsewhere,
+    keep: schemaKeep,
+    open: (file, at) => goAcross(at === null ? hrefOf(file) : placeHrefOf(file, at), file.slice(file.lastIndexOf("/") + 1)),
+  });
+  /**
+   * The bytes of the file as read, for the leaf that reads bytes (a PDF, an image): never under a pipeline's output.
+   * A rendered file's words (a README, a diagram, a command's output) are ⌘F's (Round 17): `TfFileDraw` mounts the bar.
+   */
+  const drawnBytes = $derived(file !== null && drawn === shownFile && bytesRead !== null ? { read: bytesRead, size: file.size } : null);
+  /** The repository as the file's leaves read and move in it (#2581): the Code page's half of `TfFileDraw`. */
+  const fileRepo: FileDrawRepo = {
+    get id() {
+      return repoId;
+    },
+    get entity() {
+      return at;
+    },
+    get file() {
+      return { path: file?.path ?? "", sha: file?.sha ?? null };
+    },
+    asRead: (drawnNow) => drawnNow === shownFile,
+    get path() {
+      return path;
+    },
+    get place() {
+      return place;
+    },
+    get line() {
+      return line;
+    },
+    get images() {
+      return imageRead;
+    },
+    get text() {
+      return textRead;
+    },
+    paths: allPaths,
+    readOther: otherText,
+    elsewhere: declaringElsewhere,
+    get jar() {
+      return jarPorts;
+    },
+    fileLink,
+    placeLink,
+    hrefOf,
+    lineHrefOf,
+    placeHrefOf,
+    go: (hash, label) => goAcross(hash, label),
+    replace: (hash) => replaceAddress(hash),
+    copyPlace: (inFile, to, label) => void copyPlace(inFile, to, label),
+    source: (inFile) => picks.set(inFile, "source"),
+    get files() {
+      return docFiles;
+    },
+    get schema() {
+      return docSchema;
+    },
+    // The file as the backend reads it where the view draws the file; else what the view draws (a pipeline's answer).
+    query: (doc) =>
+      doc === shownFile ? jsonQueryOpen({ entityId: at, path: doc.path, commit: fileReadAt(disk, doc.path, file?.commit ?? null) }) : jsonQueryOpen({ text: doc.text }),
+    pipeline: (inFile, filter) => pipes.set(inFile, [...(steps ?? []), { step: "jq", filter }]),
+    get values() {
+      const piped = ports.piped;
+      if (piped === undefined) return null;
+      return (inFile: string) => {
+        const entity = at;
+        const readAt = fileReadAt(disk, inFile, file?.commit ?? null);
+        return { run: (chain: PipeStep[]) => piped(entity, inFile, readAt, chain), save: (chain: PipeStep[], name: string) => entityFilePipedSave(entity, inFile, readAt, chain, name) };
+      };
+    },
+  };
 
   // ---- Text search (ADR-0062) ----
 
@@ -2821,130 +2881,20 @@
           <div class="tf-banner tf-err" role="alert">The pipeline could not read the file: {pipeRefused}</div>
         {/if}
       {/if}
-      {#if drawn === shownFile && bytesRead !== null && drawAs === "pdf"}
-        <TfPdf read={bytesRead} size={file.size} {render} />
-      {:else if drawn === file && file.binary && bytesRead !== null && drawAs === "image"}
-        <TfBytesImage read={bytesRead} path={file.path} size={file.size} />
-      {:else if drawAs === "jar" && jarPorts !== null}
-        <!-- A Java archive (ux19): its view loads with the first archive opened, never at start-up. -->
-        {#await import("../render/TfJar.svelte") then { default: TfJar }}
-          <TfJar path={file.path} ports={jarPorts} {render} />
-        {/await}
-      {:else if drawn === null || drawn.binary}
-        <div class="tf-empty"><p>A binary file, not drawn.</p></div>
-      {:else if image !== null}
-        <TfBytesImage read={image.read} path={drawn.path} size={image.bytes.length} />
-      {:else if drawAs === "openapi"}
-        <!-- An OpenAPI spec (ux18): its view and its worker load with the first spec opened, never at start-up. -->
-        {@const spec = drawn}
-        {#snippet oasProse(words: string)}
-          <TfMarkdown text={words} base={parentOf(spec.path)} {fileLink} {render} image={imageRead} imagesOf={at} />
-        {/snippet}
-        {#await explorerModule() then { default: TfOpenApi }}
-          <TfOpenApi
-            text={spec.text}
-            path={spec.path}
-            read={imageRead}
-            at={path === spec.path ? place : null}
-            line={path === spec.path ? line : null}
-            repo={repoId}
-            bind:opener={specOpener}
-            fileHref={placeLink}
-            oncopylink={(at, label) => void copyPlace(spec.path, at, label)}
-            onsource={() => picks.set(spec.path, "source")}
-            onplace={(to, how, label) => {
-              const hash = to === "" ? hrefOf(spec.path) : placeHrefOf(spec.path, to);
-              if (how === "push") goAcross(hash, label);
-              else replaceAddress(hash);
-            }}
-            onback={() => history.back()}
-            prose={oasProse}
-          />
-        {/await}
-      {:else if drawAs === "xsd"}
-        <!-- An XML Schema (2026-11-23): the schema explorer; its view and its worker load with the first schema opened. -->
-        {@const schema = drawn}
-        {#await xsdModule() then { default: TfXsd }}
-          <TfXsd
-            text={schema.text}
-            path={schema.path}
-            repo={repoId}
-            read={textRead}
-            paths={allPaths}
-            readOther={otherText}
-            elsewhere={declaringElsewhere}
-            {render}
-            at={path === schema.path ? place : null}
-            line={path === schema.path ? line : null}
-            oncopylink={(at, label) => void copyPlace(schema.path, at, label)}
-            onsource={(other, n) => {
-              if (other.startsWith("@")) return;
-              picks.set(other, "source");
-              goAcross(lineHrefOf(other, n), other.slice(other.lastIndexOf("/") + 1));
-            }}
-            onfile={(other) => {
-              if (!other.startsWith("@")) goAcross(hrefOf(other), other.slice(other.lastIndexOf("/") + 1));
-            }}
-            onplace={(to, how, label) => {
-              const hash = to === "" ? hrefOf(schema.path) : placeHrefOf(schema.path, to);
-              if (how === "push") goAcross(hash, label);
-              else replaceAddress(hash);
-            }}
-            onback={() => history.back()}
-          />
-        {/await}
-      {:else if drawAs === "xml" || drawAs === "json"}
-        <!-- An XML file (the XML view, 2026-11-23): its view and its worker load with the first document opened. -->
-        {@const doc = drawn}
-        {#await docViewModule() then { default: TfDocView }}
-          {@const piped = ports.piped}
-          {@const entity = at}
-          {@const readAt = fileReadAt(disk, doc.path, file.commit ?? null)}
-          <TfDocView
-            text={doc.text}
-            path={doc.path}
-            kind={drawAs === "json" ? (isDelimited(doc.path) ? "jsonl" : "json") : "xml"}
-            jq={drawAs !== "json"
-              ? null
-              : {
-                  // The file as the backend reads it where the view draws the file; else what the view draws (a pipeline's answer).
-                  open: () => (doc === shownFile ? jsonQueryOpen({ entityId: entity, path: doc.path, commit: readAt }) : jsonQueryOpen({ text: doc.text })),
-                }}
-            onpipeline={drawAs !== "json" || doc !== shownFile ? null : (filter) => pipes.set(doc.path, [...(steps ?? []), { step: "jq", filter }])}
-            repo={repoId}
-            sha={doc === shownFile ? (file.sha ?? null) : null}
-            {render}
-            line={path === doc.path ? line : null}
-            files={docFiles}
-            schema={{
-              read: textRead,
-              paths: allPaths,
-              pointed: () => xsdLocations().then((l) => l.pointed, () => []),
-              on: () => xmlCheck().then((c) => c.on, () => true),
-              readOther: otherText,
-              elsewhere: declaringElsewhere,
-              keep: schemaKeep,
-              open: (file, at) => goAcross(at === null ? hrefOf(file) : placeHrefOf(file, at), file.slice(file.lastIndexOf("/") + 1)),
-            }}
-            values={piped === undefined || doc !== shownFile
-              ? null
-              : { run: (steps) => piped(entity, doc.path, readAt, steps), save: (steps, name) => entityFilePipedSave(entity, doc.path, readAt, steps, name) }}
-          />
-        {/await}
-      {:else if drawAs === "markdown"}
-        <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} imagesOf={at} /></div>
-        <TfFindBar root={() => rendered} within="in this file" />
-      {:else if drawAs === "html"}
-        <!-- A page (ADR-0046): sanitized, in the frame that runs no script and makes no request. -->
-        <TfHtmlPage html={drawn.text} title="{drawn.path.slice(drawn.path.lastIndexOf('/') + 1)}, drawn as a page" frame={(doc) => folderPorts.frame(doc)} room=".tf-fileview" />
-      {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
-        <TfDiagram engine={drawAs} code={drawn.text} {render} />
-      {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
-        <div class="tf-rendered" bind:this={rendered}><TfCommandOutput {renderer} text={drawn.text} {commands} /></div>
-        <TfFindBar root={() => rendered} within="in this file" />
-      {:else}
-        <TfLines text={drawn.text} path={drawn.path} {render} {line} bind:typed />
-      {/if}
+      <!-- The leaf that draws the file, shared with Settings' *Try it on* (#2581). -->
+      <TfFileDraw
+        {drawn}
+        {renderer}
+        bytes={drawnBytes}
+        {render}
+        {commands}
+        frame={(doc) => folderPorts.frame(doc)}
+        room=".tf-fileview"
+        find
+        repo={fileRepo}
+        bind:typed
+        bind:opener={specOpener}
+      />
       {/if}
       </TfWaiting>
     {/if}
