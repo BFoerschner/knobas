@@ -69,7 +69,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { failedRun, newestFirst, runHash, runTone, shortTime } from "./builds";
+  import { failedRun, markableRun, newestFirst, runHash, runTone, shortTime } from "./builds";
   import { runsRead } from "./runs-read.svelte";
   import { counted } from "../counted";
   import { pageVisible } from "../kept-pages.svelte";
@@ -625,13 +625,14 @@
 
   /**
    * `m` on a run row (ux18): *Mark as read* or *Mark as unread* on the finished failed run whose row holds focus (its
-   * number, *Log*, a button). The rows hold no field; a run that cannot be unread takes nothing.
+   * number, *Log*, a button), and on a running run out of the blue or back in it (#2574). The rows hold no field; a run
+   * with nothing to mark (passed, cancelled, queued) takes nothing.
    */
   function runKeys(event: KeyboardEvent) {
     if (event.key !== "m" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
     const runId = event.target instanceof Element ? event.target.closest<HTMLElement>("tr[data-run]")?.dataset["run"] : undefined;
     const run = runId === undefined ? undefined : heldRuns.rows.find((one) => one.entity_id === runId);
-    if (run === undefined || !failedRun(run)) return;
+    if (run === undefined || !markableRun(run)) return;
     event.preventDefault();
     void runsRead.toggle(run);
   }

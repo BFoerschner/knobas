@@ -13,8 +13,8 @@ function countsOf(by: Record<string, Partial<BubbleCounts>>, extra: Partial<RunC
   return { pipelines, total, visiting: false, fresh: [], ...extra };
 }
 
-function failed(id: string, extra: Partial<RunRow> = {}): Pick<RunRow, "entity_id" | "finished" | "state"> {
-  return { entity_id: id, finished: "2026-08-22T10:04:00Z", state: { text: "FAILURE", tone: "err" }, ...extra };
+function failed(id: string, extra: Partial<RunRow> = {}): Pick<RunRow, "entity_id" | "started" | "finished" | "state"> {
+  return { entity_id: id, started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:04:00Z", state: { text: "FAILURE", tone: "err" }, ...extra };
 }
 
 function running(id: string): Pick<RunRow, "entity_id" | "started" | "finished"> {
@@ -110,7 +110,7 @@ test("a mark the backend did not write over keeps the mark taken while the run r
 
 test("a run that cannot be unread takes no mark", async () => {
   const runs = store();
-  await runs.toggle(failed("teamcity:build:6", { finished: null }));
+  await runs.toggle(failed("teamcity:build:6", { started: null, finished: null }));
   await runs.toggle(failed("teamcity:build:7", { state: { text: "SUCCESS", tone: "ok" } }));
   expect(runs.ports.mark).not.toHaveBeenCalled();
   expect(runs.ports.unmark).not.toHaveBeenCalled();
@@ -344,4 +344,23 @@ test("leaving a visit the backend heard draws its green, yellow and grey gone at
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("the toggle takes a running run out of the blue and puts it back; a passed run, read or not, takes nothing (#2574)", async () => {
+  const runs = store({ mark: vi.fn(async () => ({ read: [], while_running: ["teamcity:build:9"] })) });
+  await runs.load();
+  const live = { ...running("teamcity:build:9"), state: { text: "RUNNING", tone: null } };
+  expect(runs.bubble(live)).toBe("blue");
+  await runs.toggle(live);
+  expect(runs.ports.mark).toHaveBeenCalledWith(byId(["teamcity:build:9"]));
+  expect(runs.bubble(live)).toBeNull();
+  await runs.toggle(live);
+  expect(runs.ports.unmark).toHaveBeenCalledWith(["teamcity:build:9"]);
+  expect(runs.bubble(live)).toBe("blue");
+  // A passed run opened earlier keeps its mark: it has nothing to mark.
+  const opened = store({ read: vi.fn(async () => reading(["teamcity:build:4"])) });
+  await opened.load();
+  await opened.toggle({ entity_id: "teamcity:build:4", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:04:00Z", state: { text: "SUCCESS", tone: "ok" } });
+  expect(opened.ports.unmark).not.toHaveBeenCalled();
+  expect(opened.read?.has("teamcity:build:4")).toBe(true);
 });

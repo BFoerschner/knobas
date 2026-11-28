@@ -87,6 +87,14 @@ export function failedRun(run: Pick<RunRow, "finished" | "state">): boolean {
   return run.finished !== null && run.state?.tone === "err";
 }
 
+/**
+ * Whether `m` and the row's *Mark as read* have anything to do on `run` (#2574): a finished failure (read or unread) or a
+ * run running (in the blue or out of it). A passed, cancelled or queued run has nothing to mark.
+ */
+export function markableRun(run: Pick<RunRow, "started" | "finished" | "state">): boolean {
+  return failedRun(run) || (run.started !== null && run.finished === null);
+}
+
 /** The five bubbles a run can count in (ADR-0063, #2567's ruling), most critical first after blue. */
 export type Bubble = "blue" | "green" | "yellow" | "red" | "grey";
 

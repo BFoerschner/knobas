@@ -34,7 +34,7 @@
   import { secondsLabel, tickingLabel, timeLabel } from "../../time/format";
   import { refusedAttrs } from "../../shell/refused-writes";
   import type { RunRow } from "../../ipc/entity";
-  import { failedRun, runTone, testsWords, type Bubble } from "./builds";
+  import { failedRun, markableRun, runTone, testsWords, type Bubble } from "./builds";
   import { nameParts } from "./recent";
   import { DURBAR_WIDTH, chipTone, durbarWidth, isStartedHere, triggerLabel, type RunMarks } from "./pipeline";
   import { runsRead } from "./runs-read.svelte";
@@ -94,7 +94,9 @@
   const tone = $derived(runTone(run));
   const here = $derived(isStartedHere(run));
   const failure = $derived(!here && failedRun(run));
-  const unread = $derived(failure && runsRead.unread(run));
+  /** A failed or running run has a mark to offer (#2574); `readable` says which way it goes now. */
+  const markable = $derived(!here && markableRun(run));
+  const readable = $derived(markable && runsRead.readable(run));
   const number = $derived(run.number !== null ? `#${run.number}` : "queued");
   const dot = $derived(here ? null : runsRead.bubble(run));
   const parts = $derived(pipeline === null ? null : nameParts(pipeline.name));
@@ -172,13 +174,14 @@
   <td class="tf-nowrap tf-run-acts">
     {#if !here}
       <span class="tf-rowend"><span class="tf-rowacts">
-        {#if failure}
+        {#if markable}
           <!-- An icon, the words its name and tip: as words the group ran over the duration and cut it, and a
-               press on the duration of a hovered row marked the run (ux18). A tick to read, the dot to unread. -->
-          {@const said = unread ? "Mark as read" : "Mark as unread"}
+               press on the duration of a hovered row marked the run (ux18). A tick to read, the dot to unread. A
+               running run's takes it out of the blue or puts it back (#2574). -->
+          {@const said = readable ? "Mark as read" : "Mark as unread"}
           <button type="button" class="tf-iconbtn tf-sm" aria-label={said} title={`${said} (M)`} onclick={() => void runsRead.toggle(run)}
             ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
-              >{#if unread}<path d="M3 8.5l3 3 7-7.5" />{:else}<circle cx="8" cy="8" r="3" fill="currentColor" stroke="none" />{/if}</svg
+              >{#if readable}<path d="M3 8.5l3 3 7-7.5" />{:else}<circle cx="8" cy="8" r="3" fill="currentColor" stroke="none" />{/if}</svg
             ></button
           >
         {/if}

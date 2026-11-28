@@ -46,7 +46,7 @@ import {
 import { coalesce } from "../../shell/coalesce";
 import { push, undoable } from "../../shell/toasts.svelte";
 import { counted } from "../counted";
-import { runBubble, unreadRun, type Bubble } from "./builds";
+import { markableRun, runBubble, unreadRun, type Bubble } from "./builds";
 
 /** What the marks are read and written by. */
 export interface RunsReadPorts {
@@ -405,11 +405,18 @@ export class RunsRead {
   }
 
   /**
-   * *Mark as read* or *Mark as unread* on one run, whichever it is now. A run that cannot be unread is never marked,
-   * so it takes nothing: it reads as read and has no mark to take back.
+   * *Mark as read* or *Mark as unread* on one run, whichever it is now: a failure read or unread, a running run out of
+   * the blue or back in it (#2574). A run with nothing to mark ({@link markableRun}: passed, cancelled, queued) takes
+   * nothing, a mark it has from opening it included.
    */
-  toggle(run: Pick<RunRow, "entity_id" | "finished" | "state">): Promise<void> {
-    return this.unread(run) ? this.markRead([run.entity_id]) : this.markUnread([run.entity_id]);
+  toggle(run: Pick<RunRow, "entity_id" | "started" | "finished" | "state">): Promise<void> {
+    if (!markableRun(run)) return Promise.resolve();
+    return this.readable(run) ? this.markRead([run.entity_id]) : this.markUnread([run.entity_id]);
+  }
+
+  /** What the row's mark offers on `run` (#2574): *Mark as read* on an unread failure or a run in the blue. */
+  readable(run: Pick<RunRow, "entity_id" | "started" | "finished" | "state">): boolean {
+    return this.unread(run) || this.inBlue(run);
   }
 
   /**

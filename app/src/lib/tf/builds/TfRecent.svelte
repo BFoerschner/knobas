@@ -18,7 +18,8 @@
     (`HeldOrder`), and are lit once as they draw.
   - **Back**: what it held, its scroll and the run you opened are kept for the session, so `Esc` from a run lands on the
     same rows with that run's number focused, at the scope it was opened from.
-  - **Keys**: Up and Down step the runs, Enter opens one, `m` marks a failure read or unread.
+  - **Keys**: Up and Down step the runs, Enter opens one, `m` marks a failure read or unread and takes a running run out
+    of the blue or puts it back (#2574); a passed run has nothing to mark.
 -->
 <script lang="ts" module>
   import type { RecentCursor, RecentFilter, RecentPipeline, RecentRun, RecentRuns, RunRow } from "../../ipc/entity";
@@ -84,7 +85,7 @@
   import { onFocusWhileShown, everyWhileShown } from "../while-shown.svelte";
   import TfRunRow from "./TfRunRow.svelte";
   import { heldOrder, inOrder } from "../filter/ranked.svelte";
-  import { failedRun, runHash, unreadRun } from "./builds";
+  import { failedRun, markableRun, runHash, unreadRun } from "./builds";
   import { RESULTS, byDay, usualSeconds } from "./pipeline";
   import { readJobBranches } from "./pipeline-ports";
   import { runsRead } from "./runs-read.svelte";
@@ -522,7 +523,7 @@
     if (row === null) return;
     if (event.key === "m") {
       const one = byId.get(row.dataset["run"] ?? "");
-      if (one === undefined || !failedRun(one.run)) return;
+      if (one === undefined || !markableRun(one.run)) return;
       event.preventDefault();
       void runsRead.toggle(one.run);
       return;

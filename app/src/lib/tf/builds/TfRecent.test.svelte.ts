@@ -632,3 +632,42 @@ test("a queued run that starts keeps its row and its place, with the pointer off
   expect(rows()[0]!.classList.contains("tf-run-new")).toBe(true);
   expect(rows()[2]!.classList.contains("tf-run-new")).toBe(false);
 });
+
+test("m takes a running run out of the blue and puts it back, as the row's mark does; on a passed run it does nothing (#2574)", async () => {
+  const marked: unknown[] = [];
+  const unmarked: unknown[] = [];
+  runsRead.ports = {
+    ...runsRead.ports,
+    read: async () => ({ read: [], while_running: [] }),
+    mark: async (scope) => (marked.push(scope.runs), { read: [], while_running: scope.runs }),
+    unmark: async (runs) => (unmarked.push(runs), runs),
+    open: async () => false,
+  };
+  await runsRead.load();
+  const live = run(16, "ok", today(0, 58), { state: { text: "RUNNING", tone: null }, finished: null, duration_seconds: null });
+  draw({}, { first: { runs: [at(DEPLOY, live), ...PAGE.runs], pipelines: [LINT, DEPLOY], next: null } });
+  await settle();
+  const press = (at: number) => rows()[at]!.querySelector(".tf-run-pno")!.dispatchEvent(new KeyboardEvent("keydown", { key: "m", bubbles: true, cancelable: true }));
+  const dot = () => rows()[0]!.querySelector(".tf-unread");
+  const mark = () => rows()[0]!.querySelector<HTMLButtonElement>(".tf-rowacts .tf-iconbtn");
+  expect(dot()?.className).toContain("tf-u-blue");
+  expect(mark()?.getAttribute("aria-label")).toBe("Mark as read");
+  press(0);
+  flushSync();
+  expect(dot(), "out of the blue at once").toBeNull();
+  expect(mark()?.getAttribute("aria-label")).toBe("Mark as unread");
+  await settle();
+  expect(marked).toEqual([["tc:build:16"]]);
+  mark()!.click();
+  flushSync();
+  expect(dot()?.className, "the row's mark puts it back").toContain("tf-u-blue");
+  await settle();
+  expect(unmarked).toEqual([["tc:build:16"]]);
+  // #12 passed: nothing to mark, by key or on hover.
+  press(1);
+  await settle();
+  expect(marked).toHaveLength(1);
+  expect(unmarked).toHaveLength(1);
+  expect(rows()[1]!.querySelector(".tf-rowacts .tf-iconbtn")).toBeNull();
+  expect([...rows()[1]!.querySelectorAll(".tf-rowacts .tf-btn")].map((one) => one.textContent?.trim())).toEqual(["Log", "Run again…"]);
+});
