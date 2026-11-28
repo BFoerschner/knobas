@@ -82,6 +82,9 @@ test("at an example's place the header names the example, says it is not saved, 
   await vi.waitFor(() => {
     flushSync();
     expect(text(header()?.querySelector(".tf-fmeta"))).toBe("Example made by knobas, seed 4711, required parts only. 5 lines. Not saved.");
+    // A line too long for the header is cut (#2626); the whole of it is the meta's title.
+    expect(header()?.querySelector(".tf-fmeta")?.getAttribute("title")).toBe("Example made by knobas, seed 4711, required parts only. 5 lines. Not saved.");
+    expect(header()?.classList.contains("tf-exhead")).toBe(true);
     expect(target.querySelector(".tf-xsd-opened .tf-xv")).not.toBeNull();
   }, { timeout: 10_000, interval: 20 });
   const buttons = [...header()!.querySelectorAll(".tf-trail button")].map((b) => text(b));

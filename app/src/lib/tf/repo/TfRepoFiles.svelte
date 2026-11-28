@@ -2760,9 +2760,9 @@
       {@const ex = exampleHead}
       <!-- An example opened in the XML view (E1): its own name after the schema's path, and the file actions an unsaved
            document has. Nothing of the schema's file (Render as, Pipeline, Open in, Edit) stands for it. -->
-      <header>
+      <header class="tf-exhead">
         <span class="tf-p"><span class="tf-pdir">{file.path}{" › "}</span>{ex.name}</span>
-        <span class="tf-dim tf-small tf-fmeta">{ex.meta}</span>
+        <span class="tf-dim tf-small tf-fmeta" title={ex.meta}>{ex.meta}</span>
         <span class="tf-trail">
           <button type="button" class="tf-btn tf-sm" disabled={ex.xml === null} onclick={() => ex.xml !== null && void copyExample(ex.xml)}>Copy</button>
           <button type="button" class="tf-btn tf-sm" disabled={ex.xml === null} onclick={() => ex.xml !== null && void saveExample(ex.name, ex.xml)}>Save to Downloads</button>
