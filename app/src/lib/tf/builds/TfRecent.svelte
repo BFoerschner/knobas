@@ -6,7 +6,7 @@
   The newest runs of every pipeline, or of a folder's pipelines (`pipelines`, by id, asked of the backend), newest first
   by when each started or, not started, was queued, read from the mirror a page at a time (`recent_runs`, 60 first, then
   200 a page, at most 2,000 held), with no folds: each row is a pipeline's run row (`TfRunRow`) with a cell naming its
-  pipeline, the run's number after it and the folders it sits in as quiet text. Day groups with clock times, as a
+  pipeline, the run's number after it and, on its left, the folders it sits in as a link to that folder (#2572). Day groups with clock times, as a
   pipeline's runs. Its header names the scope (`title`) beside *Sync now*; `TfBuilds` owns the rail and the scope.
 
   - **Filter**: the bar's scope (*This job* with a job, *Mine*, *All*), *Result* and, with two or more CI sources
@@ -16,8 +16,9 @@
     once in 5 s, `runs-in-flight.ts`); while it is shown and the window has focus, each CI source is asked for its run
     once its last ended a minute ago. New runs wait behind *Show N new runs* while the pointer rests on the list
     (`HeldOrder`), and are lit once as they draw.
-  - **Back**: what it held, its scroll and the run you opened are kept for the session, so `Esc` from a run lands on the
-    same rows with that run's number focused, at the scope it was opened from.
+  - **Back**: what it held, its scroll and the run you opened are kept for the session. `Esc` from a run goes to its
+    pipeline (#2559); ⌘[ or selecting the scope again draws the kept rows with that run's number focused, at the scope
+    and filter they were kept at only.
   - **Keys**: Up and Down step the runs, Enter opens one, `m` marks a failure read or unread and takes a running run out
     of the blue or puts it back (#2574); a passed run has nothing to mark.
 -->

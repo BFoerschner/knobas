@@ -8,7 +8,7 @@
     (#850, *This job* by default) and the *Failing* and *Running* chips; the
     page's search is the launcher's `#b`, which `/` opens (#2425). *All* draws *Pinned* first
     (knobas-local, #849), then each source's project tree as deep as it goes
-    (folds with their count and *N failing*, own pipelines before
+    (folds with their pipeline count after the name, own pipelines before
     subgroups, a chain of single children as one row, a fold open on a
     failure, the selection or anything narrowing, else as the reader left
     it). *This job* draws the same tree pruned to the job's pipelines, each
@@ -17,8 +17,9 @@
     pipeline a glyph of its latest run (`TfRunGlyph`), its name in err tone
     when that run failed with the prefix its fold's pipelines share drawn
     dim, and a time only when it failed, runs or waits (`railTime`); a
-    hover gives its groups, name and latest run. A fold's summary counts
-    what fails and runs under it; *Collapse all* / *Expand all* sets every
+    hover gives its groups, name and latest run. Every row ends in the five
+    bubble columns (#2573, `bubbles`), a fold's the sums of the pipelines
+    under it; *Collapse all* / *Expand all* sets every
     fold as the reader's own. Up and Down step along the rows, Left and
     Right shut and open a fold. The selected one is drawn inverted and kept
     in view. The list is windowed (#2211) over its flattened rows
@@ -32,8 +33,8 @@
 
   **Read and unread** (ux18, `docs/decisions/2026-11-17-mark-builds-as-read.md`): a pipeline's name and time are err
   only while its newest failure is unread (`asksAttention`, the window's `runsRead`); read, its glyph stays red. A
-  fold counts every failing pipeline and tones the count err, and opens by itself, only for one that asks. *Mark all as
-  read* in the tools marks every failed run of the pipelines listed, with *Undo*.
+  fold opens by itself only for one that asks. The rows' bubble columns count each pipeline's unread runs by colour
+  (ADR-0063, `runsRead.countsOf`).
 
   **A run started here** (the TeamCity run fix, 2026-11-25): its pipeline's row says *queued* from the queue's answer
   (`withQueued`), and a row whose run moved at the source (the write queue reads a run it started to its end) reads
