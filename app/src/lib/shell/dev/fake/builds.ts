@@ -927,7 +927,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // looks for `payout-service`'s builds, so its Builds tab says *Looking for new builds…*.
     looking_again: () =>
       new URLSearchParams(globalThis.location?.search).has("fake-looking")
-        ? [{ scope: "mock:tidewater/payout-service", code: true, builds: true }]
+        ? [{ scope: "mock:tidewater/payout-service", code: true, builds: true, items: false }]
         : [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
     commit_repositories: (args) =>

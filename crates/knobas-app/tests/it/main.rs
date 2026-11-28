@@ -79,6 +79,7 @@ mod link_sets_ipc;
 mod live_reads;
 mod live_sources;
 mod look_again;
+mod look_again_items;
 mod monitor_on_its_way_ipc;
 mod notes_export_ipc;
 mod notes_search_ipc;

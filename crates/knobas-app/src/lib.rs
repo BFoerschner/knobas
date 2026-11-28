@@ -128,10 +128,10 @@ pub mod events {
     /// that shows the item re-reads it, and a write's echo settles on it.
     pub const ITEM_REFRESHED: &str = "item:refreshed";
     /// Payload: `knobas_sync::scheduler::LookingAgain` -- a scope's bounded
-    /// schedule after a branch moved (ADR-0064 rule 2, #2585) started, one of
-    /// its sides stopped, or it ended: what it still looks for. Broadcast:
-    /// the repository's Builds tab says *Looking for new builds…* while its
-    /// builds are looked for.
+    /// schedule after a branch moved (ADR-0064 rule 2, #2585) or after any
+    /// landed write (#2595) started, one of its sides stopped, or it ended:
+    /// what it still looks for. Broadcast: the repository's Builds tab says
+    /// *Looking for new builds…* while its builds are looked for.
     pub const LOOKING_AGAIN: &str = "looking:again";
     /// Payload: `sources::live::ViewFresh` -- a source view the shell was
     /// answered from memory was read again behind the answer, and the

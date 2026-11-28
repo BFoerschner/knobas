@@ -930,17 +930,20 @@ pub(crate) async fn after_landing(
     // to its end, beside the run that follows the write (the TeamCity run
     // fix, 2026-11-25): that run catches the build where it stands then, and
     // the next scheduled one is minutes away.
-    super::follow_run::follow_if_in_flight(scheduler, &write.source_id, &entity).await;
+    let followed =
+        super::follow_run::follow_if_in_flight(scheduler, &write.source_id, &entity).await;
     // What else the write moved, as its op declares it, each read at its own
     // source before the run (ADR-0064): the run reads only the write's own
     // source, takes minutes at size, and stands aside for a later write.
     let declared =
         serde_json::from_value::<WriteOp>(write.payload.clone()).map_or(&[][..], |op| op.effects());
     let effects = super::effects::read(scheduler, write, &entity, declared).await;
-    // What the source does after a write that moves a branch (CI queues a
-    // build, the forge finishes the merge) is looked for on a short,
-    // bounded schedule, beside the run (ADR-0064 rule 2, #2585).
-    super::look_again::after_write(scheduler, write, declared).await;
+    // What the source does after the write (CI queues a build, the forge
+    // finishes the merge, a bot comments, automation transitions a ticket) is
+    // looked for on a short, bounded schedule, beside the run: the item and
+    // its linked tickets, and the repository of a write that moves a branch
+    // (ADR-0064 rule 2, #2585, #2595).
+    super::look_again::after_write(scheduler, write, &entity, declared, followed).await;
     if let Err(error) = scheduler.sync_after_write(&write.source_id).await {
         tracing::warn!(
             source = %write.source_id,
