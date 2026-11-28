@@ -157,24 +157,28 @@ impl EffectAnswer {
     }
 }
 
-/// The items `effect` names for the write against `target`, from the mirror:
-/// also what [`super::look_again`] finds a moved branch's repository by.
+/// The live declared parents of `entity` ([`DECLARED_PARENT`]): what
+/// [`Effect::Parent`] names, and what [`super::look_again`] finds a moved
+/// branch's repository by.
+pub(crate) async fn parents(pool: &sqlx::PgPool, entity: &str) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(DECLARED_PARENT)
+        .bind(entity)
+        .fetch_all(pool)
+        .await
+}
+
+/// The items `effect` names for the write against `target`, from the mirror.
 /// The saved views are the ones of `read_back`, the item the write made or
 /// touched: a ticket filed names its project as its target, which the mirror
 /// does not hold, and the new ticket as what is read back.
-pub(crate) async fn resolve(
+async fn resolve(
     pool: &sqlx::PgPool,
     effect: Effect,
     target: &str,
     read_back: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     match effect {
-        Effect::Parent => {
-            sqlx::query_scalar(DECLARED_PARENT)
-                .bind(target)
-                .fetch_all(pool)
-                .await
-        }
+        Effect::Parent => parents(pool, target).await,
         Effect::LinkedTickets => {
             sqlx::query_scalar(LINKED_TICKETS)
                 .bind(target)
@@ -333,11 +337,11 @@ mod tests {
             .chain(views.iter().map(|(key, _)| (key.as_str(), "view")))
         {
             sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $1)")
-            .bind(id(key))
-            .bind(kind)
-            .execute(&pool)
-            .await
-            .unwrap();
+                .bind(id(key))
+                .bind(kind)
+                .execute(&pool)
+                .await
+                .unwrap();
             sqlx::query(
                 "insert into sync.item (entity_id, source_id, kind, payload)
                  values ($1, $2, $3, '{}')",

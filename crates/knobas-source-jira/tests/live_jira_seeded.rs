@@ -106,6 +106,12 @@
 //! boards with the filters they stand on (a filter whose board was never
 //! made is not a favourite, and nothing reads it).
 //!
+//! One **Kanban board over [`LITTER_LABEL`]** on a filter of its own, that
+//! leaves out *Done*, so that a board read by its key drops a ticket a
+//! transition took out of its query (#2593); the ticket's status is moved
+//! back. [`Probes`]' `Drop` takes back the board and the filter and checks,
+//! and the next run takes back a killed run's, as for the board-order probe.
+//!
 //! One **user and one permission scheme** (#2052): the user minted with Jira
 //! Software access and no group but the default one, the scheme a copy of
 //! OPS's with *Add Comments*, *Work On Issues* and *Create Issues* given to
@@ -4429,11 +4435,14 @@ impl Probes {
     /// The board-order probe. Takes back the boards a killed run left first,
     /// each with the filter it stands on.
     async fn board_order(seeded: &Seeded) -> Probes {
+        Probes::boards_named(seeded, ORDER_PROBE, "board-order probe").await
+    }
+
+    /// A probe of boards named with `name`. Takes back the boards a killed
+    /// run left first, each with the filter it stands on.
+    async fn boards_named(seeded: &Seeded, name: &str, what: &'static str) -> Probes {
         let (status, listed) = seeded
-            .get(&format!(
-                "rest/agile/1.0/board?name={}",
-                url_encode(ORDER_PROBE)
-            ))
+            .get(&format!("rest/agile/1.0/board?name={}", url_encode(name)))
             .await;
         assert_eq!(status, 200, "listing a killed run's probe boards: {listed}");
         let mut stale = Vec::new();
@@ -4458,9 +4467,9 @@ impl Probes {
         )
         .await
         {
-            panic!("a killed run's board-order probe is still on the server: {failure}");
+            panic!("a killed run's {what} is still on the server: {failure}");
         }
-        Probes::none(seeded, "board-order probe")
+        Probes::none(seeded, what)
     }
 
     /// A Kanban board on PAY named `<ORDER_PROBE> <suffix>`, on a filter of
@@ -5592,8 +5601,9 @@ async fn a_tickets_fields_are_edited_and_read_back_on_a_real_jira() {
 /// index, as a landed write's read-back does), and the board is walked from
 /// the position the run left. The walk emits the board without the ticket,
 /// as a run now emits it, and moves its position; a second walk from there
-/// emits nothing. The status, the label, the board and its filter are put
-/// back.
+/// emits nothing. The status is moved back (and by the next run's leftover
+/// clearing on a failure), the label by [`Labeled`], the board and its
+/// filter by [`Probes`], passing or panicking alike.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
 async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_query() {
@@ -5601,18 +5611,7 @@ async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_que
     const PROBE: &str = "knobas live probe walked board";
     let seeded = seeded();
     let mut labelled = Labeled::new(&seeded).await;
-    let (_, listed) = seeded
-        .get(&format!("rest/agile/1.0/board?name={}", url_encode(PROBE)))
-        .await;
-    for board in listed["values"].as_array().into_iter().flatten() {
-        seeded
-            .request(
-                reqwest::Method::DELETE,
-                &format!("rest/agile/1.0/board/{}", board["id"]),
-                None,
-            )
-            .await;
-    }
+    let mut probes = Probes::boards_named(&seeded, PROBE, "walked-board probe").await;
     let key = seeded
         .seeded_keys()
         .into_iter()
@@ -5633,6 +5632,7 @@ async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_que
         .await;
     assert_eq!(status, 200, "{filter}");
     let filter_id: u64 = filter["id"].as_str().unwrap().parse().unwrap();
+    probes.made(Probed::Filter(filter_id));
     let (status, board) = seeded
         .request(
             reqwest::Method::POST,
@@ -5641,6 +5641,7 @@ async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_que
         )
         .await;
     assert!(status == 200 || status == 201, "{status} {board}");
+    probes.made(Probed::Board(board["id"].as_u64().expect("a board id")));
     let probe = format!("board-{}", board["id"]);
 
     let source = seeded.source(serde_json::json!({ "projects": ["PAY"] }));
@@ -5694,11 +5695,6 @@ async fn a_board_read_by_its_key_drops_a_ticket_a_transition_took_out_of_its_que
     }
 
     seeded.move_to(&key, &was).await;
-    for path in [
-        format!("rest/agile/1.0/board/{}", board["id"]),
-        format!("rest/api/2/filter/{filter_id}"),
-    ] {
-        seeded.request(reqwest::Method::DELETE, &path, None).await;
-    }
+    drop(probes); // the board, then its filter, each checked gone
     println!("SEEDED walked board: {probe} dropped {key} once it was Done, without a run");
 }

@@ -660,9 +660,13 @@ pub(crate) fn is_view(key: &str) -> bool {
 /// the same reads and the same mappers, so the item is the one a run emits.
 /// `None` for a view a run would leave out: gone from Jira, one this account
 /// may no longer read or Jira can no longer run, a filter no longer a
-/// favourite, or one the *Boards and filters* setting no longer brings in.
-/// A board read refused with 403 is an error, not gone: it is what a Jira
-/// Software that refuses this account answers (#2374).
+/// favourite, a board under *No boards* or, under *Only boards built on my
+/// favourite filters*, one whose filter is no longer a favourite. A board
+/// read refused with 403 is an error, not gone: it is what a Jira Software
+/// that refuses this account answers (#2374). Under *Boards on synced
+/// projects* a board is read by its id, not found in a project's listing: one
+/// that no synced project lists any more is read as it stands, and the next
+/// board read of a run delivers it gone.
 async fn read_one(
     api: &(dyn JiraApi + '_),
     cfg: &crate::JiraConfig,
@@ -1691,6 +1695,29 @@ mod tests {
         assert!(cursor.is_some());
     }
 
+    /// **A filter keyed on the assignee drops a ticket assigned away without
+    /// a run**: the filter's walk emits it without the ticket, as a run would.
+    #[tokio::test]
+    async fn a_favourite_filters_walk_drops_a_ticket_it_no_longer_holds() {
+        let mut api = with_favourites();
+        let (_, first) = sync(&api, None).await;
+        let dropped = api.favourites[0].3.remove(0);
+        let (items, cursor) = walked(walk_of(&api, &cfg(), "filter-10300", Some(&first)).await);
+        assert_eq!(items.len(), 1, "{items:?}");
+        same_item(
+            &items[0],
+            &as_a_run_emits(&api, &cfg(), "filter-10300").await,
+        );
+        assert!(
+            !items[0].payload["keys"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(dropped)),
+            "{items:?}"
+        );
+        assert!(cursor.is_some());
+    }
+
     /// A filter this account no longer holds as a favourite is one a run
     /// would deliver gone, and so is the walk's answer.
     #[tokio::test]
@@ -1735,7 +1762,10 @@ mod tests {
         api.clock_minutes = 120; // an hour on: the boards are read again
         let (again, _) = sync(&api, Some(stored)).await;
         assert_eq!(keys_of(&again), [("board-22", false)], "{again:?}");
-        assert_eq!(again[0].payload["keys"], json!(["WEB-5", "PAY-240", "PAY-231"]));
+        assert_eq!(
+            again[0].payload["keys"],
+            json!(["WEB-5", "PAY-240", "PAY-231"])
+        );
     }
 
     /// A board record Jira Software refuses with 403 (#2374) is a failed
@@ -1745,9 +1775,16 @@ mod tests {
         let mut api = seeded();
         let (_, first) = sync(&api, None).await;
         api.software_refused = true;
-        let refused = walk(&api, &cfg(), "jira", "https://jira.example/", "board-21", Some(&first))
-            .await
-            .expect_err("a refused board record fails the walk");
+        let refused = walk(
+            &api,
+            &cfg(),
+            "jira",
+            "https://jira.example/",
+            "board-21",
+            Some(&first),
+        )
+        .await
+        .expect_err("a refused board record fails the walk");
         assert_eq!(refused.status(), Some(403));
     }
 
