@@ -18,7 +18,6 @@ import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
-import { waitFor } from "../../shell/test-wait";
 import { drafts } from "../drafts.svelte";
 import { docViewModule } from "../render/doc/doc-module";
 import { forgetReading, OUTLINE_ROOM, READER_DRAWER, READING_MIN, readingAt } from "./docs";
@@ -26,14 +25,21 @@ import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 // A code block's views (API, Schema, XML view) load their code on the first press: held before the tests, as
 // `TfFileViewer`'s are. A cold import of the XML view on a busy machine outlasted `vi.waitFor`'s second (#2604's gate, load 60).
+// A code block's views load their component on the first press, and in jsdom (no worker) their engines load their model
+// on the first call: the API view's `openapi`, the XSD view's `xsd-answer` and `xsd-known`, the XML view's `doc-model`.
+// Cold, under load, any one of them outlasts `vi.waitFor`'s one second, so all are loaded
+// before the first test (PR #2607; #2572's run).
 beforeAll(async () => {
-  await Promise.all([docViewModule(), import("../render/TfOasInline.svelte"), import("../render/xsd/TfXsdInline.svelte")]);
+  await Promise.all([
+    docViewModule(),
+    import("../render/TfOasInline.svelte"),
+    import("../render/xsd/TfXsdInline.svelte"),
+    import("../../render/openapi"),
+    import("../../render/xsd-answer"),
+    import("../../render/xsd-known"),
+    import("../../render/doc-model"),
+  ]);
 });
-/**
- * A view's own reads after the press (the schema's `open`, the XML view's lines) on a loaded machine: past vitest's one
- * second under a whole run beside a 6x probe (#2572's run, 2026-11-28), alone in 100 ms.
- */
-const VIEW_WAIT = { timeout: 10_000 };
 
 const TREE: DocsTree = {
   spaces: [
@@ -3871,16 +3877,16 @@ test("a schema block offers Schema; an XML or JSON block of 40 lines and more of
   // Schema: the block's own declarations, a row opening what it holds in place.
   const asSchema = bars[0]!.querySelector("button")!;
   asSchema.click();
-  await waitFor(() => expect(target.querySelectorAll(".tf-xsd-inline .tf-xsd-ibtn")).toHaveLength(2), VIEW_WAIT);
+  await vi.waitFor(() => expect(target.querySelectorAll(".tf-xsd-inline .tf-xsd-ibtn")).toHaveLength(2));
   expect(asSchema.textContent).toBe("Source");
   expect([...target.querySelectorAll(".tf-xsd-inline .tf-xsd-ibtn")].map((b) => b.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Note element", "Party complex type"]);
   target.querySelectorAll<HTMLButtonElement>(".tf-xsd-inline .tf-xsd-ibtn")[1]!.click();
-  await waitFor(() => expect(target.querySelector(".tf-xsd-inline .tf-xsd-iopen .tf-xsd-hname")?.textContent).toBe("Party"), VIEW_WAIT);
+  await vi.waitFor(() => expect(target.querySelector(".tf-xsd-inline .tf-xsd-iopen .tf-xsd-hname")?.textContent).toBe("Party"));
 
   // XML view: the document's own lines with their carets, in a box no taller than 420 px; no rail and no query.
   const asXml = bars[1]!.querySelector("button")!;
   asXml.click();
-  await waitFor(() => expect(bars[1]!.parentElement!.querySelector(".tf-doc-xv .tf-xv-inline .tf-l")).not.toBeNull(), VIEW_WAIT);
+  await vi.waitFor(() => expect(bars[1]!.parentElement!.querySelector(".tf-doc-xv .tf-xv-inline .tf-l")).not.toBeNull());
   const box = bars[1]!.parentElement!.querySelector<HTMLElement>(".tf-doc-xv")!;
   expect(Number.parseInt(box.style.height)).toBeLessThanOrEqual(420);
   expect(box.querySelector(".tf-xv-rail, .tf-xv-qfield")).toBeNull();
