@@ -406,6 +406,75 @@ pub async fn open_made(
     Ok(argv)
 }
 
+/// Try a saved application on pasted text, a chosen file or a chosen folder
+/// (#2562), from its settings page: run as [`open_made`] runs on a generated
+/// folder, with the chosen folder (a file's own folder) in the checkout's
+/// place and the file as `{file}`. Pasted text is written as its name into a
+/// throwaway folder first, kept while the application may have it open and
+/// removed when the next one is tried (`try_on::opened`). Answers the
+/// argument vector it started.
+///
+/// # Errors
+///
+/// As [`open_made`]; a path refused, a name refused or text past the cap.
+pub async fn open_try(
+    pool: &PgPool,
+    application: &str,
+    on: crate::try_on::TryOn,
+) -> Result<Vec<String>, IpcError> {
+    use crate::try_on::{Throwaway, TryOn, checked_path, leaf};
+    let stored = load(pool).await?;
+    let app = stored.by_id(application).ok_or_else(|| {
+        IpcError::invalid(format!(
+            "'{application}' is not one of your applications: see Settings › Checkouts"
+        ))
+    })?;
+    let (dir, file, throwaway) = match on {
+        TryOn::Text { name, text } => {
+            let made = Throwaway::write("open", &name, &text)?;
+            (made.dir.clone(), Some(made.file.clone()), Some(made.dir))
+        }
+        TryOn::Path { path } => {
+            let (at, folder) = checked_path(&path).await?;
+            if folder {
+                (at, None, None)
+            } else {
+                let parent = at
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| IpcError::invalid(format!("{} has no folder", at.display())))?;
+                (parent, Some(at), None)
+            }
+        }
+    };
+    let name = file.as_deref().map(leaf);
+    let argv = argv_in(
+        app,
+        &dir,
+        name.as_deref().zip(file.as_deref()),
+        None,
+        "what it is tried on",
+    );
+    let argv = match argv {
+        Ok(argv) => argv,
+        Err(error) => {
+            if let Some(dir) = throwaway {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            return Err(error);
+        }
+    };
+    let to_run = argv.clone();
+    let ran = tokio::task::spawn_blocking(move || spawn(&to_run))
+        .await
+        .map_err(IpcError::internal)?;
+    if let Some(dir) = throwaway {
+        crate::try_on::opened(dir);
+    }
+    ran.map_err(|error| IpcError::invalid(format!("{} could not be run: {error}", app.name)))?;
+    Ok(argv)
+}
+
 /// [`open_made`]'s argument vector: every argument a path knobas made, or a
 /// name inside it the manifest holds, passed absolute (ADR-0016).
 ///
@@ -425,6 +494,32 @@ pub fn made_argv(
         })?),
         None => None,
     };
+    argv_in(
+        app,
+        &made.dir,
+        file.zip(on_disk.as_deref()),
+        line,
+        "a generated folder",
+    )
+}
+
+/// An application's argument vector with `dir` in the checkout's place and,
+/// where given, a file in it (its name from `dir`, its path on disk): every
+/// argument a path knobas made or the person chose. `{url}` is refused: what
+/// `what` names has no page on a source.
+///
+/// # Errors
+///
+/// As [`open_made`].
+fn argv_in(
+    app: &Application,
+    dir: &Path,
+    file: Option<(&str, &Path)>,
+    line: Option<u32>,
+    what: &str,
+) -> Result<Vec<String>, IpcError> {
+    let on_disk = file.map(|(_, at)| at);
+    let file = file.map(|(rel, _)| rel);
     let object = match file {
         Some(rel) => Object::File {
             path: rel.to_owned(),
@@ -440,7 +535,7 @@ pub fn made_argv(
         .to_owned();
     if template.contains("{url}") {
         return Err(IpcError::invalid(format!(
-            "{}'s command needs a page on the source, and a generated folder has none",
+            "{}'s command needs a page on the source, and {what} has none",
             app.name
         )));
     }
@@ -450,8 +545,8 @@ pub fn made_argv(
     rules::fill(
         &template,
         &Fill {
-            checkout: &made.dir,
-            file: on_disk.as_deref(),
+            checkout: dir,
+            file: on_disk,
             line,
             code: &code,
         },

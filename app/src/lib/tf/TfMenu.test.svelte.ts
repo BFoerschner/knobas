@@ -230,9 +230,10 @@ test("one menu stands at a time: opening one closes the other, whatever opened i
 /** Every way a menu opens, closes or loses its owner, as one step. */
 const STEPS = ["open", "open-other", "close", "owner-goes", "owner-comes", "hash", "away", "esc"] as const;
 
-test("every order of three steps, each flushed or not: what stands is what is open, never more than one, and a press away ends it", async () => {
+// One test per first step: all 2,048 cases in one test took 23 s on a loaded machine, past vitest's 15 s (#2598).
+test.each(STEPS)("every order of three steps from %s, each flushed or not: what stands is what is open, never more than one, and a press away ends it", async (a) => {
   const orders: (typeof STEPS)[number][][] = [];
-  for (const a of STEPS) for (const b of STEPS) for (const c of STEPS) orders.push([a, b, c]);
+  for (const b of STEPS) for (const c of STEPS) orders.push([a, b, c]);
   for (const order of orders) {
     for (let flushes = 0; flushes < 4; flushes++) {
       const { props, shown } = await drawLive({ host: true, second: true });

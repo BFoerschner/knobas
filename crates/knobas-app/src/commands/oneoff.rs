@@ -119,6 +119,32 @@ pub async fn oneoff_run<R: tauri::Runtime>(
     .await
 }
 
+/// Tries saved command `command` on pasted text, a chosen file or a chosen
+/// folder (#2562), from its settings page: run as on a checkout, with the
+/// chosen folder in its place. Its lines follow on `channel` as a run's do,
+/// and the run dialog reads it back by its id; it is no row in the list of
+/// runs, and a throwaway file goes when it ends.
+///
+/// # Errors
+/// As [`crate::oneoff::try_start`].
+#[tauri::command]
+pub async fn oneoff_try<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: tauri::State<'_, Lifecycle>,
+    command: String,
+    on: crate::try_on::TryOn,
+    channel: Channel<Batch>,
+) -> Result<Started, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::oneoff::try_start(
+        &pool,
+        &command,
+        on,
+        Arc::new(ChannelSink::new(&app, channel)),
+    )
+    .await
+}
+
 /// Stops a run with everything it started.
 #[tauri::command]
 pub fn oneoff_stop(run: String) {

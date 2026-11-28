@@ -15,7 +15,7 @@ import { FAKE_ATTACHED, isFakeMonitor } from "./monitors";
 import { fakeStateOf } from "./link-sets";
 import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
-import { fixtureBuildEntity, runView } from "./builds";
+import { endFakeRun, fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
 import { repoFileBytes, repoFilePiped, repoRefusals, repoView } from "./views/repos";
 
@@ -199,10 +199,10 @@ const REFRESHING_ADAPTERS = new Set(["mock", "jira", "confluence", "teamcity", "
  * descriptors declare them (`KindInfo::refreshes`, #2146): `get_entity`
  * answers `refreshes` for the row's kind, not the adapter. Held to the
  * templates by knobas-app's `the_fake_ipcs_not_refreshed_kinds_are_the_descriptors`. Gitea reads every kind since
- * ADR-0047: a repository, a branch and a commit by walking their repository.
+ * ADR-0047: a repository, a branch and a commit by walking their repository; TeamCity since #2564: a build
+ * configuration by walking its newest builds.
  */
 const NOT_REFRESHED: Readonly<Record<string, ReadonlySet<string>>> = {
-  teamcity: new Set(["build_config"]),
   jira: new Set(["jira_view"]),
 };
 
@@ -237,6 +237,8 @@ function refreshEntity(args: Record<string, unknown>): EntityRefresh {
     if (!refreshesKind(detail.source.adapter_kind, detail.row.kind)) return { outcome: "not_offered" };
   }
   const failed = new URLSearchParams(location.search).has("fake-refresh-failed");
+  // `?fake-run-ends` (#2558): a running fixture run read by id has finished since.
+  if (!failed && new URLSearchParams(location.search).has("fake-run-ends")) endFakeRun(id);
   setTimeout(() => bridge?.emit("item:refreshed", { entity_id: id, write_id: null, ended: failed ? "failed" : "refreshed" }), 0);
   return failed ? { outcome: "failed", reason: "502 Bad Gateway from the source" } : { outcome: "refreshed" };
 }

@@ -36,6 +36,14 @@ async fn evict(pool: &sqlx::PgPool) {
     }
 }
 
+/// The plan's own lines in an `EXPLAIN (ANALYZE, BUFFERS)` text: what the
+/// statement read running, without the *Planning* buffers. The planner reads
+/// catalog pages, which the warm does not warm and a busy machine evicts, so
+/// a `read=` there says nothing about the search copies.
+fn executed(plan: &str) -> &str {
+    plan.find("\nPlanning").map_or(plan, |at| &plan[..at])
+}
+
 /// **The first broad word after a start reads nothing from disk.** A word
 /// more rows hold than the bound is counted first: its matches and the rows
 /// it names, each off its own page of the search copies. With the copies out
@@ -51,7 +59,7 @@ async fn a_broad_words_count_reads_no_page_after_the_warm() {
     evict(&pool).await;
     let cold = explain_kept(&pool, count(), false).await.unwrap();
     assert!(
-        cold.contains("read="),
+        executed(&cold).contains("read="),
         "the count read its pages from disk once they were out of the buffers:\n{cold}"
     );
 
@@ -60,7 +68,7 @@ async fn a_broad_words_count_reads_no_page_after_the_warm() {
     let warmed = warm(&mut conn).await.unwrap();
     let warm = explain_kept(&pool, count(), false).await.unwrap();
     assert!(
-        !warm.contains("read="),
+        !executed(&warm).contains("read="),
         "after the warm the count found every page in the buffers:\n{warm}"
     );
     assert_eq!(warmed.unread, None, "{warmed:?}");

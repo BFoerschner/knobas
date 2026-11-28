@@ -41,6 +41,12 @@ name). Back (`⌘[`) kept the page, as history does.
 Nothing drawn changed: the entries look as they did, so no screen's pixels moved. The entries carry `data-section`,
 which the speed checks press by now that an entry's link names a page of any kind.
 
+**Amended 2026-11-27 (#2559, Björn's ruling).** The last line of *Kept as it was* now holds for every page, not
+only a place come back to: `Esc` goes up to the page's parent in its own section, whatever opened it, and the opener
+has no say in where (`escape.ts`). The gear and `⌘,` no longer keep their opener for `Esc`: a section of Settings goes
+nowhere on `Esc`, and Back leaves Settings for the page they were pressed on. The chains are in
+`docs/decisions/2026-11-02-ticket-page-and-job-one-page.md`'s amendment of the same date and in `parentOf`.
+
 ## Caught
 
 `TfShell.test.svelte.ts`: one test per section, each failing before this (Docs' page and space, a ticket, a pull

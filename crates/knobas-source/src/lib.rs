@@ -1777,8 +1777,9 @@ impl WriteOp {
 
     /// How the queue delivers this op: what a hold compares, whether a resend
     /// is harmless, whether a withdrawal can leave an unclaimed artefact,
-    /// which field names the target, and which link an arrival draws
-    /// (ADR-0006, amended 2026-10-19).
+    /// which field names the target, which link an arrival draws
+    /// (ADR-0006, amended 2026-10-19), and what else it moves
+    /// ([`WriteOp::effects`], ADR-0064).
     ///
     /// **No wildcard arm**, for [`WriteOp::identifier`]'s reason: a new
     /// variant does not compile until it states its delivery here. The
@@ -1797,8 +1798,9 @@ impl WriteOp {
             can_leave_unclaimed: true,
             target: TargetField::Entity,
             link: None,
+            effects: &[],
         };
-        match self {
+        let delivery = match self {
             // What it does is the adapter's alone, so knobas can say nothing
             // in its favour.
             WriteOp::SourceAction { .. } => conservative,
@@ -1906,6 +1908,71 @@ impl WriteOp {
                 target: TargetField::Repository,
                 ..conservative
             },
+        };
+        Delivery {
+            effects: self.effects(),
+            ..delivery
+        }
+    }
+
+    /// **What else this op moves**, read back at once after it lands
+    /// (ADR-0064, `CONTEXT.md` *Effect*): the delivery's `effects`, each
+    /// resolved from the mirror against the write's target and read at its
+    /// own source, by id or by the walk of one parent, never by a run.
+    ///
+    /// **No wildcard arm**, for [`WriteOp::delivery`]'s reason: a new variant
+    /// does not compile until it states its effects here, an empty list
+    /// included. An op lists only what knobas knows it moves at the source;
+    /// the run that follows the write (ADR-0031) still reads the rest, and
+    /// what the source does later is the bounded schedule's (#2585, #2595).
+    /// The gap groups of ADR-0064's audit add their rows here.
+    #[must_use]
+    pub fn effects(&self) -> &'static [knobas_spi_types::delivery::Effect] {
+        use knobas_spi_types::delivery::Effect;
+        match self {
+            // The base branch's head and the merge commit, a head branch
+            // `delete_branch` removed, and the issues the merge closed are the
+            // repository's, and its walk brings them; the tickets the pull
+            // request is linked to may be closed or moved by the merge in
+            // whichever source holds them.
+            WriteOp::MergePullRequest { .. } => &[Effect::Parent, Effect::LinkedTickets],
+            // The head branch's tip and its new commit are the repository's.
+            WriteOp::UpdatePullRequestBranch { .. } => &[Effect::Parent],
+            // Each moves a branch of its repository: a new one, a new tip, or
+            // one gone. Its repository is the target or the target's parent,
+            // and the builds CI queues for it are looked for on the bounded
+            // schedule (ADR-0064 rule 2, #2585). A target that is the
+            // repository itself has no declared parent, so nothing more is
+            // read at once than its read-back walked.
+            WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. }
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::CommitFile { .. } => &[Effect::Parent],
+            // Each moves only the item it is read back by, as ADR-0064's
+            // audit finds, or moves what no effect names yet: a ticket's
+            // boards (#2593), a build's chain (#2594), an adapter's own action
+            // (rule 3, #2596).
+            WriteOp::Comment { .. }
+            | WriteOp::Transition { .. }
+            | WriteOp::CreateTicket { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::TriggerBuild { .. }
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::LogWork { .. }
+            | WriteOp::CreatePage { .. }
+            | WriteOp::UpdatePage { .. }
+            | WriteOp::PauseMonitor { .. }
+            | WriteOp::ResumeMonitor { .. }
+            | WriteOp::CreateMonitor { .. }
+            | WriteOp::SetParameter { .. }
+            | WriteOp::RunBuild { .. }
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::EditPullRequest { .. }
+            | WriteOp::SourceAction { .. }
+            | WriteOp::ReplyToThread { .. }
+            | WriteOp::ResolveThread { .. }
+            | WriteOp::RequestReviewers { .. }
+            | WriteOp::EditTicket { .. } => &[],
         }
     }
 
@@ -3987,6 +4054,30 @@ mod tests {
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
         assert_eq!(seen.len(), 27, "a variant lost its probe in every_write_op");
+    }
+
+    /// **What each op moves beyond its target** (ADR-0064, #2592): a merge
+    /// moves its repository's branches and the issues it closes, and the
+    /// tickets it is linked to; a branch update moves the head branch's tip.
+    /// Every other op declares nothing yet: each later gap group (#2585,
+    /// #2593, #2595) adds its rows here. The answer is the delivery's, so
+    /// whoever reads one reads the other.
+    #[test]
+    fn the_writes_that_move_a_branch_declare_what_they_move_and_nothing_else_does() {
+        use knobas_spi_types::delivery::Effect;
+        for op in every_write_op() {
+            let expected: &[Effect] = match op.identifier() {
+                "merge_pull_request" => &[Effect::Parent, Effect::LinkedTickets],
+                "update_pull_request_branch"
+                | "create_branch"
+                | "create_pull_request"
+                | "delete_branch"
+                | "commit_file" => &[Effect::Parent],
+                _ => &[],
+            };
+            assert_eq!(op.delivery().effects, expected, "{}", op.identifier());
+            assert_eq!(op.effects(), expected, "{}", op.identifier());
+        }
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

@@ -9,14 +9,25 @@
 //! run again; the tree's marks name the folders holding the project file; a
 //! mirrored name that is no plain path here is refused before the program
 //! runs; a repository with no clone and no listing says so.
+//!
+//! Each test draws into a [`Runs`] of its own, not [`Runs::global`]: other
+//! tests of this binary delete sources and change credentials, which forget
+//! every drawing the global one holds (`Runs::forget_source`), and a test
+//! that keeps a generated folder moves the global store.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use knobas_app::checkout::set_override;
 use knobas_app::folder_render::runs::{Ask, FolderFailure, FolderRenderView, ReadFrom, Runs};
-use knobas_app::folder_render::{self, FolderOutput, FolderRendererDraft, resolve};
+use knobas_app::folder_render::{self, FolderOutput, FolderRendererDraft, copy, resolve};
 use sqlx::PgPool;
+
+/// The folder renders of this test alone.
+fn own_runs() -> Arc<Runs> {
+    Arc::new(Runs::new(copy::root()))
+}
 
 async fn scratch(name: &str) -> PgPool {
     knobas_db::test_util::scratch_database(name)
@@ -86,6 +97,7 @@ async fn repo(pool: &PgPool, clone: &Path, token: &str) -> String {
 }
 
 async fn settled(
+    runs: &Arc<Runs>,
     pool: &PgPool,
     id: &str,
     renderer: &str,
@@ -95,6 +107,7 @@ async fn settled(
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let view = folder_render::ask(
+            runs,
             pool,
             None,
             id,
@@ -114,21 +127,16 @@ async fn settled(
     }
 }
 
-fn text(view: &FolderRenderView) -> String {
+fn text(runs: &Runs, view: &FolderRenderView) -> String {
     let drawn = view.drawn.as_ref().expect("a drawing");
-    String::from_utf8(
-        Runs::global()
-            .output(&drawn.token)
-            .expect("its bytes")
-            .to_vec(),
-    )
-    .unwrap()
+    String::from_utf8(runs.output(&drawn.token).expect("its bytes").to_vec()).unwrap()
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_program() {
     let pool = scratch("folder_render_clone").await;
+    let runs = own_runs();
     let clone = tempfile::tempdir().unwrap();
     git(clone.path(), &["init", "-q", "-b", "main"]);
     write(clone.path(), "README.md", "# flows\n");
@@ -183,6 +191,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
     assert_eq!(marks[0].folders, ["flows/orders"]);
 
     let opened = folder_render::ask(
+        &runs,
         &pool,
         None,
         &id,
@@ -196,10 +205,10 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
     .await
     .unwrap();
     assert!(opened.running.is_some(), "{opened:?}");
-    let view = settled(&pool, &id, &lister, "flows/orders", &first).await;
+    let view = settled(&runs, &pool, &id, &lister, "flows/orders", &first).await;
     assert!(view.current, "{view:?}");
     assert_eq!(
-        text(&view),
+        text(&runs, &view),
         "orders cwd=0\n./orders.lcproj\n./steps/main.flow\nstart -> end\n"
     );
 
@@ -208,6 +217,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
     git(clone.path(), &["checkout", "-q", "--", "flows/orders"]);
     let second = commit(clone.path(), "outside");
     let same = folder_render::ask(
+        &runs,
         &pool,
         None,
         &id,
@@ -230,6 +240,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
     );
     let third = commit(clone.path(), "inside");
     let changed = folder_render::ask(
+        &runs,
         &pool,
         None,
         &id,
@@ -246,11 +257,11 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
         !changed.current && changed.drawn.is_some() && changed.running.is_some(),
         "{changed:?}"
     );
-    let redrawn = settled(&pool, &id, &lister, "flows/orders", &third).await;
+    let redrawn = settled(&runs, &pool, &id, &lister, "flows/orders", &third).await;
     assert!(
-        text(&redrawn).ends_with("start -> pay -> end\n"),
+        text(&runs, &redrawn).ends_with("start -> pay -> end\n"),
         "{}",
-        text(&redrawn)
+        text(&runs, &redrawn)
     );
 }
 
@@ -260,6 +271,7 @@ async fn a_folder_is_copied_from_the_clone_at_the_commit_and_drawn_by_the_progra
 #[tokio::test]
 async fn a_name_that_is_no_plain_path_is_refused_before_anything_runs() {
     let pool = scratch("folder_render_names").await;
+    let runs = own_runs();
     let clone = tempfile::tempdir().unwrap();
     git(clone.path(), &["init", "-q", "-b", "main"]);
     write(clone.path(), "odd/ok.txt", "ok\n");
@@ -287,6 +299,7 @@ async fn a_name_that_is_no_plain_path_is_refused_before_anything_runs() {
     )
     .await;
     folder_render::ask(
+        &runs,
         &pool,
         None,
         &id,
@@ -299,7 +312,7 @@ async fn a_name_that_is_no_plain_path_is_refused_before_anything_runs() {
     )
     .await
     .unwrap();
-    let view = settled(&pool, &id, &saved[0].id, "odd", &sha).await;
+    let view = settled(&runs, &pool, &id, &saved[0].id, "odd", &sha).await;
     match view.failure {
         Some(FolderFailure::Copy { reason }) => assert!(reason.contains("a:b.txt"), "{reason}"),
         other => panic!("{other:?}"),
@@ -311,6 +324,7 @@ async fn a_name_that_is_no_plain_path_is_refused_before_anything_runs() {
 #[tokio::test]
 async fn a_repository_with_no_clone_and_no_listing_says_so() {
     let pool = scratch("folder_render_no_clone").await;
+    let runs = own_runs();
     let saved = folder_render::save(
         &pool,
         &[FolderRendererDraft {
@@ -330,6 +344,7 @@ async fn a_repository_with_no_clone_and_no_listing_says_so() {
     // Its clone is gone: the override names a folder that is no longer there.
     set_override(&pool, id, None).await.unwrap();
     let view = folder_render::ask(
+        &runs,
         &pool,
         None,
         id,
@@ -349,9 +364,20 @@ async fn a_repository_with_no_clone_and_no_listing_says_so() {
         }
         other => panic!("{other:?}"),
     }
-    let unknown = folder_render::ask(&pool, None, id, "gone", "x", None, None, Ask::Open, "")
-        .await
-        .unwrap_err();
+    let unknown = folder_render::ask(
+        &runs,
+        &pool,
+        None,
+        id,
+        "gone",
+        "x",
+        None,
+        None,
+        Ask::Open,
+        "",
+    )
+    .await
+    .unwrap_err();
     assert!(
         unknown
             .message
@@ -368,12 +394,13 @@ async fn a_repository_with_no_clone_and_no_listing_says_so() {
 #[tokio::test]
 async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
     let pool = scratch("folder_render_made").await;
+    let runs = own_runs();
     let clone = tempfile::tempdir().unwrap();
     git(clone.path(), &["init", "-q", "-b", "main"]);
     write(clone.path(), "flows/orders/orders.lcproj", "good\n");
     let first = commit(clone.path(), "first");
     let store = tempfile::tempdir().unwrap();
-    Runs::global().set_store(store.path().join("knobas-rendered"));
+    runs.set_store(store.path().join("knobas-rendered"));
 
     let tools = tempfile::tempdir().unwrap();
     let script = tools.path().join("site.sh");
@@ -406,6 +433,7 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
     let id = repo(&pool, clone.path(), &format!("made-{}", std::process::id())).await;
 
     folder_render::ask(
+        &runs,
         &pool,
         None,
         &id,
@@ -418,19 +446,22 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
     )
     .await
     .unwrap();
-    let view = settled(&pool, &id, &site, "flows/orders", &first).await;
+    let view = settled(&runs, &pool, &id, &site, "flows/orders", &first).await;
     let token = view
         .drawn
         .as_ref()
         .expect("a generated folder")
         .token
         .clone();
-    let tree = folder_render::made::tree(&token).unwrap();
+    let made = || runs.made(&token).expect("the generated folder, held");
+    let tree = folder_render::made::tree_of(&made());
     let paths: Vec<&str> = tree.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(paths, ["img/a.txt", "index.md"]);
     assert_eq!(tree.left_out_total, 1);
     assert!(tree.dir.starts_with(&*store.path().to_string_lossy()));
-    let block = folder_render::made::file(&token, "index.md").await.unwrap();
+    let block = folder_render::made::file_of(made(), "index.md")
+        .await
+        .unwrap();
     let knobas_source::view::Block::File {
         text,
         language,
@@ -444,18 +475,19 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
     assert_eq!(language.as_deref(), Some("markdown"));
     assert_eq!(at, None);
     assert_eq!(
-        folder_render::made::file_bytes(&token, "img/a.txt")
+        folder_render::made::file_bytes_of(made(), "img/a.txt")
             .await
             .unwrap(),
         b"a"
     );
-    assert!(folder_render::made::file(&token, "hosts").await.is_err());
-    assert!(Runs::global().output(&token).is_none());
+    assert!(folder_render::made::file_of(made(), "hosts").await.is_err());
+    assert!(runs.output(&token).is_none());
 
     // The project changes and the tool fails: nothing of it is kept.
     write(clone.path(), "flows/orders/orders.lcproj", "broken\n");
     let second = commit(clone.path(), "second");
     folder_render::ask(
+        &runs,
         &pool,
         None,
         &id,
@@ -468,7 +500,7 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
     )
     .await
     .unwrap();
-    let failed = settled(&pool, &id, &site, "flows/orders", &second).await;
+    let failed = settled(&runs, &pool, &id, &site, "flows/orders", &second).await;
     assert!(
         matches!(
             failed.failure,
@@ -480,10 +512,7 @@ async fn a_folder_of_files_is_kept_and_read_back_by_its_token() {
         "{failed:?}"
     );
     assert_eq!(failed.drawn.map(|d| d.token), Some(token.clone()));
-    assert!(
-        folder_render::made::tree(&token).is_ok(),
-        "the kept folder stays"
-    );
+    assert!(runs.made(&token).is_some(), "the kept folder stays");
 }
 
 /// The Files tab on *Working tree* (ux29; Björn: "when I have the working tree selected, it tries to render the folder
@@ -498,6 +527,7 @@ async fn the_working_tree_is_rendered_from_disk_in_its_own_lane_and_leaves_the_c
     const WT: &str = "~working-tree";
     const LANE: &str = "cmp:~working-tree";
     let pool = scratch("folder_render_working").await;
+    let runs = own_runs();
     let clone = tempfile::tempdir().unwrap();
     git(clone.path(), &["init", "-q", "-b", "main"]);
     write(clone.path(), ".gitignore", "*.log\n");
@@ -539,21 +569,21 @@ async fn the_working_tree_is_rendered_from_disk_in_its_own_lane_and_leaves_the_c
     let head = head.as_str();
 
     // The commit's drawing first, in the Files tab's lane: HEAD's file, nothing untracked.
-    ask_at(&pool, &id, &lister, head, "", Ask::Open).await;
-    let at_head = settled_at(&pool, &id, &lister, head, "").await;
+    ask_at(&runs, &pool, &id, &lister, head, "", Ask::Open).await;
+    let at_head = settled_at(&runs, &pool, &id, &lister, head, "").await;
     assert_eq!(
-        text(&at_head),
+        text(&runs, &at_head),
         "./main.flow\n./orders.lcproj\nstart -> end\n"
     );
 
     // The working tree: drawn from disk, not served the commit's drawing.
-    let opened = ask_at(&pool, &id, &lister, WT, LANE, Ask::Open).await;
+    let opened = ask_at(&runs, &pool, &id, &lister, WT, LANE, Ask::Open).await;
     assert!(opened.running.is_some(), "{opened:?}");
-    let on_disk = settled_at(&pool, &id, &lister, WT, LANE).await;
+    let on_disk = settled_at(&runs, &pool, &id, &lister, WT, LANE).await;
     assert!(on_disk.current, "{on_disk:?}");
     assert_eq!(on_disk.from, Some(ReadFrom::WorkingTree));
     assert_eq!(
-        text(&on_disk),
+        text(&runs, &on_disk),
         "./extra.flow\n./main.flow\n./orders.lcproj\nstart -> refund -> end\n"
     );
     assert_ne!(
@@ -567,26 +597,30 @@ async fn the_working_tree_is_rendered_from_disk_in_its_own_lane_and_leaves_the_c
         "flows/orders/main.flow",
         "start -> pay -> end\n",
     );
-    let moved = ask_at(&pool, &id, &lister, WT, LANE, Ask::Open).await;
+    let moved = ask_at(&runs, &pool, &id, &lister, WT, LANE, Ask::Open).await;
     assert!(!moved.current && moved.drawn.is_some(), "{moved:?}");
-    let again = settled_at(&pool, &id, &lister, WT, LANE).await;
+    let again = settled_at(&runs, &pool, &id, &lister, WT, LANE).await;
     assert!(
-        text(&again).ends_with("start -> pay -> end\n"),
+        text(&runs, &again).ends_with("start -> pay -> end\n"),
         "{}",
-        text(&again)
+        text(&runs, &again)
     );
 
     // The commit's drawing is still the commit's, current, in its own lane.
-    let back = ask_at(&pool, &id, &lister, head, "", Ask::Look).await;
+    let back = ask_at(&runs, &pool, &id, &lister, head, "", Ask::Look).await;
     assert!(back.current, "{back:?}");
     assert_eq!(
         back.drawn.as_ref().unwrap().token,
         at_head.drawn.as_ref().unwrap().token
     );
-    assert_eq!(text(&back), "./main.flow\n./orders.lcproj\nstart -> end\n");
+    assert_eq!(
+        text(&runs, &back),
+        "./main.flow\n./orders.lcproj\nstart -> end\n"
+    );
 }
 
 async fn ask_at(
+    runs: &Arc<Runs>,
     pool: &PgPool,
     id: &str,
     renderer: &str,
@@ -595,6 +629,7 @@ async fn ask_at(
     how: Ask,
 ) -> FolderRenderView {
     folder_render::ask(
+        runs,
         pool,
         None,
         id,
@@ -610,6 +645,7 @@ async fn ask_at(
 }
 
 async fn settled_at(
+    runs: &Arc<Runs>,
     pool: &PgPool,
     id: &str,
     renderer: &str,
@@ -618,7 +654,7 @@ async fn settled_at(
 ) -> FolderRenderView {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let view = ask_at(pool, id, renderer, commit, lane, Ask::Look).await;
+        let view = ask_at(runs, pool, id, renderer, commit, lane, Ask::Look).await;
         if view.running.is_none() || Instant::now() > deadline {
             return view;
         }

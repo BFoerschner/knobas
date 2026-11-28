@@ -1,7 +1,7 @@
 <!--
   Settings › Renderers (#2262, spec #2234 step 5, ADR-0033): the command
-  renderers, over `user_renderers` and `set_user_renderers`, and a test pane
-  over `run_renderer`.
+  renderers, over `user_renderers` and `set_user_renderers`, and *Try it on*
+  over `run_renderer`, `try_bytes` and `try_piped`.
 
   A renderer is a name, a command (an argument list: quotes group words, no
   shell runs it), the file patterns and Markdown fence languages it accepts,
@@ -26,9 +26,10 @@
   and focus comes back to what opened it. `Esc` and × keep what was typed, per renderer, and *Cancel* and a save end it, as
   *New page* does (F-647). The test pane's sample is kept across a leave too.
 
-  The test pane runs a *saved* renderer on pasted text: the webview never
-  sends a program (ADR-0016), so a renderer is saved before it is tried, as
-  *Try it* does for *Open in…* (#1643).
+  *Try it on* (#2562, `TfTryOn`, the panel every renderer's page has) draws pasted text or a file chosen anywhere on
+  this disk as the Code page draws a file (`TfTryDraw`): any renderer, built in or a command, and any pipeline. A
+  command renderer runs *saved*: the webview never sends a program (ADR-0016), so a renderer is saved before it is
+  tried, as *Try it* does for *Open in…* (#1643).
 -->
 <script lang="ts" module>
   import { runRenderer, setUserRenderers, userRenderers, type UserRenderer, type UserRendererDraft } from "../../ipc/app";
@@ -55,7 +56,7 @@
   import { secondsLabel } from "../../time/format";
   import type { CommandOutput, RendererDefault, RendererInput } from "../../ipc/app";
   import { COMMAND_PREFIX, installCommands } from "../../render/command";
-  import { allRenderers, type Renderer } from "../../render/registry";
+  import { allRenderers } from "../../render/registry";
   import { withDefault } from "../../render/defaults";
   import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import { commandSteps, namedPipelines, type CommandSteps, type NamedPipelines } from "../../render/pipelines.svelte";
@@ -71,7 +72,10 @@
   import { folderRenderers, type FolderRenderers } from "../../render/folders.svelte";
   import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
-  import TfCommandOutput from "../render/TfCommandOutput.svelte";
+  import TfTryDraw, { type TryDrawPorts } from "../render/TfTryDraw.svelte";
+  import TfTryOn from "./TfTryOn.svelte";
+  import { tryDraft, type TryDraft } from "./try-on";
+  import { folderRenderFrame, tryBytes, tryPiped, type TryOn } from "../../ipc/app";
   import TfDecompilerSetting, { realDecompilerPorts, type DecompilerPorts } from "./TfDecompilerSetting.svelte";
   import { diffPipelines, type DiffPipelinesSetting } from "../diff/diff-pipelines.svelte";
 
@@ -84,6 +88,7 @@
     folders = folderRenderers,
     decompiler = realDecompilerPorts,
     madeStore = () => folderRenderStore(),
+    tryPorts = { bytes: tryBytes, piped: tryPiped, frame: folderRenderFrame },
   }: {
     ports?: RendererPorts;
     defaults?: RendererDefaults;
@@ -96,6 +101,8 @@
     folders?: FolderRenderers;
     /** Where generated folders are kept (ADR-0046): the bridge's read, a fake in tests. */
     madeStore?: () => Promise<MadeStore>;
+    /** *Try it on*'s reads (#2562): the bridge's, a fake in tests. */
+    tryPorts?: Omit<TryDrawPorts, "commands">;
   } = $props();
 
   /** `null` until the read answers. */
@@ -138,15 +145,25 @@
     needsWords([...(form.name.trim() === "" ? ["the name"] : []), ...(form.command.trim() === "" ? ["the command"] : [])]) ?? secondsWhy(form.timeout),
   );
 
-  /** The test pane: which saved renderer, the sample, and the run asked for. */
-  let testId = $state("");
+  /**
+   * *Try it on* (#2562): which renderer draws (`auto`: what the Code page opens the file with), which pipeline it goes
+   * through (`auto`: the default's for its name), what the panel holds, and the try pressed. The pasted text is kept
+   * across a leave, as the test pane's sample was.
+   */
+  let testId = $state("auto");
+  let testPipe = $state("auto");
   const SAMPLE_DRAFT = "renderer-sample";
-  let sample = $state(untrack(() => drafts.get(SAMPLE_DRAFT)));
+  const SAMPLE_NAME = "renderer-sample-name";
+  const tryOn = $state<TryDraft>({ ...tryDraft("text"), name: untrack(() => drafts.get(SAMPLE_NAME)) || "example.md", text: untrack(() => drafts.get(SAMPLE_DRAFT)) });
   $effect(() => {
-    const words = sample;
-    untrack(() => drafts.put(SAMPLE_DRAFT, words));
+    const words = tryOn.text;
+    const name = tryOn.name;
+    untrack(() => {
+      drafts.put(SAMPLE_DRAFT, words);
+      drafts.put(SAMPLE_NAME, name);
+    });
   });
-  let trying = $state<{ renderer: Renderer; text: string; at: number } | null>(null);
+  let trying = $state<{ on: TryOn; renderer: string; pipeline: string; at: number } | null>(null);
 
   /** Counts installs, so the renderers a default can name are read again after one. */
   let installs = $state(0);
@@ -185,7 +202,6 @@
         saved = read;
         installCommands(read);
         installs += 1;
-        testId = read[0]?.id ?? "";
       })
       .catch((cause) => push({ text: `Could not read the renderers: ${ipcErrorMessage(cause)}`, tone: "err" }));
   });
@@ -249,7 +265,7 @@
       saved = stored;
       installCommands(stored);
       installs += 1;
-      if (!stored.some((r) => r.id === testId)) testId = stored[0]?.id ?? "";
+      if (testId.startsWith(COMMAND_PREFIX) && !stored.some((r) => `${COMMAND_PREFIX}${r.id}` === testId)) testId = "auto";
       return true;
     } catch (cause) {
       refusal = ipcErrorMessage(cause);
@@ -276,7 +292,9 @@
     else list[editing] = draft;
     saving = true;
     if (await store(list)) {
-      testId = editing === "new" ? (saved.at(-1)?.id ?? testId) : saved[editing]!.id;
+      // The renderer just saved is the one *Try it on* draws with (#2562).
+      const kept = editing === "new" ? saved.at(-1) : saved[editing];
+      if (kept !== undefined) testId = `${COMMAND_PREFIX}${kept.id}`;
       // The press rule: an edit changes nothing else on the page that says it landed.
       push({ text: `${editing === "new" ? "Added" : "Saved"} ${form.name.trim()}` });
       drafts.forget(draftKey(editing));
@@ -305,14 +323,9 @@
     if (await storeDefaults(defaults.list.filter((_, i) => i !== at))) defaultRemoved({ name: gone.pattern, at, item: gone });
   }
 
-  function runTest() {
-    const r = saved?.find((one) => one.id === testId);
-    if (!r) return;
-    trying = {
-      renderer: { id: `${COMMAND_PREFIX}${r.id}`, name: r.name, patterns: r.patterns, fences: r.fences, input: r.input, output: r.output, diff: r.diff },
-      text: sample,
-      at: (trying?.at ?? 0) + 1,
-    };
+  /** *Try it*: the example drawn as the Code page draws a file, with the renderer and pipeline picked. */
+  function runTry(on: TryOn) {
+    trying = { on, renderer: testId, pipeline: testPipe, at: (trying?.at ?? 0) + 1 };
   }
 
   /** Stores *Run pipelines on diffs*; a refusal says so and the box goes back to what is stored. */
@@ -505,31 +518,51 @@
 
   <TfPipelinesSettings {pipelines} {stepCommands} {defaults} />
 
-  {#if saved.length > 0}
-    <div class="tf-stg-sec">
-      <h2>Test a renderer</h2>
-      <p class="tf-stg-p">Paste sample text and run a saved renderer on it.</p>
+  <!-- *Try it on* (#2562): any renderer and any pipeline, on pasted text or a file chosen anywhere, drawn as the Code page draws a file. -->
+  <TfTryOn
+    id="tf-rnd-try"
+    sources={["text", "file"]}
+    draft={tryOn}
+    intro="Draw an example of your own as the Code page would: pasted text under a file name, or a file anywhere on this computer. Nothing is kept."
+    title="Draws it as the Code page would"
+    ontry={runTry}
+  >
+    {#snippet extra()}
       <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-rnd-test">Renderer</label>
+        <label class="tf-stg-l" for="tf-rnd-test">Drawn by</label>
         <div class="tf-stg-c">
           <select id="tf-rnd-test" class="tf-select" bind:value={testId}>
-            {#each saved as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+            <option value="auto">As the Code page opens it</option>
+            {#each choices as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
           </select>
         </div>
       </div>
       <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-rnd-sample">Sample</label>
-        <div class="tf-stg-c"><textarea id="tf-rnd-sample" class="tf-stg-in tf-mono" rows="6" bind:value={sample}></textarea></div>
+        <label class="tf-stg-l" for="tf-rnd-pipe">Through</label>
+        <div class="tf-stg-c">
+          <select id="tf-rnd-pipe" class="tf-select" bind:value={testPipe}>
+            <option value="auto">The default pipeline for its name, if any</option>
+            <option value="none">No pipeline</option>
+            {#each pipelines.list as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+          </select>
+        </div>
       </div>
-      <div class="tf-stg-acts">
-        <button class="tf-btn tf-sm" disabled={sample.trim() === ""} onclick={runTest}>Run</button>
-        {#if sample.trim() === ""}<p class="tf-dwhy" role="status">Paste some sample text first.</p>{/if}
-      </div>
+    {/snippet}
+    {#snippet result()}
       {#if trying !== null}
         {#key trying.at}
-          <div class="tf-stg-test"><TfCommandOutput renderer={trying.renderer} text={trying.text} commands={ports.commands} /></div>
+          <TfTryDraw
+            on={trying.on}
+            renderer={trying.renderer}
+            pipeline={trying.pipeline}
+            defaults={defaults.list}
+            pipelines={pipelines.list}
+            commandSteps={stepCommands.list}
+            savedefaults={(list) => defaults.save(list)}
+            ports={{ ...tryPorts, commands: ports.commands }}
+          />
         {/key}
       {/if}
-    </div>
-  {/if}
+    {/snippet}
+  </TfTryOn>
 {/if}

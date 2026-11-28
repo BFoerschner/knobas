@@ -203,7 +203,7 @@ test("Assets opens the asset tree at the first asset the ticket reaches", async 
   expect(sectionRow(card, "Assets").getAttribute("href")).toMatch(/^#\/asset\/asset/);
 });
 
-test("pressing Sub-tasks lands on Tickets narrowed and named, with the same bar as the other rows, and Esc goes back", async () => {
+test("pressing Sub-tasks lands on Tickets narrowed and named, and Esc ends the narrowing on Tickets, never back to the ticket (#2559)", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
   const card = await pageOf("PAY-231");
   await allSections(card, ["Sub-tasks", "Code", "Builds", "Docs", "Monitors", "Assets"]);
@@ -212,12 +212,12 @@ test("pressing Sub-tasks lands on Tickets narrowed and named, with the same bar 
   const line = () => shown("input[aria-label='Filter tickets']") as HTMLInputElement | null;
   await until(() => shown(".tf-board-title h1")?.textContent?.includes("Sub-tasks of PAY-231") ?? false, "the title never named the narrowing");
   expect(line()?.value, "nothing is typed into the search").toBe("");
-  expect(squash(shown(".tf-crumbs .tf-esc")!)).toBe("Back to PAY-231 Esc");
+  expect(squash(shown(".tf-crumbs .tf-esc")!)).toBe("Back to All tickets Esc");
   const cards = () => [...target.querySelectorAll(".tf-kept:not([hidden]) .tf-tcard[data-entity]")].map((c) => c.getAttribute("data-entity")).sort();
   await until(() => cards().join() === "mock:PAY-232,mock:PAY-233", `the board drew ${cards().join()}`);
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-  await until(() => location.hash === "#/ticket/mock%3APAY-231", `Esc went to ${location.hash}`);
-  await until(() => shown(".tf-board-title h1") === null, "Tickets stayed on screen");
+  await until(() => !(shown(".tf-board-title h1")?.textContent?.includes("Sub-tasks of PAY-231") ?? true), "the narrowing stayed");
+  expect(location.hash).toBe("#/tickets");
 });
 
 test("PAY-216 reaches nothing and has no sub-tasks: Nothing connected yet.", async () => {

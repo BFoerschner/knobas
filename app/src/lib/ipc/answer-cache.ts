@@ -153,6 +153,8 @@ export const QUIET: ReadonlySet<string> = new Set([
   // its end what it changed (`sync:state`). Unknown here, Recent's first draw, which asks every idle CI source at start,
   // dropped every kept answer and every start-up read on its way.
   "sync_now",
+  // What knobas looks at again after a branch moved (#2585): a read of memory, never of the mirror.
+  "looking_again",
   "notification_kinds",
   "diff_pipelines",
   "command_steps",

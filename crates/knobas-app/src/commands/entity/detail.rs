@@ -649,14 +649,15 @@ mod tests {
         ));
     }
 
-    /// Per kind, not per adapter (#2146): TeamCity reads a build by id and
-    /// answers a build configuration *not offered*, so a configuration's
-    /// detail draws *Sync now* from the start, and a build's *Refresh*. A
-    /// kind the adapter does not declare is not refreshed either.
+    /// Per kind, not per adapter (#2146): TeamCity reads a build by id and a
+    /// build configuration with its newest builds (#2564, ADR-0047 as amended
+    /// 2026-11-27), so both details draw *Refresh*; Jira's saved view draws
+    /// *Sync now* from the start. A kind the adapter does not declare is not
+    /// refreshed either.
     #[test]
     fn can_refresh_is_the_kinds_declaration() {
         assert!(refreshes(&registry(), Some("teamcity"), "build"));
-        assert!(!refreshes(&registry(), Some("teamcity"), "build_config"));
+        assert!(refreshes(&registry(), Some("teamcity"), "build_config"));
         assert!(refreshes(&registry(), Some("gitea"), "pr"));
         // Walked with their repository (ADR-0047), so their pages draw *Refresh* and ⌘R reads one repository.
         for kind in ["repo", "branch", "commit"] {

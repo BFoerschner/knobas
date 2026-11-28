@@ -73,6 +73,7 @@ pub mod stop_signals;
 pub mod suggestion_pass;
 pub mod ticket_views;
 pub mod time;
+pub mod try_on;
 pub mod update;
 pub mod webview_menu;
 #[cfg(windows)]
@@ -126,6 +127,12 @@ pub mod events {
     /// and whether it was refreshed, gone or failed. Broadcast: every view
     /// that shows the item re-reads it, and a write's echo settles on it.
     pub const ITEM_REFRESHED: &str = "item:refreshed";
+    /// Payload: `knobas_sync::scheduler::LookingAgain` -- a scope's bounded
+    /// schedule after a branch moved (ADR-0064 rule 2, #2585) started, one of
+    /// its sides stopped, or it ended: what it still looks for. Broadcast:
+    /// the repository's Builds tab says *Looking for new builds…* while its
+    /// builds are looked for.
+    pub const LOOKING_AGAIN: &str = "looking:again";
     /// Payload: `sources::live::ViewFresh` -- a source view the shell was
     /// answered from memory was read again behind the answer, and the
     /// answer moved (#2242, ADR-0032): the entity and the section. Broadcast:
@@ -361,6 +368,9 @@ pub fn run() {
         // at run time, with nothing failing in the build. The send itself is
         // knobas' own `notify` since #339 (`notify.rs`).
         .plugin(tauri_plugin_notification::init())
+        // *Try it on*'s native picker (#2562): `dialog:allow-open` only, in
+        // `capabilities/default.json`.
+        .plugin(tauri_plugin_dialog::init())
         // The capture window's global shortcut (#503). Nothing is registered
         // here: the accelerator is a setting, empty by default, and
         // `capture::register_stored` applies it once the database is up. What
@@ -539,6 +549,13 @@ pub fn manage_app_state<R: tauri::Runtime>(
     if let Some(profile) = handle.try_state::<Profile>() {
         runs.keep_on_disk(profile.dir.join("folder-renders"));
     }
+    // A try's folder renders (#2562) move the same way; what an earlier
+    // session's tries left is removed, and nothing of theirs is kept.
+    let tried_to = handle.clone();
+    try_on::runs().on_moved(move |moved| {
+        events::emit(&tried_to, None, events::FOLDER_RENDER, moved);
+    });
+    std::thread::spawn(try_on::sweep_left);
     // A command's run started or ended (ADR-0060); its files and the list of
     // runs are in a folder of the profile no backup carries.
     let oneoff_to = handle.clone();
@@ -622,6 +639,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::open_checkout,
         commands::entity::open_object,
         commands::entity::open_folder,
+        commands::entity::open_try,
         commands::entity::object_page,
         commands::entity::diff_tool,
         commands::entity::open_diff_tool,
@@ -948,6 +966,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::app::set_command_steps,
         commands::app::named_pipelines,
         commands::app::set_named_pipelines,
+        commands::app::try_bytes,
+        commands::app::try_piped,
+        commands::app::try_folder_render,
         // *Run pipelines on diffs* as a setting row (review of spec
         // #2234), appended at the foot (§10.8).
         commands::app::diff_pipelines,
@@ -1121,6 +1142,7 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::oneoff::oneoff_commands,
         commands::oneoff::set_oneoff_commands,
         commands::oneoff::oneoff_run,
+        commands::oneoff::oneoff_try,
         commands::oneoff::oneoff_stop,
         commands::oneoff::oneoff_runs,
         commands::oneoff::oneoff_lines,
@@ -1157,6 +1179,9 @@ pub fn invoke_handler<R: tauri::Runtime>()
         commands::entity::move_seen,
         commands::entity::put_back_seen,
         commands::entity::builds_in_front,
+        // What knobas looks at again after a branch moved (ADR-0064 rule 2,
+        // #2585), appended at the foot (§10.8).
+        commands::sources::looking_again,
     ]
 }
 
@@ -1188,6 +1213,8 @@ fn shutdown_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     folder_render::runs::kill_all();
     // A command still running dies with everything it started (ADR-0060).
     oneoff::runs::Runs::global().kill_all();
+    // What tries left behind goes with the session (#2562).
+    try_on::sweep();
     if let Some(clones) = app.try_state::<std::sync::Arc<checkout::clone::Clones>>() {
         tauri::async_runtime::block_on(checkout::clone::stop_all(&clones));
     }
@@ -2209,6 +2236,7 @@ mod tests {
             super::events::UPDATE_STATE,
             super::events::CLIPBOARD_STATE,
             super::events::LINK_HANDOFF_OPEN,
+            super::events::LOOKING_AGAIN,
         ];
         names.sort_unstable();
         declared.sort_unstable();

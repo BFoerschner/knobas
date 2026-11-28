@@ -183,3 +183,72 @@ test("a repository's Run… menu says what its file offers to add and what chang
     ]),
   ).toEqual(["2 commands from this repository, 1 changed in this repository…"]);
 });
+
+test("Try it on pasted text saves the command, then opens the run dialog on it, outside any repository (#2562)", async () => {
+  const p = ports([]);
+  const tried: [string, unknown][] = [];
+  p.tryRun = (command, on) => (
+    tried.push([command, on]),
+    Promise.resolve({ started: { run: "r1", argv: ["eslint", "/tmp/knobas-try/command-1/a.ts"], cwd: "/tmp/knobas-try/command-1", branch: null, head: null, started_at: 0, already: false }, stop: () => {} })
+  );
+  const store = new OneOffs(p);
+  await store.load();
+  view = mount(TfCommandPage, { target: document.body, props: { at: { command: null, repo: null, on: null }, store, reads } });
+  await settle();
+  const set = (id: string, value: string) => {
+    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`)!;
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  };
+  set("tf-ocp-name", "Lint");
+  set("tf-ocp-cmd", "eslint {file}");
+  // A file's command is tried on pasted text, a chosen file, or a repository's file; never a folder.
+  const sources = [...document.querySelectorAll(".tf-try .tf-seg button")].map((b) => b.textContent);
+  expect(sources).toEqual(["Pasted text", "A file", "A repository"]);
+  set("tf-ocp-try-name", "a.ts");
+  set("tf-ocp-try-text", "let x = 1\n");
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-try button")].find((b) => b.textContent?.trim() === "Try it")!.click();
+  await settle();
+  expect(p.setCommands, "saved first: only a saved command runs").toHaveBeenCalledTimes(1);
+  expect(tried).toEqual([["new-0", { kind: "text", name: "a.ts", text: "let x = 1\n" }]]);
+  expect(store.open?.entityId).toBe("~try");
+  expect(store.open?.target).toEqual({ kind: "file", path: "a.ts", lines: null, at: null });
+  expect(store.open?.cwd).toBe("/tmp/knobas-try/command-1");
+  // A folder's command takes a folder or text instead.
+  set("tf-ocp-cmd", "ruff check {dir}");
+  expect([...document.querySelectorAll(".tf-try .tf-seg button")].map((b) => b.textContent)).toEqual(["A folder", "Pasted text", "A repository"]);
+});
+
+test("a try is no row in the session's list of runs, runs again on its example, and stops when its dialog closes (#2562)", async () => {
+  const p = ports([ESLINT]);
+  let heard: ((row: import("../../ipc/oneoff").OneOffRunRow) => void) | null = null;
+  p.moved = (handler) => ((heard = handler), () => {});
+  const stopped: string[] = [];
+  p.stop = (run) => (stopped.push(run), Promise.resolve());
+  const tried: unknown[] = [];
+  let n = 0;
+  p.tryRun = (_command, on) => (
+    tried.push(on),
+    Promise.resolve({ started: { run: `t${++n}`, argv: ["eslint", "a.ts"], cwd: "/tmp/knobas-try/1/command-1", branch: null, head: null, started_at: 0, already: false }, stop: () => {} })
+  );
+  const store = new OneOffs(p);
+  await store.load();
+  store.hear();
+  const on = { kind: "text" as const, name: "a.ts", text: "let x = 1\n" };
+  const run = store.openTry(ESLINT, on);
+  await settle();
+  const row = { id: "t1", command: "eslint", name: "ESLint", entity_id: "~try", target: run.target, argv: [], cwd: "", started_at: 0, ended: null } as unknown as import("../../ipc/oneoff").OneOffRunRow;
+  heard!(row);
+  heard!({ ...row, ended: { how: "exit", code: 0 } } as typeof row);
+  expect(store.rows, "a try is in neither Last runs nor the run chip").toEqual([]);
+
+  run.ended = { how: "exit", code: 0 };
+  const again = store.again(run);
+  await settle();
+  expect(tried, "Run again tries it on the same example, not on a checkout").toEqual([on, on]);
+  expect(again.entityId).toBe("~try");
+
+  store.close();
+  expect(stopped, "nothing shows a try once its dialog closes, so it stops").toEqual(["t2"]);
+});

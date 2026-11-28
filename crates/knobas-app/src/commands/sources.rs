@@ -722,6 +722,23 @@ pub async fn refresh_entity<R: tauri::Runtime>(
     }
 }
 
+/// The scopes knobas looks at again now, after a branch moved (ADR-0064
+/// rule 2, #2585): each repository's bounded schedule and the sides it still
+/// looks for, oldest first. `looking:again` tells each change; this is what
+/// a page opened during a schedule reads first, so it says *Looking for new
+/// builds…* too. Empty while nothing is looked at.
+///
+/// # Errors
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the engine is starting
+/// or stopping.
+#[tauri::command]
+pub async fn looking_again<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<knobas_sync::scheduler::LookingAgain>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    Ok(crate::sources::look_again::looking(&state.scheduler))
+}
+
 /// What every source is doing, and when it goes next.
 ///
 /// The authoritative read: `sync:state` events are a hint that something moved

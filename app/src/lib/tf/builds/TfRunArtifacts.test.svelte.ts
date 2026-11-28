@@ -6,11 +6,18 @@
  * download through knobas.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 
 import type { ArtifactEntry, ArtifactPreview, AttachmentBytes, DownloadTarget } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
+import { docViewModule } from "../render/doc/doc-module";
 import TfRunArtifacts from "./TfRunArtifacts.svelte";
+
+// The file viewer draws XML with the XML view, whose code loads on first use: held before the tests, as `TfFileViewer`'s
+// are. A cold import on a busy machine outlasted `vi.waitFor`'s second (#2569's landing, four times at load 33 to 67).
+beforeAll(async () => {
+  await docViewModule();
+});
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;

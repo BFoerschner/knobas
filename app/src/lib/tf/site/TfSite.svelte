@@ -200,15 +200,15 @@
   });
 
   /**
-   * Where `Esc` twice lands (Björn and Fable's ruling, 2026-11-25): the page knobas holds for where the site stands,
-   * when it is another item than the one the site was opened at. He browsed in the site; leaving it lands on the page he
-   * is on. Compared by item, not address: a redirect moves the address of the same page. The shell's `escTarget` leaves
-   * it out where it is the opener's own page.
+   * Where `Esc` twice lands (Björn and Fable's ruling, 2026-11-25; #2559): the page knobas holds for where the site
+   * stands, else for the item it was opened at. He browsed in the site; leaving it lands on the page he is on, never on
+   * what opened the site. The shell's `escTarget` steps back instead where it is the opener's own page.
    */
   const landing = $derived.by((): SiteLanding | null => {
-    if (!visible || matching || !openedKnown || match === null) return null;
-    if (openedItem !== null && openedItem.entity_id === match.entity_id) return null;
-    return { hash: entityAddress(match.kind, match.entity_id), name: landingName(match, headTitle), entityId: match.entity_id, kind: match.kind };
+    if (!visible || matching || !openedKnown) return null;
+    const at = match ?? openedItem;
+    if (at === null) return null;
+    return { hash: entityAddress(at.kind, at.entity_id), name: landingName(at, headTitle), entityId: at.entity_id, kind: at.kind };
   });
   /** The landing's title as its row says, where nothing knobas drew names it yet. */
   let headTitle = $state<{ id: string; title: string } | null>(null);

@@ -148,3 +148,50 @@ test("Add a source's address is a place in Settings: no section tab to come back
   expect(sectionTabOf(parseTfHash("#/settings/sources"))).toBe("settings");
   expect(parentOf(parseTfHash("#/settings/sources/add"))).toBe("#/settings/sources");
 });
+
+// #2559: every section's chain, as `parentOf`'s comment writes it down. `null` is "Esc goes nowhere".
+test.each([
+  ["tickets", [["#/ticket/jira%3APAY-231", "#/tickets"], ["#/tickets/mine", null], ["#/job", null]]],
+  ["code", [
+    ["#/repo/gh%3Ar1/files/src/a.ts", "#/repo/gh%3Ar1"],
+    ["#/repo/gh%3Ar1/line/12/src/a.ts", "#/repo/gh%3Ar1"],
+    ["#/repo/gh%3Ar1/edit/src/a.ts", "#/repo/gh%3Ar1/files/src/a.ts"],
+    ["#/repo/gh%3Ar1/commits/gh%3Ac9", "#/repo/gh%3Ar1/commits"],
+    ["#/repo/gh%3Ar1/commits", "#/code"],
+    ["#/repo/gh%3Ar1/compare/main...feat", "#/code"],
+    ["#/repo/gh%3Ar1", "#/code"],
+    ["#/pr/gh%3Apr-12", "#/code"],
+    ["#/code/prs", null],
+  ]],
+  // A pipeline and a folder sit under All pipelines, Builds' own page; a bare Builds draws the last place stood on, so
+  // going up to it would redraw the page just left (#2570, Ruling 12). All pipelines itself goes nowhere.
+  ["builds", [
+    ["#/build/tc%3AP/4811", "#/builds/tc%3AP"],
+    ["#/builds/tc%3AP", "#/builds/recent"],
+    ["#/builds/tc%3AP/settings", "#/builds/recent"],
+    ["#/builds/folder/tc/Payments/Payouts", "#/builds/recent"],
+    ["#/builds/folder/~repo/gh%3Arepo-1", "#/builds/recent"],
+    ["#/builds/recent", null],
+    ["#/builds", null],
+  ]],
+  ["docs", [["#/page/confluence%3A9", "#/docs"], ["#/docs/space/ENG", "#/docs"], ["#/docs", null]]],
+  ["secrets", [["#/secrets/entry/e1", "#/secrets"], ["#/secrets/in/f1", "#/secrets"]]],
+  ["monitors", [["#/monitors/at/kuma%3A3", "#/monitors"], ["#/monitors/unmonitored", null]]],
+  ["assets", [["#/asset/vm-1", "#/assets"], ["#/route/route%3Ap", "#/assets"]]],
+  ["sets", [["#/sets/payout-stack", "#/sets"]]],
+  ["time", [["#/time/week", null], ["#/time/week/2026-11-23", null]]],
+  ["inbox", [["#/inbox/mentions", null]]],
+  ["settings", [
+    ["#/settings/source/jira", "#/settings/sources"],
+    ["#/settings/sources/add", "#/settings/sources"],
+    ["#/settings/checkouts/app/x", "#/settings/checkouts"],
+    ["#/settings/commands/new", "#/settings/commands"],
+    ["#/settings/renderers/folder/x", "#/settings/renderers"],
+    ["#/settings/appearance/fonts", "#/settings/appearance"],
+    ["#/settings/notes", null],
+    ["#/settings", null],
+  ]],
+  ["no section", [["#/item/x%3A1", null], ["#/note/n1", null], ["#/site/wiki", null], ["#/nowhere", null]]],
+] as const)("%s's chain goes one level up its own section (#2559)", (_, pairs) => {
+  for (const [hash, up] of pairs) expect(parentOf(parseTfHash(hash)), hash).toBe(up);
+});

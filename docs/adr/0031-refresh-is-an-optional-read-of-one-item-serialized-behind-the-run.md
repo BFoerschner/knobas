@@ -28,6 +28,14 @@ The TeamCity run fix (`docs/decisions/2026-11-25-a-started-run-moves-on-at-once.
 - **A refresh that finds the item as the mirror holds it is `Unchanged`** (only stamped, as a run leaves an unchanged row), and tells nothing unless a write is being read back, as a walk with no news. So a build waiting an hour for an agent costs the window nothing.
 - **A refresh's event with no write behind it drops what a run of its source drops** in the window's answers, not every answer; a failed one drops nothing.
 
+## Amended 2026-11-27: a started run brings its chain
+
+#2594, ADR-0064's *build chain* group. A run waits on others before it starts (TeamCity's snapshot dependencies), and the press that queued it queued them too; the run after the write caught them queued and nothing read them again until the next scheduled run.
+
+- **A run kind may declare the runs a run waits on** (`waits_on`, a list of item keys in the run's own source). TeamCity asks each build for `snapshot-dependencies(build(id))` and writes their keys beside the record as `waitsOn`. The chain is read from the started run's own record, never by searching.
+- **On every read of a followed run, each run it waits on that the mirror does not hold as finished is followed too**: read by id at once, since it may not be mirrored yet, then as the started run is, to the same ends, and it brings its own. It keeps the clock of the run that brought it, so the chain's 30 s as a person's read and its 2 h end where the started run's do.
+- **A chain counts against the 5 runs of a source run by run, and only a write's own run makes room.** A run of a chain joins only a free slot and stops nobody; one left out joins on a later read of the run that waits on it, once a slot frees. So the started run is never stopped by its own chain, and a source has at most 5 follows reading at once however long the chain.
+
 ## Rejected
 
 - Keep the run after a write and fix the paths that skip it. A run of a whole Jira is not instant, and *Refresh* on a detail has no run-shaped answer. The run stays as the follow-up.

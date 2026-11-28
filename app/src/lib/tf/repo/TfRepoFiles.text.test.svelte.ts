@@ -192,6 +192,27 @@ test("typed text is searched at the tree shown, smart case and literal by defaul
   expect(asked.at(-1)!.query).toEqual({ text: "retry", case_sensitive: true, regex: true, names: false });
 });
 
+test("words typed apart go as typed, the box says how words and quotes match, and every word is marked", async () => {
+  draw();
+  await settle();
+  segment("Text").click();
+  flushSync();
+  // Before anything is typed, the note says what words and quotes do (#2561).
+  const note = target.querySelector(".tf-ftree .tf-gonote")!.textContent!;
+  expect(note).toContain("Words match in the order typed on one line, anything between them");
+  expect(note).toContain("\"in quotes\"");
+  expect(textField()!.title).toContain("xy room");
+  answer = {
+    ...ANSWER,
+    files: [{ path: "src/room.rs", hits: [{ line: 3, parts: [{ text: "let ", hit: false }, { text: "xy", hit: true }, { text: "_", hit: false }, { text: "room", hit: true }] }], more: 0 }],
+  };
+  typeIn(textField()!, "xy room");
+  await settle(200);
+  // The words are the backend's to read: sent as typed, spaces and all.
+  expect(asked.at(-1)!.query).toEqual({ text: "xy room", case_sensitive: false, regex: false, names: false });
+  expect([...target.querySelectorAll("a.tf-txhit mark")].map((mark) => mark.textContent)).toEqual(["xy", "room"]);
+});
+
 test("the working tree is searched on disk, and where the text came from is said", async () => {
   draw({ disk: { head: SHA, marks: new Map(), stamp: "s1", branch: "main", standing: null } });
   await settle();

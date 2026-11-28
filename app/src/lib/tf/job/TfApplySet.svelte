@@ -17,7 +17,6 @@
   import Marked from "../filter/Marked.svelte";
   import { enterWhenRanked, heldOrder } from "../filter/ranked.svelte";
   import type { Layers } from "../layers.svelte";
-  import { goVisiting } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
   import { intoList, withinList } from "../sets/list-keys";
   import { contentLines } from "../sets/sets";
@@ -89,11 +88,11 @@
     return shown.every((set) => applied.has(set.id)) ? "These already apply." : "Pick a link set.";
   });
 
-  /** The sets' page says where it came from, so `Esc` and *Back to* come back here. */
+  /** The sets' own page, opened as a press would: Back comes back here, `Esc` there does nothing (#2559). */
   function manage(event: MouseEvent) {
     event.preventDefault();
     onmanage?.();
-    goVisiting("#/sets");
+    location.hash = "#/sets";
     onclose();
   }
 

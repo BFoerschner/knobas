@@ -29,11 +29,10 @@
  *
  * **A card row's narrowing goes with the entries** ({@link Trip}), so stepping to
  * an entry by `Esc`, *Back to* or `⌘[` and `⌘]` narrows the section as that entry
- * was, and a nav entry or the launcher ends it. Three presses stamp explicitly,
+ * was, and a nav entry or the launcher ends it. Two presses stamp explicitly,
  * because the address alone can't say what they mean: {@link goAcross}, a jump to
- * another place on one page; {@link goVisiting}, a top page opened from
- * somewhere to come back from; and {@link goLaunched}, the launcher's jump, which
- * is both of those and ends the narrowing.
+ * another place on one page; and {@link goLaunched}, the launcher's jump, which
+ * ends the narrowing. The opener says how `Esc` goes, never where (#2559, `escape.ts`).
  */
 import type { Trip } from "./job/scoped.svelte";
 import { parseTfHash, type TfRoute } from "./route";
@@ -46,8 +45,6 @@ export interface Came {
   opener: Opener | null;
   /** The card row's narrowing this entry is part of, or `null`. */
   trip: Trip | null;
-  /** A top page opened to be returned from, so its `Esc` follows the opener ({@link goVisiting}). */
-  visit: boolean;
 }
 
 /** What an entry's history state says about how it was opened. */
@@ -64,7 +61,7 @@ export interface Opener {
 }
 
 /** An entry opened by nothing, as the window's first address is. */
-export const NOT_OPENED: Came = { opener: null, trip: null, visit: false };
+export const NOT_OPENED: Came = { opener: null, trip: null };
 
 /** How long a chain a stamp keeps. History state is copied on every write, and nobody presses `Esc` further than this. */
 const CHAIN = 24;
@@ -76,14 +73,14 @@ function trimmed(opener: Opener | null, left: number): Opener | null {
 
 /** The page at `hash`, called `name`, as the opener of what it opens next. */
 export function openerOf(hash: string, name: string, came: Came): Opener {
-  return { hash, name, from: { opener: trimmed(came.opener, CHAIN - 1), trip: came.trip, visit: came.visit } };
+  return { hash, name, from: { opener: trimmed(came.opener, CHAIN - 1), trip: came.trip } };
 }
 
 /** The key the stamp sits under in `history.state`, beside whatever else is there. */
 const KEY = "knobasOpened";
 
 /** How an address change was made, when it is not a plain in-app link's. */
-export type Told = "unopened" | "replace" | "back" | "across" | "visit" | "launched" | "land";
+export type Told = "unopened" | "replace" | "back" | "across" | "launched" | "land";
 
 /** The next address change the shell is told about, and what to call the place it left where the page's own name is not it. */
 let told: { hash: string; how: Told; left?: string | undefined } | null = null;
@@ -126,15 +123,6 @@ export function jumpAcross(event: MouseEvent, left?: string): void {
   if (!href) return;
   event.preventDefault();
   goAcross(href, left);
-}
-
-/**
- * Open a section's top page to come back from. A top page's `Esc` does nothing,
- * since a nav entry brought the reader there. Pressed from a ticket's dialog
- * (*Manage link sets*), it says where it came from, as a card's row does.
- */
-export function goVisiting(hash: string): void {
-  goTold(hash, "visit");
 }
 
 /**

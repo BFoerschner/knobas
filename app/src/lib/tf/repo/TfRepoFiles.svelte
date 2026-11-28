@@ -2451,6 +2451,7 @@
             <input
               placeholder="Search text"
               aria-label="Search text"
+              title={'Words in the order typed, on one line: xy room finds xy_room and xyRoom. "In quotes" matches as typed.'}
               bind:this={textField}
               value={textSearch.typed}
               oninput={(event) => {
@@ -2497,7 +2498,7 @@
       {#if texting && textSearch.asking}
         <TfRepoText search={textSearch} {hrefOf} {lineHrefOf} current={path} />
       {:else if texting}
-        <p class="tf-gonote">Search the text of every file {disk !== null ? "in the working tree" : local !== null ? "in your clone's copy of this branch" : "on this branch"}. A word typed in lower case matches every case.</p>
+        <p class="tf-gonote">Search the text of every file {disk !== null ? "in the working tree" : local !== null ? "in your clone's copy of this branch" : "on this branch"}. Words match in the order typed on one line, anything between them: <code>xy room</code> finds <code>xy_room</code> and <code>xyRoom</code>. "in quotes" matches as typed. A word typed in lower case matches every case.</p>
       {:else if going}
         <!-- Go to file's answer in the rows' place (#2311): every path at the commit that holds what is typed. -->
         {#each goFound as found (found)}

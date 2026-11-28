@@ -114,6 +114,10 @@
     refresh?: DetailRefreshPorts;
     /** The page's own walk of its repository when shown (the pr-state fix); `refresh_entity` behind, the bridge's when left out. */
     walk?: (entityId: string) => Promise<EntityRefresh>;
+    /** The Builds tab's read of a run in flight at its source (#2558); `refresh_entity` behind, the bridge's when left out. */
+    follow?: (runId: string) => Promise<unknown>;
+    /** ⌘R's read of one of the Builds tab's pipelines with its newest runs at its source (#2564); `refresh_entity`, the bridge's when left out. */
+    walkPipeline?: (pipelineId: string) => Promise<unknown>;
     /** *New branch…* and *Commit change…*'s standing (#2241); none refused when left out. */
     refusedWrites?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
     /** The byte read (#2256): a Markdown file's relative images, at the file's commit; none load when left out. */
@@ -328,6 +332,7 @@
   import { holdSlot, NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
   import { parentPage } from "../page-name.svelte";
+  import { parentOf } from "../route";
   import { itemHash } from "../job/job";
   import { jumpAcross } from "../opener";
   import { withPrStates } from "../pr/pr-state.svelte";
@@ -668,13 +673,16 @@
   let buildsFailed = $state<string | null>(null);
   let buildsFor: string | null = null;
   let buildsReads = 0;
-  /** The repository a read is on its way for: a second ask while it is (a return reads the lists and the tab) is that read. */
+  /**
+   * The repository a read is on its way for: a second ask while it is (a return reads the lists and the tab) is that
+   * read. A `fresh` one is not: a run the tab draws moved after that read was asked (#2558), so it asks again.
+   */
   let buildsAsking: string | null = null;
-  function readBuilds(id: string): void {
-    if (buildsAsking === id) return;
+  function readBuilds(id: string, fresh = false): Promise<void> {
+    if (buildsAsking === id && !fresh) return Promise.resolve();
     buildsAsking = id;
     const at = ++buildsReads;
-    (ports.repoPipelines ?? repoPipelines)(id)
+    return (ports.repoPipelines ?? repoPipelines)(id)
       .then(
         (answer) => {
           if (at !== buildsReads || repoId !== id) return;
@@ -1447,8 +1455,13 @@
     }
     return [code, repo === null ? { name: "Repository" } : { name: repo.title, code: true }];
   });
-  // A commit sits under its repository, by the title its crumb gives it.
-  parentPage(() => (route.commit !== null && repoId !== null && repo !== null ? { hash: repoHash(repoId), name: repo.title } : null));
+  // Where the address sits in Code (`parentOf`, #2559), named as the crumb names it: the repository by its title, a
+  // file being edited by its name. Code's own page is the address's to name.
+  parentPage(() => {
+    const up = parentOf({ view: "full", section: "code", head: "repo", rest });
+    if (up === null || repoId === null || repo === null || !up.startsWith(repoHash(repoId))) return null;
+    return { hash: up, name: route.tab === "edit" && route.path !== null ? (route.path.split("/").pop() ?? repo.title) : repo.title };
+  });
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
@@ -1669,6 +1682,11 @@
                   failed={buildsFailed}
                   runs={ports.pipelineRuns}
                   {refreshed}
+                  shown={one === slot}
+                  listen={ports.listen}
+                  follow={ports.follow}
+                  walk={ports.walkPipeline}
+                  again={() => (repoId === null ? undefined : readBuilds(repoId, true))}
                 />
               {:else if one === "prs"}
                 <TfRepoPrs {ports} {repoId} rows={shownPrs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
