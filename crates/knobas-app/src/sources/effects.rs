@@ -117,8 +117,9 @@ impl EffectAnswer {
     }
 }
 
-/// The items `effect` names for the write against `target`, from the mirror.
-async fn resolve(
+/// The items `effect` names for the write against `target`, from the mirror:
+/// also what [`super::look_again`] finds a moved branch's repository by.
+pub(crate) async fn resolve(
     pool: &sqlx::PgPool,
     effect: Effect,
     target: &str,

@@ -149,6 +149,8 @@ export const QUIET: ReadonlySet<string> = new Set([
   // (`item:refreshed`), and one that moved nothing tells nothing. Unknown here, each page's refresh of its runs in
   // flight dropped every kept answer at the call.
   "refresh_entity",
+  // What knobas looks at again after a branch moved (#2585): a read of memory, never of the mirror.
+  "looking_again",
   "notification_kinds",
   "diff_pipelines",
   "command_steps",
