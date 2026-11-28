@@ -163,7 +163,17 @@ test.each([
     ["#/pr/gh%3Apr-12", "#/code"],
     ["#/code/prs", null],
   ]],
-  ["builds", [["#/build/tc%3AP/4811", "#/builds/tc%3AP"], ["#/builds/tc%3AP", "#/builds"], ["#/builds", null]]],
+  // A pipeline and a folder sit under All pipelines, Builds' own page; a bare Builds draws the last place stood on, so
+  // going up to it would redraw the page just left (#2570, Ruling 12). All pipelines itself goes nowhere.
+  ["builds", [
+    ["#/build/tc%3AP/4811", "#/builds/tc%3AP"],
+    ["#/builds/tc%3AP", "#/builds/recent"],
+    ["#/builds/tc%3AP/settings", "#/builds/recent"],
+    ["#/builds/folder/tc/Payments/Payouts", "#/builds/recent"],
+    ["#/builds/folder/~repo/gh%3Arepo-1", "#/builds/recent"],
+    ["#/builds/recent", null],
+    ["#/builds", null],
+  ]],
   ["docs", [["#/page/confluence%3A9", "#/docs"], ["#/docs/space/ENG", "#/docs"], ["#/docs", null]]],
   ["secrets", [["#/secrets/entry/e1", "#/secrets"], ["#/secrets/in/f1", "#/secrets"]]],
   ["monitors", [["#/monitors/at/kuma%3A3", "#/monitors"], ["#/monitors/unmonitored", null]]],

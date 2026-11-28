@@ -305,7 +305,8 @@ export function isTopPage(route: TfRoute): boolean {
  *   any tab, a pick in it included (Compare's branches, Builds' branch and pipeline) → Code (its Repositories); a pull
  *   request → its repository (the page says which, `parentPage`), else Code; a diff → its repository (the page says);
  *   a bare branch or commit address, until its page names the repository → Code. Code's own tabs → nowhere.
- * - **Builds**: a run → its pipeline; a pipeline, any tab of it → Builds (`#/builds`, Recent). Builds → nowhere.
+ * - **Builds**: a run → its pipeline; a pipeline, any tab of it, and a folder → All pipelines (`#/builds/recent`, not
+ *   the bare `#/builds`, which draws the last place stood on). All pipelines and a bare Builds → nowhere.
  * - **Docs**: a page → its space (the page says, `parentPage`), else Docs; a space, a search → Docs.
  * - **Secrets**: a folder, a source, an entry → Secrets.
  * - **Monitors**: a marked monitor → Monitors. Its tabs → nowhere.
@@ -323,8 +324,9 @@ export function parentOf(route: TfRoute): string | null {
   if (route.head === "repo") return repoParent(route.rest);
   // A run sits under its pipeline. A bare run's address names none yet.
   if (route.head === "build" && route.rest[0] && route.rest[1]) return `#/builds/${encodeURIComponent(route.rest[0])}`;
-  // A pipeline picked on Builds, any tab of it, sits under Builds' own page, the recent runs (#2559).
-  if (route.head === "builds") return sectionHash("builds");
+  // A pipeline picked on Builds, any tab of it, and a folder sit under Builds' own page, All pipelines (#2559). Not the
+  // bare `#/builds`: that draws the last place stood on, the page just left (#2570, Ruling 12). All pipelines is the top.
+  if (route.head === "builds") return route.rest.length === 1 && route.rest[0] === "recent" ? null : BUILDS_ALL;
   // A monitor's mark sits on Monitors' own page: leaving it is the page with no mark.
   if (route.head === "monitors" && route.rest[0] === MONITOR_AT) return sectionHash("monitors");
   // A section's own tabs are the section's page: its parent would be a sibling.
@@ -353,6 +355,9 @@ function settingsUp(rest: readonly string[]): string | null {
   // A child section (the subtrees ruling, 2026-11-21): `#/settings/appearance/fonts` sits under Appearance.
   return head === undefined ? null : `#/settings/${encodeURIComponent(head)}`;
 }
+
+/** All pipelines, Builds' own page (`RECENT_HASH` in `builds/recent.ts`, which imports this module). */
+const BUILDS_ALL = "#/builds/recent";
 
 /** The sections whose deeper addresses are their own page's tabs or a pick in its rail. */
 const TABBED_HEADS: ReadonlySet<string> = new Set(["code", "time", "monitors", "inbox"]);

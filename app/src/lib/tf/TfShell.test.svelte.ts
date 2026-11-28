@@ -420,6 +420,8 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   const tops = [
     ...NAV.map((section) => `#/${section}`),
     "#/tickets/view-1",
+    // All pipelines is Builds' own page (#2570, Ruling 12).
+    "#/builds/recent",
   ];
   for (const top of tops) {
     await at(top);
@@ -441,8 +443,10 @@ test("Esc on a detail page reached with no opener goes to its parent in its own 
     ["#/repo/gh:repo-1/branches", "#/code"],
     // A commit opens under its repository's Commits tab, and goes up to it (#2559).
     ["#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1/commits"],
-    // A pipeline picked on Builds goes up to Builds' own page (#2559).
-    ["#/builds/pipe-1", "#/builds"],
+    // A pipeline picked on Builds goes up to Builds' own page, All pipelines (#2559; #2570, Ruling 12).
+    ["#/builds/pipe-1", "#/builds/recent"],
+    // So does a folder's scope: a bare Builds would redraw the folder, the last place stood on (#2570, Ruling 12).
+    ["#/builds/folder/tc/Payments", "#/builds/recent"],
     // A branch or commit address the shell has not placed under a repository yet.
     ["#/branch/gh:b-1", "#/code"],
     ["#/commit/gh:c-9", "#/code"],
@@ -468,7 +472,7 @@ test.each([
   ["Code: a repository's tab", "#/ticket/jira%3APAY-231", "#/repo/gh:repo-1/commits", "#/code"],
   ["Code: a commit", "#/ticket/jira%3APAY-231", "#/repo/gh:repo-1/commits/gh:c-9", "#/repo/gh%3Arepo-1/commits"],
   ["Code: a pull request", "#/inbox", "#/pr/gh:pr-12", "#/code"],
-  ["Builds", "#/ticket/jira%3APAY-231", "#/builds/pipe-1", "#/builds"],
+  ["Builds", "#/ticket/jira%3APAY-231", "#/builds/pipe-1", "#/builds/recent"],
   ["Docs", "#/ticket/jira%3APAY-231", "#/docs/space/ENG", "#/docs"],
   ["Secrets", "#/ticket/jira%3APAY-231", "#/secrets/entry/e-1", "#/secrets"],
   ["Monitors", "#/inbox", "#/monitors/at/kuma%3A3", "#/monitors"],
@@ -560,7 +564,7 @@ test("a run opened from another run's link goes up to its pipeline, then to Buil
   expect(location.hash).toBe("#/builds/pipe-1");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/recent");
   expect(escHint()).toBeNull();
 });
 
