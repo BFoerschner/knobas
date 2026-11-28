@@ -29,6 +29,7 @@ import { coalesce } from "../shell/coalesce";
 import { monitorsDown, type MonitorRow } from "../ipc/assets";
 import type { BubbleCounts } from "../ipc/entity";
 import { runsRead } from "./builds/runs-read.svelte";
+import { BUBBLE_WORDS, RAIL_COLUMNS } from "./builds/builds";
 import type { SourceSyncStatus } from "../ipc/sources";
 
 export interface BadgePorts {
@@ -73,13 +74,7 @@ export interface BuildsBubble {
 }
 
 /** The states most critical first, each with its word (Björn on #2568, 2026-11-27). */
-const BY_CRITICAL: readonly (readonly [keyof BubbleCounts, string])[] = [
-  ["red", "failed"],
-  ["yellow", "passed with warnings"],
-  ["green", "passed"],
-  ["grey", "cancelled"],
-  ["blue", "running"],
-];
+const BY_CRITICAL: readonly (readonly [keyof BubbleCounts, string])[] = RAIL_COLUMNS.map((bubble) => [bubble, BUBBLE_WORDS[bubble]] as const);
 
 /**
  * The top bar's one Builds bubble (Björn on #2568, 2026-11-27, replacing up to three numbers): the total of unread

@@ -138,11 +138,14 @@
     unreadRunsOf,
     namesEvery,
     foldPipelines,
+    foldSums,
     keptPipelines,
     latestTime,
     listRows,
     pipelineHash,
     pinnedOf,
+    railCells,
+    BUBBLE_WORDS,
     railGlyph,
     railTime,
     foldChain,
@@ -154,6 +157,7 @@
     type Fold,
     type Scope,
   } from "./builds";
+  import type { BubbleCounts } from "../../ipc/entity";
 
   let {
     ready,
@@ -451,6 +455,8 @@
     return [...seen.values()];
   }
   const trees = $derived(byRepository ? (commitRepos === null ? [] : repoTreeOf(kept, reposOf, read)) : treeOf(kept, read));
+  /** Each fold's bubbles (#2573): the sums of its pipelines' counts, which the shell reads; none until they answer. */
+  const foldCounts = $derived(foldSums(trees, (id) => runsRead.countsOf(id)));
 
   // ---- a folder's scope (#2570) ----
   /** A folder's place: a source's groups (*By project*) or a repository (*By repository*); `null` at no folder. */
@@ -769,7 +775,17 @@
 <!-- A pipeline's name, the prefix its fold's pipelines share drawn dim (`sharedPrefix`). -->
 {#snippet name(pipeline: PipelineRow, pre: string)}
   <span class="tf-pi-nm" class:tf-bad={asksAttention(pipeline, read)}
-    >{#if pre !== ""}<span class="tf-pi-pre">{pre}</span>{/if}{pipeline.name.slice(pre.length)}</span
+    >{#if pre !== ""}<span class="tf-pi-pre">{pre}</span>{/if}<span class="tf-pi-rest">{pipeline.name.slice(pre.length)}</span></span
+  >
+{/snippet}
+
+<!-- The five bubble columns at a row's end (#2573), in the top bar's order: every row draws all five, a zero saying
+     nothing, so a number that comes or goes moves nothing and each colour's place is the same down the rail. -->
+{#snippet bubbles(counts: BubbleCounts | null, unseen = false)}
+  <span class="tf-pl-ub" class:tf-unseen={unseen}
+    >{#each railCells(counts) as cell (cell.bubble)}<span class={`tf-ub tf-ub-${cell.bubble}`} class:tf-ub-0={cell.n === 0} data-bubble={cell.bubble} title={cell.n > 0 ? `${cell.n} ${BUBBLE_WORDS[cell.bubble]}` : undefined}
+        >{cell.text}{#if cell.n > 0}<span class="tf-sr">{` ${BUBBLE_WORDS[cell.bubble]}`}</span>{/if}</span
+      >{/each}</span
   >
 {/snippet}
 
@@ -792,6 +808,7 @@
     {#if tag !== null}<span class="tf-pi-src">{tag}</span>{/if}
     {#if why !== ""}<span class="tf-pi-why"><TfKeyed text={why} /></span>{/if}
     {#if time !== null}<span class={`tf-pi-when${time.tone !== null ? ` tf-${time.tone}` : ""}`}>{time.text}</span>{/if}
+    {@render bubbles(runsRead.counts === null ? null : runsRead.countsOf(pipeline.entity_id))}
   </a>
 {/snippet}
 
@@ -813,11 +830,8 @@
         const under = foldPipelines(f);
         return { kind: "pipeline-folder", name: f.name, unread: unreadRunsOf(under, read), pipelines: under.map((p) => p.entity_id) };
       })}
-      ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-at"
-        >{#if f.failing > 0}<span class="tf-count" class:tf-err={f.asking > 0}>{f.failing}<span class="tf-sr">{" failing"}</span></span>{/if}{#if f.running > 0}<span
-            class="tf-count tf-info">{f.running}<span class="tf-sr">{" running"}</span></span
-          >{/if}<span class="tf-fold-n">{f.count}<span class="tf-sr">{f.count === 1 ? " pipeline" : " pipelines"}</span></span></span
-      ></summary
+      ><span class="tf-fold-nm">{f.name}</span><span class="tf-fold-n">{f.count}<span class="tf-sr">{f.count === 1 ? " pipeline" : " pipelines"}</span></span
+      >{@render bubbles(foldCounts.get(f.key) ?? null)}</summary
     >
   </details>
 {/snippet}
@@ -842,7 +856,7 @@
           ><path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg
         ><span class="tf-pi-nm">All pipelines</span><span class="tf-fold-n" class:tf-unseen={all === null}
           >{all?.length ?? 0}<span class="tf-sr">{all?.length === 1 ? " pipeline" : " pipelines"}</span></span
-        ></a
+        >{@render bubbles(runsRead.counts?.total ?? null, runsRead.counts === null)}</a
       >
     </div>
     <div class="tf-pl-top">
@@ -906,6 +920,7 @@
             <TfRunGlyph {...railGlyph(outside)} />
             {@render name(outside, "")}
             <span class="tf-pi-why">{#if scope === "job" && !jobsOwn.some((p) => p.entity_id === outside.entity_id)}Not in <TfKey value={job ?? ""} />{:else}Hidden by the filter{/if}</span>
+            {@render bubbles(runsRead.counts === null ? null : runsRead.countsOf(outside.entity_id))}
           </a>
         </div>
       {/if}

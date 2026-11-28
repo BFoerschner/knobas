@@ -7,7 +7,7 @@ import { layers as sharedLayers } from "../layers.svelte";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { JobPipeline, RailPipeline, RunRow } from "../../ipc/entity";
+import type { BubbleCounts, JobPipeline, RailPipeline, RunRow } from "../../ipc/entity";
 import * as entityIpc from "../../ipc/entity";
 import { sessionFilter, sessionValue } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
@@ -363,16 +363,23 @@ function drawTree(
   });
 }
 
-/** Each fold's summary as its name, failing, running and total, as a reader hears them. */
+/** A row's five bubble columns (#2573), each as its bubble and what it says: `red:3`, `green:` at zero. */
+const cells = (row: Element) => [...row.querySelectorAll(".tf-pl-ub > .tf-ub")].map((c) => `${c.getAttribute("data-bubble")}:${c.firstChild?.textContent ?? ""}`);
+/** Each fold's summary as its name, its pipeline count and its columns' numbers, as a reader hears them. */
 const summaries = () =>
   [...target.querySelectorAll<HTMLElement>(".tf-pl-fold > summary")].map((s) =>
-    [
-      s.firstChild?.textContent?.trim(),
-      s.querySelector(".tf-count.tf-err")?.textContent ?? "",
-      s.querySelector(".tf-count.tf-info")?.textContent ?? "",
-      s.querySelector(".tf-fold-n")?.textContent,
-    ].join("|"),
+    [s.firstChild?.textContent?.trim(), s.querySelector(".tf-fold-n")?.textContent, cells(s).filter((c) => !c.endsWith(":")).join(" ")].join("|"),
   );
+
+/** The bridge answering `counts` for every pipeline named (the rest have none), read once as the shell would. */
+async function counted(byName: Record<string, Partial<BubbleCounts>>): Promise<void> {
+  const zero = { blue: 0, green: 0, yellow: 0, red: 0, grey: 0 };
+  const pipelines = Object.entries(byName).map(([name, c]) => ({ pipeline: `teamcity:buildType:${name}`, counts: { ...zero, ...c } }));
+  const total = { ...zero };
+  for (const { counts } of pipelines) for (const k of Object.keys(zero) as (keyof BubbleCounts)[]) total[k] += counts[k];
+  runsRead.ports = { ...runsRead.ports, counts: async () => ({ pipelines, total, visiting: true, fresh: [] }) };
+  await runsRead.readCounts();
+}
 /** The `n` rows after a fold's summary, each as its indent and name. */
 const after = (from: Element, n: number) => {
   const out: string[] = [];
@@ -394,18 +401,65 @@ test("All: Pinned first, then the tree as deep as it goes, with counts, failures
   const pinned = target.querySelector(".tf-pl h3 + .tf-pi .tf-pi-nm")?.textContent;
   expect(pinned).toBe("Payout_Build");
   // A fold's rows follow its summary, one level deeper (#2211).
-  expect(summaries()).toEqual([
-    "Data|1 failing||1 pipeline",
-    "Payments › Payouts|1 failing||3 pipelines",
-    "Deploy|1 failing||1 pipeline",
-    "Platform › Infra|||1 pipeline",
-  ]);
+  expect(summaries()).toEqual(["Data|1 pipeline|", "Payments › Payouts|3 pipelines|", "Deploy|1 pipeline|", "Platform › Infra|1 pipeline|"]);
   // Own pipelines before the subgroup.
   expect(after(fold("Payments › Payouts"), 3)).toEqual(["tf-d1 Payout_Build", "tf-d1 Payout_Lint", "tf-d1 Deploy"]);
   // Open on a failure (and the selection, the first failing one); closed otherwise.
   expect(fold("Data").open).toBe(true);
   expect(fold("Platform › Infra").open).toBe(false);
   expect(rows().some((row) => row.title.startsWith("Payments › Payouts › Deploy › Payout_Deploy_Prod\n"))).toBe(true);
+});
+
+test("every rail row draws five columns in the top bar's order; a folder sums its pipelines and All pipelines carries the totals (#2573)", async () => {
+  drawTree();
+  await settle();
+  await counted({ Payout_Build: { blue: 1, green: 2 }, Payout_Deploy_Prod: { red: 1, grey: 3 }, Dbt_Test: { red: 2, yellow: 1 } });
+  flushSync();
+  const home = target.querySelector(".tf-pl-root")!;
+  expect(cells(home)).toEqual(["red:3", "yellow:1", "green:2", "grey:3", "blue:1"]);
+  // Every row has all five, a zero saying nothing: each colour's place is the same on every row.
+  const all = [home, ...target.querySelectorAll(".tf-pl-rows .tf-pi, .tf-pl-fold > summary")];
+  expect(all.every((row) => cells(row).map((c) => c.split(":")[0]).join() === "red,yellow,green,grey,blue")).toBe(true);
+  expect(summaries()).toEqual([
+    "Data|1 pipeline|red:2 yellow:1",
+    "Payments › Payouts|3 pipelines|red:1 green:2 grey:3 blue:1",
+    "Deploy|1 pipeline|red:1 grey:3",
+    "Platform › Infra|1 pipeline|",
+  ]);
+  const lint = rows().find((row) => row.querySelector(".tf-pi-nm")?.textContent === "Payout_Lint")!;
+  expect(cells(lint)).toEqual(["red:", "yellow:", "green:", "grey:", "blue:"]);
+  // A reader hears each number with its state; the old folder counts are gone.
+  expect(home.querySelector(".tf-ub[data-bubble='grey']")?.textContent).toBe("3 cancelled");
+  expect(target.querySelector(".tf-pl-fold .tf-count")).toBeNull();
+  // The pipeline count stands just after the folder's name, before the columns.
+  const deploy = fold("Deploy").querySelector(":scope > summary")!;
+  expect([...deploy.children].map((c) => c.className.split(" ")[0])).toEqual(["tf-fold-nm", "tf-fold-n", "tf-pl-ub"]);
+});
+
+test("All pipelines holds its columns' room unseen until the counts answer, and a mark of all clears them at once (#2573)", async () => {
+  drawTree();
+  await settle();
+  const strip = () => target.querySelector(".tf-pl-root .tf-pl-ub")!;
+  expect(strip().classList.contains("tf-unseen")).toBe(true);
+  expect(strip().children).toHaveLength(5);
+  await counted({ Payout_Build: { blue: 1, green: 2 }, Dbt_Test: { red: 2 } });
+  flushSync();
+  expect(strip().classList.contains("tf-unseen")).toBe(false);
+  runsRead.ports = { ...runsRead.ports, mark: () => new Promise(() => {}), moveSeen: () => new Promise(() => {}) };
+  void runsRead.markAll({ runs: [], pipelines: [], everything: true });
+  flushSync();
+  expect(cells(strip())).toEqual(["red:", "yellow:", "green:", "grey:", "blue:"]);
+  expect(summaries().map((s) => s.split("|")[2])).toEqual(["", "", "", ""]);
+});
+
+test("a shared prefix is its own part of the name, cut before the rest (#2573)", async () => {
+  draw([]);
+  await settle();
+  const lint = rows().find((row) => row.querySelector(".tf-pi-nm")?.textContent === "Payout_Lint")!;
+  expect([...lint.querySelector(".tf-pi-nm")!.children].map((c) => [c.className, c.textContent])).toEqual([
+    ["tf-pi-pre", "Payout_"],
+    ["tf-pi-rest", "Lint"],
+  ]);
 });
 
 test("a fold the reader closes stays closed as the list redraws", async () => {
@@ -571,7 +625,7 @@ test("All is the default, as on every page; This job prunes the tree to its pipe
   // Every pipeline is back (Payout_Build twice, pinned and in its fold); the
   // closed fold holds its one, undrawn until opened.
   expect(names()).toHaveLength(5);
-  expect(summaries()).toContain("Platform › Infra|||1 pipeline");
+  expect(summaries()).toContain("Platform › Infra|1 pipeline|");
   expect(target.querySelector(".tf-scope-note")).toBeNull();
   expect(target.querySelector(".tf-pi-why")).toBeNull();
 });

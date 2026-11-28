@@ -423,6 +423,15 @@ export function foldSums(trees: readonly SourceTree[], countsOf: (id: string) =>
  */
 export const RAIL_COLUMNS: readonly Bubble[] = ["red", "yellow", "green", "grey", "blue"];
 
+/** Each bubble's word, what a count is heard and titled with (the top bar's, #2568). */
+export const BUBBLE_WORDS: Readonly<Record<Bubble, string>> = {
+  red: "failed",
+  yellow: "passed with warnings",
+  green: "passed",
+  grey: "cancelled",
+  blue: "running",
+};
+
 /** One of a row's columns: its bubble, its count, and what the cell says (nothing at zero, two figures at most). */
 export interface RailCell {
   bubble: Bubble;

@@ -189,8 +189,7 @@
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted); --rule: var(--on-ink-muted);
 }
 .tf-pl :is(.tf-pi, .tf-tfold)[aria-current="true"]::after { background: var(--sel-row); }
-.tf-tfold[aria-current="true"] :is(.tf-fold-nm, .tf-fold-at) { color: inherit; }
-.tf-tfold[aria-current="true"] .tf-count { color: inherit; }
+.tf-tfold[aria-current="true"] .tf-fold-nm { color: inherit; }
 /* The ring follows the pill, inside it. */
 .tf-pl .tf-tr:focus-visible { outline: none; }
 :where(:root[data-focus-ring]) .tf-pl .tf-tr:focus-visible::after { outline: var(--focus-w) solid color-mix(in srgb, var(--focus-c) var(--focus-a), transparent); outline-offset: var(--focus-in); }
@@ -222,8 +221,8 @@
 .tf-pi-nm.tf-bad .tf-pi-pre, .tf-pi[aria-current="true"] .tf-pi-pre, .tf-pi[aria-current="true"] .tf-pi-nm.tf-bad { color: inherit; }
 /* *This job*'s reason has only the room the name leaves, so it gives way first. */
 .tf-pi-why { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); }
-/* The time (only where it says something, `railTime`), or a fold's counts, on the right edge. */
-.tf-pi-when, .tf-fold-at {
+/* The time (only where it says something, `railTime`), on the right edge before the bubble columns. */
+.tf-pi-when {
   flex: none; margin-left: auto; padding-left: 6px; display: inline-flex; gap: 4px; align-items: center;
   font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
@@ -231,13 +230,13 @@
 .tf-pi-when.tf-info { color: var(--info); }
 .tf-pi[aria-current="true"] :is(.tf-pi-why, .tf-pi-when) { color: inherit; opacity: .8; }
 /* A fold: the app's one fold chevron (chrome.css) set in the glyph column, its name a group label (600, the second
-   ink, design system, Heading steps), its counts right. */
+   ink, design system, Heading steps), how many pipelines it holds just after the name, its bubble columns right. */
 .tf-pl-fold > summary { list-style: none; }
 .tf-pl-fold > summary::-webkit-details-marker { display: none; }
 .tf-pl-fold > summary.tf-tfold::before { margin: 0 3px 1px 3px; }
 .tf-fold-nm { font-weight: 600; color: var(--ink-2); }
-.tf-fold-at .tf-count { font-size: calc(var(--t-2xs) * var(--fs)); }
-.tf-fold-n { min-width: 2ch; text-align: right; }
+.tf-fold-n { flex: none; color: var(--ink-2); font-size: calc(var(--t-2xs) * var(--fs)); font-weight: var(--wt-ui, 400); font-variant-numeric: tabular-nums; }
+.tf-tfold[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
 /* The tools: the chips, and *Collapse all* / *Expand all* as the line's trailing group (`.tf-trail`). */
 .tf-pl-tools { display: flex; align-items: center; gap: var(--control-gap); }
 .tf-pl-pin { padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--rule-2); }
@@ -402,14 +401,44 @@
 /* ---------- Builds' run table at *All pipelines* and a folder (2026-11-25 *Recent*; one page since #2570) ---------- */
 /* *All pipelines* (#2570): the rail's first row, above its tools, which never narrow it; a row of the tree's own shape,
    so its pill is the rail's. Its pipeline count holds its room unseen until the list is read. */
-.tf-pl-home { padding: 8px 8px 0; }
+.tf-pl-home { padding: 8px 16px 0 8px; }
 .tf-pl-home + .tf-pl-top { padding-top: 8px; }
 .tf-pl-root .tf-pi-nm { font-weight: 600; }
 .tf-pl-rooticon { flex: none; width: 12px; height: 12px; color: var(--ink-2); }
 .tf-pi[aria-current="true"] .tf-pl-rooticon { color: inherit; }
-.tf-pl-root .tf-fold-n { margin-left: auto; font-size: calc(var(--t-xs) * var(--fs)); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-pi[aria-current="true"] .tf-fold-n { color: inherit; opacity: .8; }
 .tf-pl-root .tf-fold-n.tf-unseen { visibility: hidden; }
+/* The bubble columns (#2573): five at every row's end, in the top bar's order (red, yellow, green, grey, blue), each in
+   its own place on every row, so a number that comes or goes moves nothing, a scan down one column reads one colour,
+   and the place says the colour to someone who can't tell red from green. Two figures' room each; a zero holds its
+   room unseen. The list keeps its scrollbar's 8 px whether it scrolls or not, and *All pipelines* stands 16 px in on
+   the right (the list's 8 and the bar's 8), so the columns line up down the rail. */
+.tf-bv .tf-pl-list { scrollbar-gutter: stable; }
+.tf-pl-ub { flex: none; display: inline-grid; grid-template-columns: repeat(5, calc(16px * var(--fs))); column-gap: 2px; margin-left: auto; }
+.tf-pl :is(.tf-pi-when, .tf-pi-why) + .tf-pl-ub { margin-left: 0; }
+.tf-ub {
+  height: 16px; border-radius: 4px; overflow: hidden; text-align: center; line-height: 16px;
+  font-size: calc(var(--t-2xs) * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.tf-ub.tf-ub-0, .tf-pl-ub.tf-unseen { visibility: hidden; }
+/* The tones are `.tf-count`'s (chrome.css): grey is the plain count. */
+.tf-ub-red { background: var(--err-bg); color: var(--err); }
+.tf-ub-yellow { background: var(--warn-bg); color: var(--warn); }
+.tf-ub-green { background: var(--ok-bg); color: var(--ok); }
+.tf-ub-grey { background: var(--rule); color: var(--ink-2); }
+.tf-ub-blue { background: var(--info-bg); color: var(--info); }
+/* On the selected row the tint is the pill's, so it goes; the tone stays, re-declared for the ink (design system, *A
+   status tag on the pill*). */
+.tf-pl [aria-current="true"] .tf-ub { background: color-mix(in srgb, currentColor 20%, transparent); }
+.tf-pl [aria-current="true"] .tf-ub-grey { color: inherit; }
+/* What a fold's pipelines share gives way before what tells them apart: the dim prefix, which the folder above already
+   says, is the first part of a name cut, so `IntegrationTests` survives where `Payout_Integ…` stood. */
+.tf-bv .tf-pi-nm { display: flex; }
+.tf-bv .tf-pi-pre { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-bv .tf-pi-rest { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* At the rail's narrow width, a window of 1240 px or less, a row's time gives way to the columns: the table beside it
+   says every time, and the row's title still has it. Stacked under 900 px the rail is the window's width again. */
+@media (min-width: 901px) and (max-width: 1240px) { .tf-bv .tf-pi-when { display: none; } }
 /* The rail's rows held in their room while a run opened from a scope scrolls its pipeline into view (#2570). */
 .tf-pl-rows.tf-unseen { visibility: hidden; }
 /* One band, as a pipeline's runs bar is (`.tf-rbar.tf-rpickbar`'s shape): the filter bar, with *Mark all as read* after
