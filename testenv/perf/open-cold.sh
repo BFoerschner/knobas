@@ -74,7 +74,7 @@ if [ -n "$live" ]; then
   owner=$(jq -r '.gitea.org // "tidewater"' "$state" 2>/dev/null)
   [ -n "$gitea_token" ] && [ -n "$teamcity_token" ] ||
     { echo "open-cold: --live needs Gitea and TeamCity seeded from this checkout: just live-up teamcity" >&2; exit 2; }
-  curl -sf -o /dev/null -m 5 http://127.0.0.1:3000/api/healthz && curl -s -o /dev/null -m 5 http://127.0.0.1:8111/ ||
+  { curl -sf -o /dev/null -m 5 http://127.0.0.1:3000/api/healthz && curl -s -o /dev/null -m 5 http://127.0.0.1:8111/; } ||
     { echo "open-cold: --live needs the local Gitea (3000) and TeamCity (8111) answering: just live-up teamcity" >&2; exit 2; }
   start_backend "$out/live-setup.log"
   for source in \
