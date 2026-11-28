@@ -31,7 +31,7 @@
   import TfStateChip from "../TfStateChip.svelte";
   import Marked from "../filter/Marked.svelte";
   import { stateWord } from "../state-word";
-  import { secondsLabel, tickingLabel, timeLabel } from "../../time/format";
+  import { runLengthLabel, timeLabel } from "../../time/format";
   import { refusedAttrs } from "../../shell/refused-writes";
   import type { RunRow } from "../../ipc/entity";
   import { failedRun, markableRun, runTone, testsWords, type Bubble } from "./builds";
@@ -152,7 +152,7 @@
     {#if run.duration_seconds !== null}
       <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
         ><rect width={durbarWidth(run.duration_seconds, max)} height="4" rx="2" /></svg
-      >{secondsLabel(run.duration_seconds)}
+      >{runLengthLabel(run.duration_seconds)}
     {:else if elapsed !== null}
       <!-- The bar's room is held with nothing known (no finished run held), so the clock stands where it will. -->
       <svg class="tf-durbar tf-durbar-live" width={DURBAR_WIDTH} height="4" aria-hidden="true"
@@ -162,7 +162,7 @@
             height="4"
             rx="2"
           />{/if}</svg
-      ><span class="tf-info tf-run-clock">{tickingLabel(elapsed)}</span>
+      ><span class="tf-info tf-run-clock">{runLengthLabel(elapsed)}</span>
     {:else if here}
       <!-- Why it waits (F-352): in the queue, or sent and not yet read back. -->
       <span class="tf-dim">{inQueue ? "in the write queue" : "until the next sync"}</span>

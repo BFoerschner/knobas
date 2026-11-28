@@ -45,10 +45,11 @@ export function secondsLabel(seconds: number): string {
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
- * A running clock (#2574): {@link secondsLabel}'s words with the smaller unit always said in two figures (`4m 05s`,
- * `1h 02m`), so in tabular figures it keeps its width as it ticks within a minute.
+ * A run's length in its row (#2574, the mockup's `length`): {@link secondsLabel}'s words with the smaller unit always
+ * said in two figures (`4m 05s`, `1h 02m`). Running, it ticks and keeps its width within a minute in tabular figures;
+ * ended, the same words say what it took.
  */
-export function tickingLabel(seconds: number): string {
+export function runLengthLabel(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;

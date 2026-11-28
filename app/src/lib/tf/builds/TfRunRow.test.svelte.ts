@@ -130,3 +130,12 @@ test("queued it waits; started it ticks; ended, the same bar and the words say w
   flushSync();
   expect(said()).toBe("4m 12s");
 });
+
+test("running and ended, the cell says a length in one form, the smaller unit in two figures (#2574)", () => {
+  const set = draw(runRow({ started: ago(3725) }), { max: 7200, usual: 3600 });
+  expect(said()).toBe("1h 02m");
+  set(runRow({ started: ago(3725), finished: ago(0), duration_seconds: 3725, state: { text: "SUCCESS", tone: "ok" } }));
+  expect(said(), "not secondsLabel's 1h 2m").toBe("1h 02m");
+  set(runRow({ started: ago(245), finished: ago(0), duration_seconds: 245, state: { text: "SUCCESS", tone: "ok" } }));
+  expect(said()).toBe("4m 05s");
+});
