@@ -254,7 +254,8 @@ const PLACES = [
   // Left by the list's address: `Esc` goes up to the pull request's repository (#2576), which lists none to press (#2602).
   { name: "pull-request", start: "#/code/prs", press: `${shown} a[href^="#/pr/"]`, hash: "#/pr/", away: "#/code/prs", tabs: true },
   { name: "builds", start: "#/time", nav: "builds", hash: "#/builds", away: "time", tabs: true },
-  { name: "pipeline", start: "#/builds", press: `${shown} .tf-rail a[href^="#/builds/"], ${shown} a[href^="#/builds/"]`, hash: "#/builds/", away: "Escape" },
+  // A pipeline's row in the rail's tree, not *All pipelines* above it (#2570), whose `#/builds/recent` the hash also takes.
+  { name: "pipeline", start: "#/builds", press: `${shown} .tf-rail .tf-pl-rows a.tf-pi[href^="#/builds/"]`, hash: "#/builds/", away: "Escape" },
   { name: "run", start: "#/builds", press: `${shown} a[href^="#/build/"]`, hash: "#/build/", away: "Escape", tabs: true },
   // A run pressed on a pipeline's page (#2571), the path `run` took before #2570.
   { name: "pipeline-run", start: `#/builds/${PIPE}`, press: `${shown} .tf-runs a[href^="#/build/"]`, hash: "#/build/", away: "Escape" },
