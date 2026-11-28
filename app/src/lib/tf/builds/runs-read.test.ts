@@ -292,6 +292,30 @@ test("Mark all as read at All pipelines takes every count to zero at once, and U
   expect(putBackSeen).toHaveBeenCalledWith(moved);
 });
 
+test("a scope's Mark all as read takes the rows' green out at once, and a press that fails puts it back (#2566 review)", async () => {
+  const pass = { entity_id: "r:pass", started: "2026-08-22T10:00:00Z", finished: "2026-08-22T10:04:00Z", state: { text: "ok", tone: "ok" as const } };
+  let fail = false;
+  const mark = vi.fn(async (scope: MarkScope) => {
+    if (fail) throw new Error("db gone");
+    return reading(scope.runs);
+  });
+  let answer: () => void = () => {};
+  const counts = vi.fn(() => new Promise<RunCounts>((resolve) => (answer = () => resolve(countsOf({ [TESTS]: { green: 1 } }, { visiting: true, fresh: ["r:pass"] })))));
+  const runs = store({ mark, counts });
+  const first = runs.readCounts();
+  answer();
+  await first;
+  expect(runs.bubble(pass)).toBe("green");
+  const pressed = runs.markAll({ runs: [], pipelines: [TESTS] });
+  expect(runs.bubble(pass), "with the scope's counts, before the read after the mark").toBeNull();
+  await pressed;
+  answer();
+  fail = true;
+  await vi.waitFor(() => expect(runs.bubble(pass)).toBe("green"));
+  await runs.markAll({ runs: [], pipelines: [], everything: true });
+  expect(runs.bubble(pass), "a failed press leaves the green as it was").toBe("green");
+});
+
 test("a folder's Mark all as read clears its pipelines' counts and no other's", async () => {
   const runs = store({ counts: vi.fn(async () => countsOf({ [TESTS]: { green: 2 }, [LINT]: { red: 1 } })) });
   await runs.readCounts();

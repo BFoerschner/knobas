@@ -425,6 +425,7 @@ export class RunsRead {
     const cleared = !reached ? 0 : everything ? seenCount(this.#counts?.total ?? noCounts()) : seenCount(this.countsOf(...new Set(scope.pipelines)));
     this.#with(drawn);
     const countsBefore = this.#counts;
+    const freshBefore = this.#fresh;
     if (reached) this.#cleared(everything ? null : scope.pipelines);
     const asked: MarkScope = { everything, pipelines: everything ? [] : [...scope.pipelines], runs: [...drawn] };
     let wrote: RunMarks;
@@ -440,6 +441,7 @@ export class RunsRead {
     } catch (cause) {
       this.#with([], drawn, wasRunning);
       if (this.#counts !== null && countsBefore !== null) this.#counts = countsBefore;
+      this.#fresh = freshBefore;
       push({ text: `Could not mark the runs as read: ${ipcErrorMessage(cause)}`, tone: "err" });
       return [];
     }
@@ -460,13 +462,17 @@ export class RunsRead {
     void this.readCounts();
   }
 
-  /** A scope's counts drawn cleared at once, `null` for every pipeline: the read after the mark says the rest. */
+  /**
+   * A scope's counts drawn cleared at once, `null` for every pipeline: the read after the mark says the rest. The rows'
+   * green, yellow and grey dots go with them, every one (a fresh run's pipeline is not known here): the table lists only
+   * the scope's runs, and the read after the mark draws the others' again.
+   */
   #cleared(pipelines: readonly string[] | null): void {
     const counts = this.#counts;
     if (counts === null) return;
+    this.#fresh = new Set();
     if (pipelines === null) {
       this.#counts = { ...counts, pipelines: [], total: noCounts(), fresh: [] };
-      this.#fresh = new Set();
       return;
     }
     const gone = new Set(pipelines);
