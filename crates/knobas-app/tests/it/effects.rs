@@ -15,7 +15,12 @@
 //!   by `full_name` and by `name`; a second repository of the same short
 //!   name stands under another owner, so a parent matched by `name` alone
 //!   would walk it too.
-//! * **`tracker`**, as Jira: a ticket is read by id.
+//! * **`tracker`**, as Jira: a ticket is read by id; a board or filter is
+//!   not, and is walked by its key (`refresh_under`, #2593). Its tickets
+//!   declare their project, as Jira's do, and its views are saved views
+//!   whose `keys` are what the tracker's query answers: a Kanban board over
+//!   `PAY` that leaves out *Done*, a filter on the assignee `mara`, and a
+//!   board over `OPS`, which no `PAY` ticket write may read.
 //!
 //! Every run passes a door the test holds shut once the mirror is seeded, so
 //! "read without a run" is a fact: what a run would bring cannot reach the
@@ -50,6 +55,12 @@ const MAIN: &str = "forge:tide/pay@refs/heads/main";
 const FEATURE: &str = "forge:tide/pay@refs/heads/feature";
 const ISSUE: &str = "forge:tide/pay/issues/3";
 const TICKET: &str = "tracker:PAY-1";
+const SIBLING: &str = "tracker:PAY-2";
+const FILED: &str = "tracker:PAY-3";
+const OTHER: &str = "tracker:OPS-1";
+const BOARD: &str = "tracker:board-1";
+const MINE: &str = "tracker:filter-9";
+const ELSEWHERE: &str = "tracker:board-2";
 const OLD_MAIN: &str = "1111111";
 const MERGED_MAIN: &str = "2222222";
 const OLD_FEATURE: &str = "aaaaaaa";
@@ -66,6 +77,10 @@ struct World {
     feature_head: Option<String>,
     issue_open: bool,
     ticket_status: String,
+    /// Whom `PAY-1` is assigned to.
+    assignee: Option<String>,
+    /// Whether `PAY-3` has been filed.
+    filed: bool,
 }
 
 impl Default for World {
@@ -76,6 +91,8 @@ impl Default for World {
             feature_head: Some(OLD_FEATURE.to_owned()),
             issue_open: true,
             ticket_status: "In Review".to_owned(),
+            assignee: None,
+            filed: false,
         }
     }
 }
@@ -179,14 +196,76 @@ impl World {
         ]
     }
 
-    fn ticket(&self) -> SyncItem {
-        item(
-            TICKET,
+    /// The tracker's tickets: `(entity, project, status, assignee)`.
+    fn tickets(&self) -> Vec<(&'static str, &'static str, String, Option<String>)> {
+        let mara = Some("mara".to_owned());
+        let mut tickets = vec![
+            (
+                TICKET,
+                "PAY",
+                self.ticket_status.clone(),
+                self.assignee.clone(),
+            ),
+            (SIBLING, "PAY", "To Do".to_owned(), mara.clone()),
+            (OTHER, "OPS", "To Do".to_owned(), mara),
+        ];
+        if self.filed {
+            tickets.push((FILED, "PAY", "To Do".to_owned(), None));
+        }
+        tickets
+    }
+
+    fn ticket_of(&self, entity: &str) -> Option<SyncItem> {
+        let (entity, project, status, assignee) =
+            self.tickets().into_iter().find(|t| t.0 == entity)?;
+        Some(item(
+            entity,
             "ticket",
-            "Retry SEPA payouts",
-            json!({ "fields": { "status": { "name": self.ticket_status } } }),
+            if entity == TICKET {
+                "Retry SEPA payouts"
+            } else {
+                entity
+            },
+            json!({ "fields": {
+                "status": { "name": status },
+                "project": { "key": project },
+                "assignee": assignee,
+            } }),
+            false,
+        ))
+    }
+
+    /// A view with the keys its query answers now, in the tracker's order.
+    fn view(&self, entity: &str) -> SyncItem {
+        let keys: Vec<&str> = self
+            .tickets()
+            .into_iter()
+            .filter(|(_, project, status, assignee)| match entity {
+                BOARD => *project == "PAY" && status != "Done",
+                MINE => assignee.as_deref() == Some("mara"),
+                _ => *project == "OPS",
+            })
+            .map(|(ticket, ..)| ticket.split_once(':').expect("an entity id").1)
+            .collect();
+        let kind = if entity == MINE { "filter" } else { "board" };
+        item(
+            entity,
+            "view",
+            entity,
+            json!({ "kind": kind, "keys": keys }),
             false,
         )
+    }
+
+    /// What a run of the tracker emits.
+    fn tracked(&self) -> Vec<SyncItem> {
+        let mut items: Vec<SyncItem> = self
+            .tickets()
+            .iter()
+            .filter_map(|t| self.ticket_of(t.0))
+            .collect();
+        items.extend([BOARD, MINE, ELSEWHERE].map(|view| self.view(view)));
+        items
     }
 }
 
@@ -241,7 +320,7 @@ impl Source for Fake {
             ));
             items
         } else {
-            vec![world.ticket()]
+            world.tracked()
         };
         for each in items {
             sink.item(each).await?;
@@ -260,7 +339,9 @@ impl Source for Fake {
         Ok(match entity {
             PULL => RefreshAnswer::Item(world.pull()),
             ISSUE => RefreshAnswer::Item(world.issue()),
-            TICKET => RefreshAnswer::Item(world.ticket()),
+            TICKET | SIBLING | FILED | OTHER => world
+                .ticket_of(entity)
+                .map_or(RefreshAnswer::Gone, RefreshAnswer::Item),
             _ => RefreshAnswer::NotOffered,
         })
     }
@@ -286,6 +367,10 @@ impl Source for Fake {
                 items: Vec::new(),
                 cursor: None,
             },
+            BOARD | MINE | ELSEWHERE => UnderAnswer::Walked {
+                items: vec![world.view(entity)],
+                cursor: None,
+            },
             _ => UnderAnswer::NotOffered,
         })
     }
@@ -304,6 +389,16 @@ impl Source for Fake {
             }
             WriteOp::UpdatePullRequestBranch { .. } => {
                 world.feature_head = Some(UPDATED_FEATURE.to_owned());
+            }
+            WriteOp::Transition { status, .. } => world.ticket_status = status,
+            WriteOp::EditTicket { assignee, .. } => {
+                if let Some(assignee) = assignee {
+                    world.assignee = assignee.account().map(str::to_owned);
+                }
+            }
+            WriteOp::CreateTicket { .. } => {
+                world.filed = true;
+                return Ok(WriteReceipt::id("PAY-3"));
             }
             other => return Err(SourceError::protocol(format!("not here: {other:?}"))),
         }
@@ -355,6 +450,23 @@ fn forge_paths() -> Vec<KindPaths> {
     ]
 }
 
+/// The tracker's declarations as Jira's template states them: a ticket
+/// names its project, and a view is a saved view.
+fn tracker_paths() -> Vec<KindPaths> {
+    vec![
+        KindPaths {
+            kind: "ticket".to_owned(),
+            project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "view".to_owned(),
+            frame: Some(knobas_core::payload::Frame::SavedView),
+            ..KindPaths::default()
+        },
+    ]
+}
+
 fn descriptor(id: &str) -> SourceDescriptor {
     let forge = id == FORGE;
     SourceDescriptor {
@@ -384,7 +496,11 @@ fn descriptor(id: &str) -> SourceDescriptor {
                 "update_pull_request_branch".to_owned(),
             ]
         } else {
-            Vec::new()
+            vec![
+                "transition".to_owned(),
+                "create_ticket".to_owned(),
+                "edit_ticket".to_owned(),
+            ]
         },
         entity_kinds: if forge {
             ["repository", "branch", "pull_request", "ticket"]
@@ -392,10 +508,14 @@ fn descriptor(id: &str) -> SourceDescriptor {
                 .map(kind)
                 .collect()
         } else {
-            vec![kind("ticket")]
+            vec![kind("ticket"), kind("view")]
         },
         config_schema: json!({"type": "object", "properties": {}}),
-        payload_paths: if forge { forge_paths() } else { Vec::new() },
+        payload_paths: if forge {
+            forge_paths()
+        } else {
+            tracker_paths()
+        },
     }
 }
 
@@ -586,14 +706,25 @@ async fn landed(state: &SourcesState, op: Value) -> i64 {
 }
 
 /// After the read-back, the run of the write's source still follows: once
-/// the door opens, a run that began after the write finishes.
-async fn the_run_still_follows(state: &SourcesState, shared: &Shared, id: i64) {
+/// the door opens, a run of `source` that began after the write finishes.
+async fn the_run_still_follows(state: &SourcesState, shared: &Shared, source: &str, id: i64) {
     shared.door.add_permits(1_000);
     eventually(
-        "a run of the forge that began after the write finishes",
-        || async { runs_since(state, FORGE, id).await.1 > 0 },
+        &format!("a run of {source} that began after the write finishes"),
+        || async { runs_since(state, source, id).await.1 > 0 },
     )
     .await;
+}
+
+/// The tickets the mirror's saved view `view` holds, in its order.
+async fn held(state: &SourcesState, view: &str) -> Vec<String> {
+    sqlx::query_scalar(
+        "select entity_id from sync.saved_view_member where view_id = $1 order by rank",
+    )
+    .bind(view)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap()
 }
 
 /// **A merge with `delete_branch` shows its effects without a run**: the
@@ -651,7 +782,7 @@ async fn a_merge_reads_back_its_repository_and_linked_ticket_without_a_run() {
         "the linked ticket is read once, by id: {refreshed:?}"
     );
 
-    the_run_still_follows(&state, &shared, id).await;
+    the_run_still_follows(&state, &shared, FORGE, id).await;
     state.scheduler.shutdown().await;
 }
 
@@ -694,7 +825,7 @@ async fn a_branch_update_reads_back_the_head_branch_tip_without_a_run() {
         "a branch update links no ticket"
     );
 
-    the_run_still_follows(&state, &shared, id).await;
+    the_run_still_follows(&state, &shared, FORGE, id).await;
     state.scheduler.shutdown().await;
 }
 
@@ -740,5 +871,87 @@ async fn an_effect_behind_a_run_that_does_not_stand_aside_holds_up_nothing() {
         "the ticket was not read while its source was held"
     );
     tracker_run.rollback().await.unwrap();
+    state.scheduler.shutdown().await;
+}
+
+/// A ticket write's views were read without a run: no run of the tracker
+/// finished since the write, the views of the ticket's project were walked,
+/// and the board over another project was not; then the run still follows.
+async fn the_views_were_read_without_a_run(state: &SourcesState, shared: &Shared, id: i64) {
+    assert_eq!(
+        runs_since(state, TRACKER, id).await.1,
+        0,
+        "no tracker run finished"
+    );
+    let mut walked = shared.seen.walked.lock().unwrap().clone();
+    walked.sort();
+    assert_eq!(walked, [BOARD, MINE], "read at once, side by side");
+    the_run_still_follows(state, shared, TRACKER, id).await;
+}
+
+/// **A transition that takes a ticket out of a board's query drops its card
+/// without a run** (#2593): the Kanban board that leaves out *Done* holds
+/// `PAY-1` no longer, read by its key at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transition_drops_the_ticket_from_a_board_that_leaves_it_out_without_a_run() {
+    let (state, shared) = fixture("effects_views_transition").await;
+    assert_eq!(held(&state, BOARD).await, [TICKET, SIBLING]);
+
+    let id = landed(
+        &state,
+        json!({ "Transition": { "entity": TICKET, "status": "Done" } }),
+    )
+    .await;
+
+    eventually("the board drops PAY-1", || async {
+        held(&state, BOARD).await == [SIBLING]
+    })
+    .await;
+    the_views_were_read_without_a_run(&state, &shared, id).await;
+    state.scheduler.shutdown().await;
+}
+
+/// **A ticket filed in a project shows on that project's board without a
+/// run**: the views are the new ticket's, whose project the mirror knows
+/// once it is read back, though the write's target is the project.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ticket_filed_shows_on_its_projects_board_without_a_run() {
+    let (state, shared) = fixture("effects_views_create").await;
+
+    let id = landed(
+        &state,
+        json!({ "CreateTicket": {
+            "entity": "tracker:PAY", "title": "Retry on 503", "body": "", "ticket_type": "Task"
+        } }),
+    )
+    .await;
+
+    eventually("the board holds PAY-3", || async {
+        held(&state, BOARD).await == [TICKET, SIBLING, FILED]
+    })
+    .await;
+    the_views_were_read_without_a_run(&state, &shared, id).await;
+    state.scheduler.shutdown().await;
+}
+
+/// **An assignee change moves the ticket into a filter keyed on the
+/// assignee without a run**: the filter holds no `PAY-1` before, and is
+/// found through `PAY-2`, the project's ticket it holds.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_assignee_change_moves_the_ticket_into_the_filter_on_the_assignee_without_a_run() {
+    let (state, shared) = fixture("effects_views_assignee").await;
+    assert_eq!(held(&state, MINE).await, [SIBLING, OTHER]);
+
+    let id = landed(
+        &state,
+        json!({ "EditTicket": { "entity": TICKET, "assignee": { "account": "mara" } } }),
+    )
+    .await;
+
+    eventually("the filter holds PAY-1", || async {
+        held(&state, MINE).await == [TICKET, SIBLING, OTHER]
+    })
+    .await;
+    the_views_were_read_without_a_run(&state, &shared, id).await;
     state.scheduler.shutdown().await;
 }

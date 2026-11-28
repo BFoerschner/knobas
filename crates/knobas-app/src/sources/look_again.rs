@@ -586,7 +586,7 @@ pub(crate) async fn after_write(
     }
     let pool = &scheduler.deps().pool;
     let target = write.entity_id.as_str();
-    let mut repositories = match super::effects::resolve(pool, Effect::Parent, target).await {
+    let mut repositories = match super::effects::parents(pool, target).await {
         Ok(parents) => parents,
         Err(error) => {
             tracing::warn!(write_id = write.id, %error, "a landed write's repository could not be found");
@@ -748,7 +748,7 @@ pub(crate) async fn after_run(scheduler: &Scheduler, source: &str, changed: bool
     let pool = &deps.pool;
     let mut repositories = Vec::new();
     for branch in &moved {
-        match super::effects::resolve(pool, Effect::Parent, branch).await {
+        match super::effects::parents(pool, branch).await {
             Ok(parents) => {
                 for parent in parents {
                     if !repositories.contains(&parent) {

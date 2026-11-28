@@ -293,15 +293,35 @@ impl Source for JiraSource {
     }
 
     /// One issue, by a search on its key (#2097, [`crate::refresh`]). A
-    /// view's id (`board-3`, `filter-10000`) is not an issue key: a view is
-    /// read with the boards, and is not offered. An id of another source is
-    /// refused, as a write's is.
+    /// view's id (`board-3`, `filter-10000`) is not an issue key: it is not
+    /// offered here, and is walked instead ([`Self::refresh_under`]). An id of
+    /// another source is refused, as a write's is.
     async fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         let key = self.owned_key(entity)?;
         if !is_issue_key(&key) {
             return Ok(RefreshAnswer::NotOffered);
         }
         self.reader().refresh(&key, crate::refresh::PATIENCE).await
+    }
+
+    /// A board or a favourite filter, read by its key as a run reads it, with
+    /// its position in the cursor moved (#2593, [`crate::views::walk`]): what
+    /// a landed ticket write reads back for the views that hold the ticket.
+    async fn refresh_under(
+        &self,
+        entity: &str,
+        cursor: Option<&str>,
+    ) -> Result<knobas_source::UnderAnswer, SourceError> {
+        let key = self.owned_key(entity)?;
+        crate::views::walk(
+            &self.http,
+            &self.cfg,
+            &self.id,
+            &self.base_url,
+            &key,
+            cursor,
+        )
+        .await
     }
 
     /// Perform one of the three writes M2 ratified for Jira, or refuse.
@@ -934,10 +954,12 @@ mod tests {
         assert!(message.contains("not a Jira project"), "{message}");
     }
 
-    /// A view is not read by id, and no request is made to say so; an id
-    /// of another source is refused before any request too.
+    /// A view is not read by id, and no request is made to say so: it is
+    /// walked (`refresh_under`, #2593), and with no position to walk from it
+    /// is not offered either, still with no request. An id of another source
+    /// is refused before any request too.
     #[tokio::test]
-    async fn a_views_id_is_not_offered_and_another_sources_is_refused() {
+    async fn a_views_id_is_walked_not_read_and_another_sources_is_refused() {
         let source = built(instance(serde_json::json!({})));
         for view in ["jira:board-3", "jira:filter-10000"] {
             assert!(matches!(
@@ -945,15 +967,25 @@ mod tests {
                 RefreshAnswer::NotOffered
             ));
         }
+        for view in ["jira:board-3", "jira:filter-10000"] {
+            assert!(matches!(
+                source.refresh_under(view, None).await.unwrap(),
+                knobas_source::UnderAnswer::NotOffered
+            ));
+        }
         assert!(matches!(
             source.refresh("jira-eu:PAY-231").await,
             Err(SourceError::Protocol { .. })
         ));
+        assert!(matches!(
+            source.refresh_under("jira-eu:board-3", None).await,
+            Err(SourceError::Protocol { .. })
+        ));
         let descriptor = source.descriptor();
         assert!(descriptor.refreshes());
-        // So a view's detail draws *Sync now*, and a ticket's *Refresh*
-        // (#2146). The offline battery's corpus holds no view to ask.
-        assert!(!descriptor.refreshes_kind(crate::KIND_JIRA_VIEW));
+        // So a view's detail draws *Refresh*, as a ticket's does (#2146,
+        // #2593). The offline battery's corpus holds no view to ask.
+        assert!(descriptor.refreshes_kind(crate::KIND_JIRA_VIEW));
         assert!(descriptor.refreshes_kind(crate::KIND_TICKET));
     }
 

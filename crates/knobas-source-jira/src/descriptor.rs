@@ -97,9 +97,9 @@ pub fn descriptor_template() -> SourceDescriptor {
                 // board that stops coming back is gone in Jira: the run itself
                 // says so (`views::gone`), and a full sync's sweep agrees.
                 full_sync_exhaustive: true,
-                // A view's id is not an issue key: it is read with the
-                // boards, and `refresh` answers it not offered (#2146).
-                refreshes: false,
+                // A view's id is not an issue key, so `refresh` answers it not
+                // offered, and `refresh_under` reads it by its key (#2593).
+                refreshes: true,
                 title_stays_in_mirror: false,
             },
         ],

@@ -67,6 +67,46 @@ const LINKED_TICKETS: &str = "select distinct i.entity_id
       where (l.from_id = $1 or l.to_id = $1) and i.kind = $2
       order by i.entity_id";
 
+/// The live **saved views** that hold `$1` (`sync.saved_view_member`), and
+/// those that hold any item of `$1`'s project in its source
+/// (`sync.item_project`, the key its configured adapter declares): the boards
+/// and filters a ticket write may have moved it out of or into. A view
+/// holding no ticket of the project yet is not found; the next run of its
+/// source brings it.
+///
+/// At most `$2` ([`SAVED_VIEWS_AT_MOST`]), the views holding `$1` first, as
+/// those are the ones a write takes it out of; then by view id. The project's
+/// items are one range of `item_project_census_idx`, hashed once, so the
+/// members are scanned once whatever the project's size.
+const SAVED_VIEWS: &str = "with project as (
+         select p.source_id, p.adapter_kind, p.key
+           from sync.item_project p
+           join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind
+          where p.entity_id = $1
+       ),
+       held as (
+         select m.view_id, bool_or(m.entity_id = $1) as holds
+           from sync.saved_view_member m
+          where m.entity_id = $1
+             or m.entity_id in (select q.entity_id
+                                  from sync.item_project q
+                                  join project p on p.source_id = q.source_id
+                                   and p.key = q.key and p.adapter_kind = q.adapter_kind)
+          group by m.view_id
+       )
+       select h.view_id
+         from held h
+         join sync.live_item v on v.entity_id = h.view_id
+        order by h.holds desc, h.view_id
+        limit $2";
+
+/// How many saved views one ticket write reads at once ([`SAVED_VIEWS`]).
+/// Each read opens a connection of its own and waits on its source's lock
+/// beside the others, and a project on a large Jira sits on dozens of boards
+/// and filters; the ones past it are brought by the run that follows the
+/// write. Eight, as the bounded schedule's scopes (`look_again::AT_ONCE`).
+const SAVED_VIEWS_AT_MOST: i64 = 8;
+
 /// What one effect's read answered: what the *say so* rule (ADR-0064 rule 3,
 /// #2596) names for an effect knobas could not read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,24 +157,39 @@ impl EffectAnswer {
     }
 }
 
-/// The items `effect` names for the write against `target`, from the mirror:
-/// also what [`super::look_again`] finds a moved branch's repository by.
-pub(crate) async fn resolve(
+/// The live declared parents of `entity` ([`DECLARED_PARENT`]): what
+/// [`Effect::Parent`] names, and what [`super::look_again`] finds a moved
+/// branch's repository by.
+pub(crate) async fn parents(pool: &sqlx::PgPool, entity: &str) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(DECLARED_PARENT)
+        .bind(entity)
+        .fetch_all(pool)
+        .await
+}
+
+/// The items `effect` names for the write against `target`, from the mirror.
+/// The saved views are the ones of `read_back`, the item the write made or
+/// touched: a ticket filed names its project as its target, which the mirror
+/// does not hold, and the new ticket as what is read back.
+async fn resolve(
     pool: &sqlx::PgPool,
     effect: Effect,
     target: &str,
+    read_back: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     match effect {
-        Effect::Parent => {
-            sqlx::query_scalar(DECLARED_PARENT)
-                .bind(target)
-                .fetch_all(pool)
-                .await
-        }
+        Effect::Parent => parents(pool, target).await,
         Effect::LinkedTickets => {
             sqlx::query_scalar(LINKED_TICKETS)
                 .bind(target)
                 .bind(TICKET_KIND)
+                .fetch_all(pool)
+                .await
+        }
+        Effect::SavedViews => {
+            sqlx::query_scalar(SAVED_VIEWS)
+                .bind(read_back)
+                .bind(SAVED_VIEWS_AT_MOST)
                 .fetch_all(pool)
                 .await
         }
@@ -154,10 +209,12 @@ async fn named(
         return Vec::new();
     }
     let deps = scheduler.deps();
-    // The declarations `sync.item_parent` is kept from are the registry's:
-    // the same call every search makes before it reads (#627). One read when
-    // they are stored already.
-    if effects.contains(&Effect::Parent)
+    // The declarations `sync.item_parent` and `sync.item_project` are kept
+    // from are the registry's: the same call every search makes before it
+    // reads (#627). One read when they are stored already.
+    if effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Parent | Effect::SavedViews))
         && let Err(error) =
             knobas_search::Searcher::declaring(deps.pool.clone(), deps.registry.descriptors()).await
     {
@@ -166,7 +223,7 @@ async fn named(
     let mut seen = std::collections::HashSet::from([read_back.to_owned()]);
     let mut named = Vec::new();
     for &effect in effects {
-        match resolve(&deps.pool, effect, &write.entity_id).await {
+        match resolve(&deps.pool, effect, &write.entity_id, read_back).await {
             Ok(entities) => named.extend(
                 entities
                     .into_iter()
@@ -237,4 +294,108 @@ pub(crate) async fn read(
         }
     }))
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A ticket write reads at most [`SAVED_VIEWS_AT_MOST`] views, the
+    /// ones holding the ticket first**: on a project that sits on more boards
+    /// than that, the board holding the ticket itself is read even though its
+    /// id sorts last, a board over another project is not, and neither is a
+    /// view no longer live.
+    #[tokio::test]
+    async fn a_ticket_write_reads_a_bounded_set_of_views_its_own_first() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        let source = "effects_views";
+        let id = |key: &str| format!("{source}:{key}");
+        sqlx::query(
+            "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+             values ($1, 'effects_views_kind', $1, 'http://localhost', 'pat')
+             on conflict (id) do nothing",
+        )
+        .bind(source)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let tickets = [("PAY-1", "PAY"), ("PAY-2", "PAY"), ("OPS-1", "OPS")];
+        // Ten boards over PAY that hold PAY-2, one that holds PAY-1 and sorts
+        // last, one over OPS, and one holding PAY-1 that is gone.
+        let mut views: Vec<(String, &str)> = (0..10)
+            .map(|n| (format!("board-{n:02}"), "PAY-2"))
+            .collect();
+        views.extend([
+            ("board-99".to_owned(), "PAY-1"),
+            ("board-50".to_owned(), "OPS-1"),
+            ("board-77".to_owned(), "PAY-1"),
+        ]);
+        for (key, kind) in tickets
+            .iter()
+            .map(|(key, _)| (*key, "ticket"))
+            .chain(views.iter().map(|(key, _)| (key.as_str(), "view")))
+        {
+            sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $1)")
+                .bind(id(key))
+                .bind(kind)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "insert into sync.item (entity_id, source_id, kind, payload)
+                 values ($1, $2, $3, '{}')",
+            )
+            .bind(id(key))
+            .bind(source)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        for (key, project) in tickets {
+            sqlx::query(
+                "insert into sync.item_project (entity_id, adapter_kind, source_id, key)
+                 values ($1, 'effects_views_kind', $2, $3)",
+            )
+            .bind(id(key))
+            .bind(source)
+            .bind(project)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        for (key, holds) in &views {
+            sqlx::query(
+                "insert into sync.saved_view (entity_id, source_id, ref_kind, ref_id, name)
+                 values ($1, $2, 'board', $1, $1)",
+            )
+            .bind(id(key))
+            .bind(source)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "insert into sync.saved_view_member (view_id, entity_id, rank) values ($1, $2, 1)",
+            )
+            .bind(id(key))
+            .bind(id(holds))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+            .bind(id("board-77"))
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ticket = id("PAY-1");
+        let read = resolve(&pool, Effect::SavedViews, &ticket, &ticket)
+            .await
+            .unwrap();
+        let mut expected = vec![id("board-99")];
+        expected.extend((0..7).map(|n| id(&format!("board-{n:02}"))));
+        assert_eq!(read, expected);
+    }
 }
