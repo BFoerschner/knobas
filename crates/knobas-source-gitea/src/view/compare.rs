@@ -72,20 +72,23 @@ pub(super) async fn read(
             .client
             .compare_commits::<Listing>(owner, repo, base, head),
     );
-    let range = match listing.ok().and_then(|listing| {
-        meeting(&listing, base, head).map(|(meets, tip)| (listing, meets, tip))
-    }) {
-        Some((listing, meets, tip)) => source
-            .client
-            .latest_of(owner, repo, &meets)
-            .await
-            .map(|merge_base| DiffRange {
-                repository: entity.to_owned(),
-                base: merge_base,
-                head: tip,
-                commits: carried(&source.id, owner, repo, &listing),
-                reviewed: None,
-            }),
+    let range = match listing
+        .ok()
+        .and_then(|listing| meeting(&listing, base, head).map(|(meets, tip)| (listing, meets, tip)))
+    {
+        Some((listing, meets, tip)) => {
+            source
+                .client
+                .latest_of(owner, repo, &meets)
+                .await
+                .map(|merge_base| DiffRange {
+                    repository: entity.to_owned(),
+                    base: merge_base,
+                    head: tip,
+                    commits: carried(&source.id, owner, repo, &listing),
+                    reviewed: None,
+                })
+        }
         None => None,
     };
     let text = match text {

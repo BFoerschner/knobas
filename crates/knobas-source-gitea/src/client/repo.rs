@@ -328,7 +328,12 @@ impl GiteaClient {
     /// two (where a branch was cut, and the base commit it merged back in).
     /// `None` when none is (a criss-cross merge has no single merge base),
     /// when there are more than [`MEETS_ASKED`], or when a compare fails.
-    pub(crate) async fn latest_of(&self, owner: &str, repo: &str, commits: &[String]) -> Option<String> {
+    pub(crate) async fn latest_of(
+        &self,
+        owner: &str,
+        repo: &str,
+        commits: &[String],
+    ) -> Option<String> {
         #[derive(serde::Deserialize)]
         struct Ahead {
             total_commits: Option<u64>,
