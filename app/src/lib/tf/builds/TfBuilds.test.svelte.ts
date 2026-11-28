@@ -1064,7 +1064,7 @@ test("a repository's folder turns the rail to By repository and lists the pipeli
 });
 
 test("a folder reached by its address is revealed in the rail: the folds above it opened, its pill drawn, the rows shown (#2572)", async () => {
-  const nested: PipelineRow[] = [
+  const nested: RailPipeline[] = [
     { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
     { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
     { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
@@ -1081,7 +1081,7 @@ test("a folder reached by its address is revealed in the rail: the folds above i
 });
 
 test("a folder reached again, from All pipelines after a press in the rail, is revealed again (#2572)", async () => {
-  const nested: PipelineRow[] = [
+  const nested: RailPipeline[] = [
     { ...pipeline("a", "Api", [run("teamcity:build:1", "ok")]), path: ["Core", "Payments", "V1"] },
     { ...pipeline("b", "Worker", [run("teamcity:build:2", "ok")]), path: ["Core", "Payments", "V2"] },
     { ...pipeline("c", "Edge", [run("teamcity:build:3", "ok")]), path: ["Core", "Edge"] },
