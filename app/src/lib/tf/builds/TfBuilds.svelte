@@ -701,7 +701,8 @@
    * A folder reached by its address, a run row's folders (#2572) or a typed one, is revealed in the rail: its fold and
    * those above it opened, drawn if the window left it out, and scrolled into view. The rows are held unseen meanwhile,
    * as `railUnseen` holds a run's step, so nothing drawn moves. A fold pressed in the rail is in view already
-   * (`foldPicked`). One reveal a folder: what the reader folds after it stays folded.
+   * (`foldPicked`, spent by the step it names). One reveal each time a folder is reached: what the reader folds while
+   * there stays folded, and reaching it again (from *All pipelines*, or another folder) reveals it again.
    */
   let foldPicked: string | null = null;
   let foldUnseen = $state(false);
@@ -711,14 +712,16 @@
   $effect.pre(() => {
     const path = folderPath;
     const hash = path === null ? null : runScopeHash({ kind: "folder", path });
-    if (hash === null || hash === foldShown) return;
-    if (hash === untrack(() => foldPicked)) {
+    if (hash === foldShown) return;
+    if (hash === null || hash === untrack(() => foldPicked)) {
       foldShown = hash;
+      foldPicked = null;
       return;
     }
     const chain = foldChain(trees, path!);
     if (chain === null) return; // not in the tree yet (still read), or narrowed out of it: the rail stays where it is
     foldShown = hash;
+    foldPicked = null;
     foldUnseen = true;
     for (const f of chain) remembered.set(f.key, true);
     foldScroll();
