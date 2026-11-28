@@ -562,8 +562,8 @@
     restored = true;
     // Only at the scope and filter it was kept at: elsewhere its scroll and its run mean nothing.
     if (back?.basis !== basis) return;
-    const at = back?.scroll ?? 0;
-    const was = back?.opened ?? null;
+    const at = back.scroll;
+    const was = back.opened;
     const scroller = scrollerOf();
     if (scroller !== null) scroller.scrollTop = scrolledTo = at;
     let tries = 0;
