@@ -32,6 +32,12 @@ const MAIN_TIP: &str = "1111111111111111111111111111111111111111";
 /// Where the feature branch was cut from main: the merge base, an ancestor of
 /// `MAIN_TIP` too.
 const FORK: &str = "2222222222222222222222222222222222222222";
+/// The commit of main's that the feature branch merged back in (#2608): an
+/// ancestor of `MAIN_TIP`, with `FORK` among its own ancestors, so the merge
+/// base of a branch that merged it.
+const MERGED: &str = "3333333333333333333333333333333333333333";
+/// The feature branch's merge of `MERGED`, between `FIRST` and `TIP`.
+const MERGE: &str = "4444444444444444444444444444444444444444";
 
 /// The compare's diff: two files, one added.
 const DIFF: &str = "diff --git a/src/retry.rs b/src/retry.rs
@@ -113,6 +119,10 @@ struct Served {
     /// Forgejo's compare JSON lists the branch's commits with their parents,
     /// as Forgejo 17.0.0 answers it, so the range meets main at `FORK`.
     forgejo_parents: bool,
+    /// As `forgejo_parents`, on a branch that merged main back in (#2608):
+    /// `FIRST` on `FORK`, then `MERGE` of `FIRST` and `MERGED`, then `TIP`,
+    /// so the range meets main at two commits.
+    forgejo_merged_back: bool,
 }
 
 impl Default for Served {
@@ -136,6 +146,7 @@ impl Default for Served {
             forgejo: None,
             forgejo_nothing_ahead: false,
             forgejo_parents: false,
+            forgejo_merged_back: false,
         }
     }
 }
@@ -221,6 +232,14 @@ async fn gitea(served: Served) -> MockServer {
         let mut first = listed(FIRST, "PAY-231: retry", "2026-08-21T17:30:00Z", &[]);
         first["parents"] = json!([{ "sha": FORK }]);
         json!({"total_commits": 2, "commits": [tip, first], "files": []})
+    } else if served.forgejo_merged_back {
+        let mut tip = listed(TIP, "PAY-231: jitter", "2026-08-22T11:42:00Z", &[]);
+        tip["parents"] = json!([{ "sha": MERGE }]);
+        let mut merge = listed(MERGE, "Merge main", "2026-08-22T09:00:00Z", &[]);
+        merge["parents"] = json!([{ "sha": FIRST }, { "sha": MERGED }]);
+        let mut first = listed(FIRST, "PAY-231: retry", "2026-08-21T17:30:00Z", &[]);
+        first["parents"] = json!([{ "sha": FORK }]);
+        json!({"total_commits": 3, "commits": [tip, merge, first], "files": []})
     } else {
         json!({"total_commits": 2, "commits": [], "files": []})
     }
@@ -1162,6 +1181,87 @@ index 5786b13..0000000
         .and(path(format!(
             "/tidewater/payout-service/compare/{FORK}...{TIP}.diff"
         )))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .mount(&server)
+        .await;
+    let view = source(&server)
+        .view(FEATURE, Some("diff"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["src/retry.rs", "CHANGELOG.md"], "the branch's own");
+}
+
+/// A file under `path` that `diff` adds, as `git diff` prints it.
+fn added(path: &str) -> String {
+    format!(
+        "diff --git a/{path} b/{path}
+new file mode 100644
+index 0000000..5786b13
+--- /dev/null
++++ b/{path}
+@@ -0,0 +1 @@
++x
+"
+    )
+}
+
+/// A branch that merged main back in (#2608) meets main's history at two
+/// commits: where it was cut (`FORK`) and the commit it merged (`MERGED`).
+/// The merge base is the one the other is an ancestor of, which a compare
+/// between the two tells (`total_commits` 0: nothing the other lacks). The
+/// diff is read from there: not from main's tip (every file main gained since
+/// drawn as deleted), and not from the fork (main's files the merge brought
+/// in drawn as the branch's).
+#[tokio::test]
+async fn a_forgejo_branch_that_merged_main_back_diffs_from_the_merged_commit() {
+    let server = gitea(Served {
+        forgejo: Some(true),
+        forgejo_merged_back: true,
+        ..Served::default()
+    })
+    .await;
+    let token = format!("token {TOKEN}");
+    let ancestry = [(MERGED, FORK, 0, vec![]), (FORK, MERGED, 1, vec![listed(MERGED, "PAY-228", "2026-08-21T16:00:00Z", &[])])];
+    for (from, to, total, commits) in ancestry {
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO}/compare/{from}...{to}")))
+            .and(header("Authorization", token.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({ "total_commits": total, "commits": commits, "files": [] }),
+            ))
+            .mount(&server)
+            .await;
+    }
+    let deleted = "diff --git a/schemas/partner-order-2.xsd b/schemas/partner-order-2.xsd
+deleted file mode 100644
+index 5786b13..0000000
+--- a/schemas/partner-order-2.xsd
++++ /dev/null
+@@ -1 +0,0 @@
+-<xs:schema/>
+";
+    let web = |base: &str, head: &str| {
+        Mock::given(method("GET")).and(path(format!(
+            "/tidewater/payout-service/compare/{base}...{head}.diff"
+        )))
+    };
+    web("main", FEATURE_WIRE)
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!("{DIFF}{deleted}")))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    web(FORK, TIP)
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(format!("{DIFF}{}", added("src/merged.rs"))),
+        )
+        .mount(&server)
+        .await;
+    web(MERGED, TIP)
         .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
         .mount(&server)
         .await;

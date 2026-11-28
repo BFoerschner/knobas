@@ -192,6 +192,21 @@ struct Parent {
 /// otherwise a range that meets that history at one commit only meets it at
 /// its merge base. A branch name settles only that second way.
 pub(crate) fn between(listing: &Listing, base: &str, head: &str) -> Option<(String, String)> {
+    let (meets, tip) = meeting(listing, base, head)?;
+    match meets.as_slice() {
+        [merge_base] => Some((merge_base.clone(), tip)),
+        _ => None,
+    }
+}
+
+/// Where the range `base...head` meets `base`'s history, from the compare's
+/// `listing`, and the head's whole sha: the merge base alone where
+/// [`between`] settles it, otherwise every parent outside the listing, in the
+/// order the listing names them. Two or more is a branch that merged its base
+/// back in (#2608): the merge base is the one every other is an ancestor of,
+/// which the listing cannot say. `None` where it does not settle the head:
+/// no commits, a listing cut short, or a tip that is not `head`.
+pub(crate) fn meeting(listing: &Listing, base: &str, head: &str) -> Option<(Vec<String>, String)> {
     let commits = &listing.commits;
     if commits.is_empty() || listing.total_commits.is_some_and(|t| t != commits.len()) {
         return None;
@@ -229,12 +244,16 @@ pub(crate) fn between(listing: &Listing, base: &str, head: &str) -> Option<(Stri
                 .map(|p| p.sha.as_str())
         })
     };
-    let merge_base = match asked {
-        Some(asked) if outside.iter().any(|o| o.eq_ignore_ascii_case(asked)) => asked,
-        _ if outside.len() == 1 => outside[0],
-        _ => return None,
+    let meets = match asked {
+        Some(asked) if outside.iter().any(|o| o.eq_ignore_ascii_case(asked)) => vec![asked],
+        _ => outside,
     };
-    super::is_full_sha(merge_base).then(|| (merge_base.to_owned(), tip.record.sha.clone()))
+    (!meets.is_empty() && meets.iter().all(|m| super::is_full_sha(m))).then(|| {
+        (
+            meets.into_iter().map(str::to_owned).collect(),
+            tip.record.sha.clone(),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -292,6 +311,17 @@ mod tests {
     fn branch_names_settle_where_the_range_meets_the_base_once() {
         let l = listing(&[('c', &['b']), ('b', &['0'])]);
         assert_eq!(between(&l, "main", "feature"), Some((sha('0'), sha('c'))));
+    }
+
+    #[test]
+    fn a_branch_that_merged_its_base_back_meets_it_where_it_was_cut_and_where_it_merged() {
+        // c <- m <- a: a cut from main at 0, m merges main's 5 back in.
+        let l = listing(&[('c', &['m']), ('m', &['a', '5']), ('a', &['0'])]);
+        assert_eq!(between(&l, "main", "feature"), None);
+        assert_eq!(
+            meeting(&l, "main", "feature"),
+            Some((vec![sha('5'), sha('0')], sha('c')))
+        );
     }
 
     #[test]

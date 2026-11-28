@@ -7,6 +7,11 @@ use knobas_source::SourceError;
 
 use super::{API_ROOT, GiteaClient, page_params, segment};
 
+/// The most places a range may meet its base's history for the merge base to
+/// be asked among them, at up to `n × (n − 1)` compares (#2608). A branch
+/// that merged its base back in meets it at two.
+const MEETS_ASKED: usize = 3;
+
 /// The most bytes of one repository's archive spooled: past it the read stops.
 pub(crate) const ARCHIVE_STOP: u64 = 4 << 30;
 
@@ -262,9 +267,16 @@ impl GiteaClient {
         // compare's commits settle the merge base, the diff is read from it
         // to the head's tip, which is `git diff base...head`; otherwise as
         // asked.
-        let settled = serde_json::from_value::<crate::view::compare::Listing>(compare)
+        let meeting = serde_json::from_value::<crate::view::compare::Listing>(compare)
             .ok()
-            .and_then(|listing| crate::view::compare::between(&listing, base, head));
+            .and_then(|listing| crate::view::compare::meeting(&listing, base, head));
+        let settled = match meeting {
+            Some((meets, tip)) => self
+                .latest_of(owner, repo, &meets)
+                .await
+                .map(|merge_base| (merge_base, tip)),
+            None => None,
+        };
         let (from, to) = settled
             .as_ref()
             .map_or((base, head), |(from, to)| (from.as_str(), to.as_str()));
@@ -306,6 +318,39 @@ impl GiteaClient {
             )),
             Err(error) => Err(error),
         }
+    }
+
+    /// The one of `commits` every other is an ancestor of: where a range
+    /// meets its base's history, the merge base (#2608). One is that one
+    /// with no read. Otherwise a compare `{a}...{b}` with nothing listed
+    /// says `b` is an ancestor of `a`, so one or two reads settle the usual
+    /// two (where a branch was cut, and the base commit it merged back in).
+    /// `None` when none is (a criss-cross merge has no single merge base),
+    /// when there are more than [`MEETS_ASKED`], or when a compare fails.
+    async fn latest_of(&self, owner: &str, repo: &str, commits: &[String]) -> Option<String> {
+        #[derive(serde::Deserialize)]
+        struct Ahead {
+            total_commits: Option<u64>,
+        }
+        if let [only] = commits {
+            return Some(only.clone());
+        }
+        if commits.len() > MEETS_ASKED {
+            return None;
+        }
+        'candidates: for latest in commits {
+            for other in commits.iter().filter(|c| *c != latest) {
+                let ahead = self
+                    .compare_commits::<Ahead>(owner, repo, latest, other)
+                    .await
+                    .ok()?;
+                if ahead.total_commits != Some(0) {
+                    continue 'candidates;
+                }
+            }
+            return Some(latest.clone());
+        }
+        None
     }
 
     /// How many commits `sha` has that `not` does not, by Gitea's own
