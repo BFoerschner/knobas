@@ -931,7 +931,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         ? [
             { scope: "mock:tidewater/payout-service", code: true, builds: true, items: ["mock:payout-service#142"] },
             { scope: "mock:PAY-240", code: false, builds: false, items: ["mock:PAY-240", "mock:PAY-241"] },
-            { scope: "confluence:edi-formats", code: false, builds: false, items: ["confluence:edi-formats"] },
+            { scope: "confluence:sepa", code: false, builds: false, items: ["confluence:sepa"] },
           ]
         : [],
     // *By repository*: a fixture commit's id names its repository (`ranOn`), as the mirror's stored parent does.
