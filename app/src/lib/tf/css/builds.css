@@ -61,8 +61,11 @@
 .tf-runs .tf-run-acts { width: 20px; padding-left: 0; text-align: right; }
 .tf-durbar { vertical-align: middle; margin-right: 6px; }
 .tf-durbar rect { fill: var(--ink-2); opacity: .35; }
-.tf-progress { width: 70px; height: 4px; vertical-align: middle; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
-.tf-progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
+/* A run in flight (#2574): the track is its pipeline's usual time, on the scale its ended runs' bars stand on, and the
+   fill is how long it has run, in the info tone, past the track where it runs long. It moves a pixel at a time with the
+   clock, so it has no transition for reduced motion to take away. Ended, the fill is the plain bar at the same width. */
+.tf-durbar .tf-durbar-usual { fill: var(--info); opacity: .22; }
+.tf-durbar .tf-durbar-fill { fill: var(--info); opacity: 1; }
 .tf-chip.tf-jobchip-sm { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); }
 .tf-older { padding: 12px 0; display: flex; gap: 8px; align-items: center; }
 .tf-older[hidden] { display: none; }
@@ -308,10 +311,10 @@
 @media (max-width: 1240px) { .tf-bv { grid-template-columns: var(--side-builds, 240px) minmax(0, 1fr); } }
 /* The run table sheds by its own width, not the window's: the duration drops its bar, then a column goes at a time. */
 /* The bar goes first, alone: that is the room a job's chip needs beside the longest branch. Trigger stays 170 px until 1000 (F-346, F-357).
-   A running run's progress bar goes with it: 70 px of bar and the word *running* ran over the start time in 70 px (builds at 6x, 2026-11-15). */
+   A running run's bar is the same bar and goes with it, leaving its clock (#2574). */
 @container (max-width: 1060px) {
   .tf-runs .tf-run-dur { width: 70px; }
-  .tf-durbar, .tf-runs .tf-run-dur .tf-progress { display: none; }
+  .tf-durbar { display: none; }
 }
 @container (max-width: 1000px) {
   .tf-runs .tf-run-no { width: 130px; }
@@ -319,7 +322,7 @@
   .tf-runs .tf-run-tests { width: 136px; }
   .tf-runs .tf-run-dur { width: 70px; }
   .tf-runs .tf-run-at { width: 170px; }
-  .tf-durbar, .tf-runs .tf-run-dur .tf-progress { display: none; }
+  .tf-durbar { display: none; }
 }
 /* Who started a run goes first: the branch is what you scan by, and keeps 190 px or more. */
 @container (max-width: 860px) { .tf-runs :is(col, td).tf-run-trig { display: none; } }
@@ -491,7 +494,7 @@
 @container (max-width: 1299px) {
   .tf-runs.tf-recent .tf-run-br { width: 180px; }
   .tf-runs.tf-recent .tf-run-dur { width: 78px; }
-  .tf-runs.tf-recent :is(.tf-durbar, .tf-run-dur .tf-progress) { display: none; }
+  .tf-runs.tf-recent .tf-durbar { display: none; }
 }
 @container (max-width: 1179px) { .tf-runs.tf-recent :is(col, td).tf-run-tests { display: none; } }
 @container (max-width: 999px) {

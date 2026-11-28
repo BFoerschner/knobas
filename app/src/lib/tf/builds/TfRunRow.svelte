@@ -7,8 +7,10 @@
   last word (`nameParts`); never the number or the chip. The folders are a link to that folder.
 
   The rest is the pipeline's row as it was: the bubble's dot hung in the first cell's gutter (#2572), the branch with the
-  job's chip, who or what started it, the tests, the duration bar or *running*, the start time, and *Mark as read*, *Log*
-  and *Run again…* on hover. A click anywhere else on the row opens the run; the number stays the keyboard's link.
+  job's chip, who or what started it, the tests, the duration, the start time, and *Mark as read* (a failed or running
+  run), *Log* and *Run again…* on hover. A run in flight counts up in the duration's cell (#2574): the bar of its
+  pipeline's usual time filling in the info tone, then its clock, each second; ended, the same bar and the words say
+  what it took. The cell is a fixed width and its words start at one x, so queued, running and ended move nothing. A click anywhere else on the row opens the run; the number stays the keyboard's link.
 -->
 <script lang="ts" module>
   import type { Bubble as DotBubble } from "./builds";
@@ -29,13 +31,14 @@
   import TfStateChip from "../TfStateChip.svelte";
   import Marked from "../filter/Marked.svelte";
   import { stateWord } from "../state-word";
-  import { secondsLabel, timeLabel } from "../../time/format";
+  import { secondsLabel, tickingLabel, timeLabel } from "../../time/format";
   import { refusedAttrs } from "../../shell/refused-writes";
   import type { RunRow } from "../../ipc/entity";
   import { failedRun, runTone, testsWords, type Bubble } from "./builds";
   import { nameParts } from "./recent";
   import { DURBAR_WIDTH, chipTone, durbarWidth, isStartedHere, triggerLabel, type RunMarks } from "./pipeline";
   import { runsRead } from "./runs-read.svelte";
+  import { elapsedSeconds, runClock } from "./run-clock.svelte";
 
   let {
     run,
@@ -46,6 +49,7 @@
     job = null,
     jobBranches = [],
     max,
+    usual = null,
     arrived = false,
     cannotRun = null,
     inQueue = false,
@@ -67,6 +71,11 @@
     jobBranches?: readonly string[];
     /** The longest duration its bar is measured against. */
     max: number;
+    /**
+     * Its pipeline's usual time (#2574): the median of the finished runs the list holds (`historyFacts`' *Usual
+     * duration*), drawn as the track a running run's bar fills along, on the scale of `max`. `null` while unknown.
+     */
+    usual?: number | null;
     /** A run a read brought to the top after the list drew: lit once. */
     arrived?: boolean;
     /** Why *Run again…* cannot run, or `null`. */
@@ -89,6 +98,8 @@
   const number = $derived(run.number !== null ? `#${run.number}` : "queued");
   const dot = $derived(here ? null : runsRead.bubble(run));
   const parts = $derived(pipeline === null ? null : nameParts(pipeline.name));
+  /** How long a run in flight has run, read again each second while it runs; `null` for any other. */
+  const elapsed = $derived(tone === "run" && !here && run.started !== null ? elapsedSeconds(run.started, runClock.now) : null);
 </script>
 
 <!-- What a row's dot says (#2572): the bubble that counts its run, in its colour, as words for who can't see it. -->
@@ -140,8 +151,16 @@
       <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
         ><rect width={durbarWidth(run.duration_seconds, max)} height="4" rx="2" /></svg
       >{secondsLabel(run.duration_seconds)}
-    {:else if tone === "run"}
-      <progress class="tf-progress" aria-label="Running"></progress> running
+    {:else if elapsed !== null}
+      <!-- The bar's room is held with nothing known (no finished run held), so the clock stands where it will. -->
+      <svg class="tf-durbar tf-durbar-live" width={DURBAR_WIDTH} height="4" aria-hidden="true"
+        >{#if usual !== null && max > 0}<rect class="tf-durbar-usual" width={Math.min(DURBAR_WIDTH, durbarWidth(usual, max))} height="4" rx="2" />{/if}{#if max > 0}<rect
+            class="tf-durbar-fill"
+            width={Math.min(DURBAR_WIDTH, durbarWidth(elapsed, max))}
+            height="4"
+            rx="2"
+          />{/if}</svg
+      ><span class="tf-info tf-run-clock">{tickingLabel(elapsed)}</span>
     {:else if here}
       <!-- Why it waits (F-352): in the queue, or sent and not yet read back. -->
       <span class="tf-dim">{inQueue ? "in the write queue" : "until the next sync"}</span>

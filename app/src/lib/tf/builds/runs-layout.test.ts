@@ -58,10 +58,11 @@ test("each run row is a fixed table of its own in a block body, its widths the c
   expect(css).not.toMatch(/\.tf-runtbl > tbody > tr \{[^}]*contain:/);
 });
 
-test("a running run's progress bar goes where the duration bar goes, so the word fits its 70 px", () => {
+test("a running run's bar is the duration bar and goes where it goes, so its clock fits the 70 px (#2574)", () => {
   const css = flat(builds);
   for (const width of [1060, 1000]) {
-    const rule = new RegExp(`@container \\(max-width: ${width}px\\) \\{[^@]*\\.tf-durbar, \\.tf-runs \\.tf-run-dur \\.tf-progress \\{ display: none; \\}`);
+    const rule = new RegExp(`@container \\(max-width: ${width}px\\) \\{[^@]*\\.tf-durbar \\{ display: none; \\}`);
     expect(css).toMatch(rule);
   }
+  expect(css).not.toContain("tf-progress");
 });

@@ -883,6 +883,7 @@
               {job}
               {jobBranches}
               {max}
+              usual={facts.usual}
               arrived={arrived.has(run.entity_id)}
               {cannotRun}
               inQueue={inQueue(run)}

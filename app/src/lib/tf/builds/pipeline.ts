@@ -252,17 +252,26 @@ export interface HistoryFacts {
   lastPassing: RunRow | null;
 }
 
-/** The facts over every run the page holds. */
-export function historyFacts(runs: readonly RunRow[]): HistoryFacts {
-  const done = runs.filter(isFinished);
-  const durations = done
+/**
+ * A pipeline's usual time: the median duration of its finished runs among `runs`, or `null` with none. The pipeline
+ * page's *Usual duration*, and the track a running run's bar fills along (#2574).
+ */
+export function usualSeconds(runs: readonly RunRow[]): number | null {
+  const durations = runs
+    .filter(isFinished)
     .map((run) => run.duration_seconds)
     .filter((seconds): seconds is number => seconds !== null)
     .sort((a, b) => a - b);
+  return durations.length > 0 ? durations[Math.floor(durations.length / 2)]! : null;
+}
+
+/** The facts over every run the page holds. */
+export function historyFacts(runs: readonly RunRow[]): HistoryFacts {
+  const done = runs.filter(isFinished);
   return {
     passed: done.filter(passed).length,
     finished: done.length,
-    usual: durations.length > 0 ? durations[Math.floor(durations.length / 2)]! : null,
+    usual: usualSeconds(runs),
     lastPassing: runs.find(passed) ?? null,
   };
 }

@@ -527,7 +527,8 @@ test("a sync of the pipeline's source finishing reads the runs again: a running 
   const drawn = draw();
   drawn.next = RUNNING;
   await settle();
-  expect(firstRow().textContent).toContain("running");
+  // Running, its duration's cell counts up (#2574).
+  expect(firstRow().querySelector(".tf-run-clock")).not.toBeNull();
   expect(drawn.reads).toBe(1);
 
   drawn.next = FINISHED;
@@ -540,7 +541,7 @@ test("a sync of the pipeline's source finishing reads the runs again: a running 
   expect(drawn.reads).toBe(2);
   expect(firstRow().textContent).toContain("#1188");
   expect(firstRow().textContent).toContain("5m");
-  expect(firstRow().textContent).not.toContain("running");
+  expect(firstRow().querySelector(".tf-run-clock")).toBeNull();
 });
 
 test("a sync of another source reads nothing", async () => {

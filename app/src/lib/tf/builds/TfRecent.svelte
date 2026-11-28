@@ -21,7 +21,7 @@
   - **Keys**: Up and Down step the runs, Enter opens one, `m` marks a failure read or unread.
 -->
 <script lang="ts" module>
-  import type { RecentCursor, RecentFilter, RecentPipeline, RecentRun, RecentRuns } from "../../ipc/entity";
+  import type { RecentCursor, RecentFilter, RecentPipeline, RecentRun, RecentRuns, RunRow } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import type { EchoListen } from "../queued.svelte";
 
@@ -85,7 +85,7 @@
   import TfRunRow from "./TfRunRow.svelte";
   import { heldOrder, inOrder } from "../filter/ranked.svelte";
   import { failedRun, runHash, unreadRun } from "./builds";
-  import { RESULTS, byDay } from "./pipeline";
+  import { RESULTS, byDay, usualSeconds } from "./pipeline";
   import { readJobBranches } from "./pipeline-ports";
   import { runsRead } from "./runs-read.svelte";
   import { InFlightReads, IN_FLIGHT_AFTER_MS, IN_FLIGHT_AGAIN_MS, runsInFlight } from "./runs-in-flight";
@@ -452,6 +452,16 @@
     }
     return most;
   });
+  /** Each pipeline's usual time over the runs held (`usualSeconds`): the track its running runs' bars fill along (#2574). */
+  const usual = $derived.by(() => {
+    const byPipeline = new Map<string, RunRow[]>();
+    for (const one of held ?? []) {
+      const runs = byPipeline.get(one.pipeline_id);
+      if (runs === undefined) byPipeline.set(one.pipeline_id, [one.run]);
+      else runs.push(one.run);
+    }
+    return new Map([...byPipeline].map(([id, runs]) => [id, usualSeconds(runs)]));
+  });
 
   const config = $derived<FilterConfig>({
     id: "builds-recent",
@@ -631,6 +641,7 @@
                 {job}
                 jobBranches={jobBranches ?? []}
                 max={longest.get(one.pipeline_id) ?? 0}
+                usual={usual.get(one.pipeline_id) ?? null}
                 arrived={arrived.has(run.entity_id)}
                 pipeline={rowPipeline(pipe, manySources, place)}
                 onopen={(event) => openRow(event, one)}

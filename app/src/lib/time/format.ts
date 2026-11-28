@@ -43,6 +43,17 @@ export function secondsLabel(seconds: number): string {
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * A running clock (#2574): {@link secondsLabel}'s words with the smaller unit always said in two figures (`4m 05s`,
+ * `1h 02m`), so in tabular figures it keeps its width as it ticks within a minute.
+ */
+export function tickingLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
+  return `${minutes}m ${pad(seconds % 60)}s`;
+}
 const dateOf = (at: Date) => `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 
 const clockOf = (at: Date) => `${pad(at.getHours())}:${pad(at.getMinutes())}`;

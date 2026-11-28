@@ -609,7 +609,7 @@ test("a new scope keeps the count's room while it reads, so the bar's controls h
 
 /** A run of `LINT` queued at `queued`, not started: the source gives it no number yet. */
 const queued = (queuedAt: string): RunRow =>
-  run(14, "ok", null, { entity_id: "tc:build:q14", number: null, state: { text: "queued", tone: "q" }, finished: null, duration_seconds: null, updated_at: queuedAt });
+  run(14, "ok", null, { entity_id: "tc:build:q14", number: null, state: { text: "queued", tone: null }, finished: null, duration_seconds: null, updated_at: queuedAt });
 
 test("a queued run that starts keeps its row and its place, with the pointer off the runs too; a new run then takes the top (#2574)", async () => {
   const waiting = queued(today(0, 35));
