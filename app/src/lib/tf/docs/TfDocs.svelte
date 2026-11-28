@@ -736,7 +736,9 @@
     // In this task the new page as the answer cache keeps it, else its frame (`frame`): the page before never stands
     // under the new address (Björn, 2026-11-25), and a page read before never shows a frame.
     untrack(() => {
-      if (page?.entity_id !== id) page = io.docsPageKept?.(id) ?? null;
+      if (page?.entity_id === id) return;
+      if (page?.readable) pageCreates.set(page.source_id, page.writes.includes("create_page"));
+      page = io.docsPageKept?.(id) ?? null;
     });
     // Another page, or none: the reads asked for this one are dropped.
     return () => {
@@ -749,6 +751,13 @@
    * The header's actions draw once, whole (`held-head.svelte.ts`, the nothing-moves pass): the view's *Sync now* drew
    * before the page's row was read, and *Refresh page* taking its place moved every action 23 px left.
    */
+  /**
+   * Whether each source's last page drawn offered *New page…* (#2619): a frame holds its room by that before the
+   * adapter list, because the page's own writes decide (they add the source's markup to the adapter's word), and a frame
+   * that guessed otherwise moved the title by a line when the read landed. Plain: only the page's change reads it.
+   */
+  const pageCreates = new Map<string, boolean>();
+
   const actsHeld = heldHead(
     () => target,
     () => detailRead,
@@ -2262,7 +2271,7 @@
               {#if p === null}
                 {@const source = f?.space?.source_id ?? null}
                 {#if job !== null && linkPorts}<button type="button" class="tf-btn">Link to <TfKey value={job} /></button>{/if}
-                {#if source !== null && makers?.has(source)}<button type="button" class="tf-btn">New page…</button>{/if}
+                {#if source !== null && (pageCreates.get(source) ?? makers?.has(source))}<button type="button" class="tf-btn">New page…</button>{/if}
                 <TfDocMore onlink={linkPorts ? () => {} : undefined} oncopy={() => {}} onexport={() => {}} sync={syncForMore} />
                 {#if f?.space}<button type="button" class="tf-btn tf-ghost"><span class="tf-cut">Open in {f.space.source_name}</span></button>{/if}
               {:else}

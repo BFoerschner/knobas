@@ -286,6 +286,45 @@ test("a page opened from another draws its frame before the next paint, never th
   expect(target.querySelector<HTMLElement>(".tf-rd-head .tf-acts")?.inert === true).toBe(false);
 });
 
+/** Whether the header's actions offer *New page…*, seen or held unseen in a frame. */
+const offersNewPage = () => actions().includes("New page…");
+
+test("a frame's actions take New page from the page before in its source, so the title keeps its width as the read lands (#2619)", async () => {
+  // The adapter list names no source that creates pages, and the page before offers it: the page is what the read answers.
+  let land: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn((id: string) => (id === "confluence:1" ? new Promise<DocPage>((resolve) => (land = resolve)) : Promise.resolve(RICH)));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage, pageMakers: vi.fn(async () => []) }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(offersNewPage()).toBe(true);
+
+  props.rest = ["confluence:1"];
+  await nextFrame();
+  expect(target.querySelector(".tf-rd-page")?.getAttribute("aria-busy")).toBe("true");
+  expect(offersNewPage(), "the frame holds New page's room").toBe(true);
+  land({ ...OTHER, writes: RICH.writes });
+  await settle();
+  expect(target.querySelector(".tf-rd-page")?.hasAttribute("aria-busy")).toBe(false);
+  expect(offersNewPage()).toBe(true);
+});
+
+test("a frame after a page whose source takes no New page holds none, whatever the adapter list says (#2619)", async () => {
+  let land: (page: DocPage) => void = () => {};
+  const docsPage = vi.fn((id: string) => (id === "confluence:1" ? new Promise<DocPage>((resolve) => (land = resolve)) : Promise.resolve(PAGE)));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage, pageMakers: vi.fn(async () => ["confluence"]) }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(offersNewPage()).toBe(false);
+
+  props.rest = ["confluence:1"];
+  await nextFrame();
+  expect(target.querySelector(".tf-rd-page")?.getAttribute("aria-busy")).toBe("true");
+  expect(offersNewPage()).toBe(false);
+  land(OTHER);
+  await settle();
+  expect(offersNewPage()).toBe(false);
+});
+
 test("a kept answer draws the next page in the press's own task: its frame is never drawn (Fable's ruling, 2026-11-25)", async () => {
   const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : PAGE));
   const docsPageKept = (id: string) => (id === "confluence:1" ? OTHER : undefined);
