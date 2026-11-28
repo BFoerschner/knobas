@@ -395,14 +395,20 @@
   // Only rows read for the filter now: a new filter's basis is here a turn before the effect that drops the last rows, and
   // placed then they were held under it, kept as "left" once its page landed, and drawn with no run behind them.
   const placed = $derived(held === null || heldFor !== basis ? { rows: [] as RecentRun[], waiting: 0, stale: false } : runHold.place(typed, holdBasis));
-  const heldBar = $derived({ waiting: placed.waiting, stale: placed.stale, show: () => runHold.release() });
+  // A run's place moves only when it starts (queued by when it was queued, then by when it started): that is no reason to
+  // offer *Sort again*, since the list holds its order (#2574). A run that left is.
+  const heldBar = $derived({ waiting: placed.waiting, stale: (placed.left ?? 0) > 0, show: () => runHold.release() });
 
+  /**
+   * The pointer off the runs (#2574, the mockup's *States*): a new run takes the top, lit once, and a run that left
+   * goes; a queued run that started keeps its row and its place, and only its chip, number and clock change.
+   */
   let pointerOn = $state(false);
   $effect(() => {
     if (!shown()) pointerOn = false;
   });
   $effect(() => {
-    if (!pointerOn && (placed.waiting > 0 || placed.stale)) untrack(() => runHold.release());
+    if (!pointerOn && (placed.waiting > 0 || (placed.left ?? 0) > 0)) untrack(() => runHold.settle());
   });
   let runsBox = $state<HTMLElement | null>(null);
   function showNew() {

@@ -154,3 +154,19 @@ test("restore puts a moved row back where it stood, with nothing else changed; a
   const fresh = hold.place(read, "y");
   expect(fresh.rows.map((r) => hold.tagOf(r))).toEqual(["todo", "todo", "doing"]);
 });
+
+test("settle: the waiting rows take their place where they sort and the rows that left go, while the drawn rows keep their order (#2574)", () => {
+  const hold = new HeldOrder<Row>((r) => r.id);
+  hold.place([row("a"), row("b"), row("c"), row("gone")], "x");
+  // b now sorts first (a queued run that started) and gone left: still drawn as they were, new waiting above.
+  const read = [row("new"), row("b"), row("a"), row("c")];
+  const before = hold.place(read, "x");
+  expect(ids(before.rows)).toEqual(["a", "b", "c", "gone"]);
+  expect(before).toMatchObject({ waiting: 1, left: 1 });
+  hold.settle();
+  const after = hold.place(read, "x");
+  expect(ids(after.rows)).toEqual(["new", "a", "b", "c"]);
+  expect(after).toMatchObject({ waiting: 0, left: 0 });
+  // Settled once: a later read keeps that order as any drawn order is kept.
+  expect(ids(hold.place([row("b"), row("new"), row("a"), row("c")], "x").rows)).toEqual(["new", "a", "b", "c"]);
+});

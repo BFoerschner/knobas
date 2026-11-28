@@ -554,13 +554,15 @@
   /** What the person chose, and the runs they started: a change sorts the list again. */
   const runBasis = $derived(JSON.stringify([id, filter.text, runOrder.settled(filter.text, chipped), filter.scope, filter.chips, filter.dropdowns, started.map((run) => run.entity_id)]));
   const heldRuns = $derived(all === null ? { rows: [] as RunRow[], waiting: 0, stale: false } : runHold.place(kept, runBasis));
-  const heldBar = $derived({ waiting: heldRuns.waiting, stale: heldRuns.stale, show: () => runHold.release() });
+  // A run's place moves only when it starts: no reason to offer *Sort again*, since the list holds its order (#2574).
+  const heldBar = $derived({ waiting: heldRuns.waiting, stale: (heldRuns.left ?? 0) > 0, show: () => runHold.release() });
 
   /**
    * Newest first, always (Björn on ux6: "how am i supposed to find the most recent run which is the most important
    * anyways?"). The hold above is only for the pointer: while it rests on the runs, a run that arrives waits behind
    * *Show N new runs* over the list's top, which takes no room; once the pointer is off the list, or the page is
-   * away, every run takes its place at once. So a first draw, a return and a sync all draw newest first.
+   * away, every new run takes its place at once. So a first draw, a return and a sync all draw newest first. A queued
+   * run that starts keeps its row and its place (#2574): only its chip, number and clock change.
    */
   let pointerOn = $state(false);
   const shown = pageVisible();
@@ -568,7 +570,7 @@
     if (!shown()) pointerOn = false;
   });
   $effect(() => {
-    if (!pointerOn && (heldRuns.waiting > 0 || heldRuns.stale)) untrack(() => runHold.release());
+    if (!pointerOn && (heldRuns.waiting > 0 || (heldRuns.left ?? 0) > 0)) untrack(() => runHold.settle());
   });
   let runsBox = $state<HTMLElement | null>(null);
   /** *Show N new runs*: they take the top, and the top comes into view. */

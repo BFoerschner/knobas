@@ -14,6 +14,8 @@
  *   stands where it stood.
  * - **The person's act sorts again**: a changed filter, scope or tab (the `basis`), or *Show N new* / *Sort again*
  *   ({@link HeldOrder.release}).
+ * - **Nobody pointing**: a list whose pointer is off it lets the waiting rows in where they sort, and the rows that left
+ *   go, while the drawn rows keep their order ({@link HeldOrder.settle}, #2574: a queued run that starts keeps its row).
  *
  * The order of first draw is what the page sorted then, so a page whose order needs a late read waits for that read
  * before it draws (Code waits for the open pull requests that make a repository yours).
@@ -26,6 +28,8 @@ export interface Placed<T> {
   waiting: number;
   /** Whether the read differs from what is drawn in order, or by a row that left: *Sort again* would move rows. */
   stale: boolean;
+  /** Rows that left the read and are still drawn ({@link HeldOrder.settle} takes them out). */
+  left?: number;
 }
 
 export class HeldOrder<T> {
@@ -41,6 +45,8 @@ export class HeldOrder<T> {
   #byTag: boolean;
   /** Rows the person's own press brings in (*Wake*): they take their place where they sort, at once. */
   #admitted = new Set<string>();
+  /** The next {@link HeldOrder.place} admits every waiting row and drops every row that left ({@link HeldOrder.settle}). */
+  #settling = false;
 
   /**
    * `key` names a row across reads. `tag`, where given, is the group a row draws under (Code's *Yours*, *Merged or
@@ -84,6 +90,12 @@ export class HeldOrder<T> {
     }
     const held = this.#held;
     const keys = fresh.map((row) => this.#key(row));
+    if (this.#settling) {
+      this.#settling = false;
+      for (const key of keys) if (!held.has(key)) this.#admitted.add(key);
+      const present = new Set(keys);
+      for (const key of [...held.keys()]) if (!present.has(key)) held.delete(key);
+    }
     let lastHeld = -1;
     /** By group, where `byTag`: the place in `fresh` of its last drawn row. */
     const lastOf = new Map<string, number>();
@@ -115,12 +127,14 @@ export class HeldOrder<T> {
         // Where it sorts is after every drawn row: it joins the end and moves nothing.
         held.set(key, { rank: this.#next++, row, tag: this.#tag(row) });
       } else if (this.#admitted.has(key)) {
-        // The person brought it: between the drawn rows it sorts between.
-        const before = keys.slice(0, at).reverse().find((other) => held.has(other));
-        const after = keys.slice(at + 1).find((other) => held.has(other));
-        const low = before === undefined ? -1 : held.get(before)!.rank;
-        const high = after === undefined ? this.#next : held.get(after)!.rank;
-        held.set(key, { rank: (low + high) / 2, row, tag: this.#tag(row) });
+        // The person brought it: between the drawn rows it sorts between. In a read whose drawn rows sort otherwise than
+        // they stand (a queued run that started), above every drawn row it sorts above.
+        const ranks = (part: readonly string[]) => part.filter((other) => held.has(other)).map((other) => held.get(other)!.rank);
+        const above = ranks(keys.slice(at + 1));
+        const high = above.length === 0 ? this.#next : Math.min(...above);
+        const below = ranks(keys.slice(0, at));
+        const low = below.length === 0 ? high - 1 : Math.max(...below);
+        held.set(key, { rank: low < high ? (low + high) / 2 : high - 0.5, row, tag: this.#tag(row) });
         this.#admitted.delete(key);
       } else {
         waiting += 1;
@@ -132,8 +146,8 @@ export class HeldOrder<T> {
       .filter(([key]) => this.#keepLeft || present.has(key))
       .sort(([, a], [, b]) => a.rank - b.rank)
       .map(([, place]) => place.row);
-    const left = this.#keepLeft && [...held.keys()].some((key) => !present.has(key));
-    return { rows, waiting, stale: reordered || left };
+    const left = this.#keepLeft ? [...held.keys()].filter((key) => !present.has(key)).length : 0;
+    return { rows, waiting, stale: reordered || left > 0, left };
   }
 
   /** A row the person's press brings into the list (*Wake*): when a read holds it, it stands where it sorts. */
@@ -171,6 +185,17 @@ export class HeldOrder<T> {
     if (place === undefined) return;
     place.tag = was.tag;
     place.rank = was.rank;
+    this.#released += 1;
+  }
+
+  /**
+   * Nobody points at the list (#2574): the rows waiting take their places where they sort (a new run above every drawn
+   * one takes the top), and the rows that left go. The drawn rows keep their order, so a row whose sort moved (a queued
+   * run that started) stays where it stood; only the person's act ({@link HeldOrder.release}, a new basis) sorts it.
+   */
+  settle(): void {
+    if (this.#held === null) return;
+    this.#settling = true;
     this.#released += 1;
   }
 

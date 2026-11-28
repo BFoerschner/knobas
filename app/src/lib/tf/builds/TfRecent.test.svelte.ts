@@ -604,3 +604,31 @@ test("a new scope keeps the count's room while it reads, so the bar's controls h
   expect(reads).toBe(2);
   expect(room(), "the folder's runs still read: the count says nothing, in the room it had").toBe(before);
 });
+
+// -- live rows (#2574) ---------------------------------------------------------
+
+/** A run of `LINT` queued at `queued`, not started: the source gives it no number yet. */
+const queued = (queuedAt: string): RunRow =>
+  run(14, "ok", null, { entity_id: "tc:build:q14", number: null, state: { text: "queued", tone: "q" }, finished: null, duration_seconds: null, updated_at: queuedAt });
+
+test("a queued run that starts keeps its row and its place, with the pointer off the runs too; a new run then takes the top (#2574)", async () => {
+  const waiting = queued(today(0, 35));
+  const drawn = draw({}, { first: { ...PAGE, runs: [PAGE.runs[0]!, at(LINT, waiting), ...PAGE.runs.slice(1)] } });
+  await settle();
+  const ids = () => rows().map((row) => row.dataset["run"]);
+  expect(ids()).toEqual(["tc:build:12", "tc:build:q14", "tc:build:11", "tc:build:10"]);
+  // It starts after #12 did, so the backend now sorts it first: the list holds its order, only its chip and number change.
+  const started = { ...waiting, number: "14", state: { text: "RUNNING", tone: null }, started: today(0, 45), updated_at: today(0, 45) } as RunRow;
+  drawn.next = { ...PAGE, runs: [at(LINT, started), ...PAGE.runs] };
+  drawn.revision(1);
+  await settle();
+  expect(ids()).toEqual(["tc:build:12", "tc:build:q14", "tc:build:11", "tc:build:10"]);
+  expect(rows()[1]!.querySelector(".tf-run-pno")?.textContent).toBe("#14");
+  // A new run, the pointer off the runs: it takes the top, lit once, and the started run stays where it stood.
+  drawn.next = { ...PAGE, runs: [at(DEPLOY, run(15, "ok", today(0, 50))), at(LINT, started), ...PAGE.runs] };
+  drawn.revision(2);
+  await settle();
+  expect(ids()).toEqual(["tc:build:15", "tc:build:12", "tc:build:q14", "tc:build:11", "tc:build:10"]);
+  expect(rows()[0]!.classList.contains("tf-run-new")).toBe(true);
+  expect(rows()[2]!.classList.contains("tf-run-new")).toBe(false);
+});
