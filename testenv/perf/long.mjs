@@ -18,7 +18,10 @@
 //
 // Each sample: main-thread time since the last (`Performance.getMetrics`), the longest task, DOM nodes, listeners, and a
 // hover sweep over the rows on screen at 1x and 4x CPU slowdown, from the mouse event to the end of the frame that draws
-// it. Every third sample collects garbage first and reads the heap. Fails (exit 1) when a line in budget.json's `long`
+// it. The nodes and listeners are what the page keeps after a collection, read outside the timed window, as soak.mjs's
+// growth is: read before one, they held what the last re-renders dropped, and rose and fell with the sample's place in
+// the collector's cycle (Monitors' listeners 636, 660, 764 and back, a "growth" of 104 that was none, #2574's landing).
+// Every third sample also reads the heap. Fails (exit 1) when a line in budget.json's `long`
 // is crossed: growth over the run, main-thread time a minute, a long task, or a hover's paint.
 import { readFileSync, writeFileSync } from "node:fs";
 import { attach, launch, sizeFrom, viewport, sleep } from "./cdp.mjs";
@@ -116,12 +119,13 @@ async function phase(hash, mins, name) {
       taskMsPerMin: Math.round(((m.TaskDuration - prev.TaskDuration) * 1000 * 60000) / (now - at)),
       longest: Math.round(Math.max(0, ...(await js(`window.__long.long.splice(0)`)))),
       ipcP95: Math.round(pct(ipc, 0.95)),
-      nodes: m.Nodes,
-      listeners: m.JSEventListeners,
     };
+    await c.send("HeapProfiler.collectGarbage");
+    const kept = await metrics();
+    row.nodes = kept.Nodes;
+    row.listeners = kept.JSEventListeners;
     if (n % 3 === 1) {
-      await c.send("HeapProfiler.collectGarbage");
-      row.heapMB = Math.round((await metrics()).JSHeapUsedSize / 1e5) / 10;
+      row.heapMB = Math.round(kept.JSHeapUsedSize / 1e5) / 10;
       row.hover1x = await hover(1);
       row.hover4x = await hover(4);
       await js(`window.__long.long.splice(0)`);
