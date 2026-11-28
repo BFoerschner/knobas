@@ -14,8 +14,7 @@
   import { push } from "../shell/toasts.svelte";
   import { pageRefresh } from "./page-refresh.svelte";
   import { pageVisible } from "./kept-pages.svelte";
-  import { itemLooked, startLooking } from "./builds/looking.svelte";
-  import { windowListen } from "../ipc/shared-listen";
+  import { itemLooked } from "./builds/looking.svelte";
 
   let {
     detail,
@@ -63,8 +62,7 @@
     looking?: boolean;
   } = $props();
 
-  // What knobas looks at again (#2595): started once, by the first page that asks.
-  if (untrack(() => looking)) startLooking(windowListen);
+  // What knobas looks at again (#2595), followed for the window from the app's start (`App.svelte`).
   const looked = $derived(looking && itemLooked(detail.row.entity_id));
   /** The words the toast names. */
   const named = $derived(name ?? (detail.row as { title?: string }).title);

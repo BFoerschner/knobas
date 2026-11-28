@@ -282,6 +282,8 @@ vi.mock("../ipc/entity", () => ({
  */
 vi.mock("../ipc/sources", () => ({
   listSources: () => deferred([]),
+  // What knobas looks at again (#2595), read once by the first item page that says *Looking for changes…* (#2615).
+  lookingAgain: () => deferred([]),
   syncNow: () => deferred(1),
   syncAll: () => deferred([1]),
   deleteSource: () => deferred(undefined),

@@ -4,9 +4,10 @@
  * says *Looking for new builds…* while its builds are looked for, and for an item's page, which says *Looking for
  * changes…* while the item is read by id (#2615).
  *
- * Started once, by the first page that asks ({@link startLooking}): it reads what is looked at now (`looking_again`),
- * so a page opened during a schedule says so, then follows `looking:again` until the window goes. An event heard
- * before that first read answers wins over it: the event is newer.
+ * Started once for the window, by the app at start (`App.svelte`) or by the first page that asks
+ * ({@link startLooking}): it reads what is looked at now (`looking_again`), so a page opened during a schedule says so,
+ * then follows `looking:again` until it is stopped. An event heard before that first read answers wins over it: the
+ * event is newer.
  */
 import { SvelteMap } from "svelte/reactivity";
 
@@ -38,21 +39,36 @@ export function itemLooked(entityId: string): boolean {
   return false;
 }
 
-/** Listen for `looking:again`, once, on `listen`; and read what is looked at now with `read`. */
-export function startLooking(listen: EchoListen, read: () => Promise<LookingAgain[]> = lookingAgain): void {
-  if (started) return;
+/**
+ * Listen for `looking:again`, once, on `listen`; and read what is looked at now with `read`. Answers what stops the
+ * listening, which the app calls when its window goes; a second start answers a stop that does nothing.
+ */
+export function startLooking(listen: EchoListen, read: () => Promise<LookingAgain[]> = lookingAgain): () => void {
+  if (started) return () => {};
   started = true;
   const heard = new Set<string>();
+  let stopped = false;
+  let off: (() => void) | null = null;
   void listen(EVENTS.lookingAgain, ({ payload }) => {
     const looking = payload as LookingAgain;
     heard.add(looking.scope);
     hear(looking);
-  }).catch(() => {});
-  void read()
-    .then((now) => {
-      for (const looking of now) if (!heard.has(looking.scope)) hear(looking);
+  })
+    .then((unlisten) => {
+      if (stopped) unlisten();
+      else off = unlisten;
     })
     .catch(() => {});
+  void read()
+    .then((now) => {
+      for (const looking of now) if (!stopped && !heard.has(looking.scope)) hear(looking);
+    })
+    .catch(() => {});
+  return () => {
+    stopped = true;
+    started = false;
+    off?.();
+  };
 }
 
 /** Tests only. */

@@ -9,7 +9,7 @@ function bridge() {
   return {
     listen: (event: string, handler: (event: { payload: unknown }) => void) => {
       if (event === "looking:again") handlers.push(handler);
-      return Promise.resolve(() => {});
+      return Promise.resolve(() => void handlers.splice(handlers.indexOf(handler), 1));
     },
     tell: (payload: LookingAgain) => handlers.forEach((handler) => handler({ payload })),
   };
@@ -73,5 +73,29 @@ describe("an item looked at again after a write (#2595, #2615)", () => {
     expect(itemLooked("jira:PAY-2")).toBe(false);
     tell({ scope: "forge:repo:tide/pay", code: false, builds: false, items: [] });
     expect(itemLooked("forge:pr:tide/pay#4")).toBe(false);
+  });
+});
+
+describe("the window's listening (#2615)", () => {
+  it("stops when the app's window goes, and a start after that listens again", async () => {
+    const { listen, tell } = bridge();
+    const stop = startLooking(listen, () => Promise.resolve([]));
+    await settle();
+    expect(startLooking(listen, () => Promise.resolve([])), "a second start is the first one's").toBeTypeOf("function");
+    stop();
+    tell({ scope: "jira:PAY-1", code: false, builds: false, items: ["jira:PAY-1"] });
+    expect(itemLooked("jira:PAY-1"), "stopped: nothing heard").toBe(false);
+    startLooking(listen, () => Promise.resolve([]));
+    await settle();
+    tell({ scope: "jira:PAY-1", code: false, builds: false, items: ["jira:PAY-1"] });
+    expect(itemLooked("jira:PAY-1")).toBe(true);
+  });
+
+  it("a stop before the listening was set up still stops it", async () => {
+    const { listen, tell } = bridge();
+    startLooking(listen, () => Promise.resolve([]))();
+    await settle();
+    tell({ scope: "jira:PAY-1", code: false, builds: false, items: ["jira:PAY-1"] });
+    expect(itemLooked("jira:PAY-1")).toBe(false);
   });
 });
