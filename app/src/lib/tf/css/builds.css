@@ -462,4 +462,6 @@
 @container (max-width: 999px) {
   .tf-runs.tf-recent :is(col, td).tf-run-trig { display: none; }
   .tf-runs.tf-recent .tf-run-br { width: 150px; }
+  /* The line stands where the folders have the smaller share, so at the narrow step they give way before the name. */
+  .tf-runs.tf-recent[data-paths="long"] .tf-run-id { grid-template-columns: minmax(0, .6fr) minmax(0, 1fr); }
 }
