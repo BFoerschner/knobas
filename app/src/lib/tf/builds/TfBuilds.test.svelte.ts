@@ -1034,9 +1034,15 @@ test("All pipelines draws before the pipeline list is read, which follows its fi
   draw(["recent"], "builds", [], { recent: ASKING(drawn), pipelines: () => ((listed += 1), Promise.resolve(LIST)) } as Partial<BuildsPorts>);
   flushSync();
   expect(listed).toBe(0);
+  const home = () => target.querySelector<HTMLAnchorElement>(".tf-pl-home a")!;
+  expect(home().title, "no count before the list is read").toBe("Every pipeline's runs, newest first");
   await settle();
   expect(drawn).toHaveLength(1);
   expect(listed).toBe(1);
+  // At the rail's narrow width the count gives way to the five columns (#2573); the row's title still says it.
+  const n = home().querySelector(".tf-fold-n")!.firstChild!.textContent;
+  expect(Number(n)).toBeGreaterThan(1);
+  expect(home().title).toBe(`Every pipeline's runs, newest first\n${n} pipelines`);
 });
 
 test("a bare #/builds opens All pipelines the first time in a session, and where you were after that (#2570)", async () => {

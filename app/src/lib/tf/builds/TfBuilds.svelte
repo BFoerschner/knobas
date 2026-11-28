@@ -850,7 +850,7 @@
   >
     <!-- *All pipelines* (#2570, Björn's answer 9): the rail's first row, above its tools, which never narrow it. -->
     <div class="tf-pl-home">
-      <a class="tf-tr tf-pi tf-d0 tf-pl-root" href={RECENT_HASH} aria-current={runScope?.kind === "all"} title="Every pipeline's runs, newest first"
+      <a class="tf-tr tf-pi tf-d0 tf-pl-root" href={RECENT_HASH} aria-current={runScope?.kind === "all"} title={`Every pipeline's runs, newest first${all === null ? "" : `\n${all.length} ${all.length === 1 ? "pipeline" : "pipelines"}`}`}
         ><svg class="tf-pl-rooticon" viewBox="0 0 16 16" aria-hidden="true"
           ><path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg
         ><span class="tf-pi-nm">All pipelines</span><span class="tf-fold-n" class:tf-unseen={all === null}

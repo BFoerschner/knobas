@@ -438,9 +438,11 @@
 .tf-bv .tf-pi-pre { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-bv .tf-pi-rest { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 /* At the rail's narrow width, a window of 1240 px or less, a row's time gives way to the columns: the table beside it
-   says every time, and the row's title still has it. Stacked under 900 px the rail is the window's width again. */
+   says every time, and the row's title still has it. So does *All pipelines*' pipeline count, which would otherwise cut
+   the row's own name (76 px of words where 67 are left beside the five columns); its title says it. Stacked under
+   900 px the rail is the window's width again. */
 @media (min-width: 901px) and (max-width: 1240px) {
-  .tf-bv .tf-pi-when { display: none; }
+  .tf-bv .tf-pi-when, .tf-bv .tf-pl-root .tf-fold-n { display: none; }
   .tf-bv .tf-pi-when + .tf-pl-ub { margin-left: auto; }
 }
 /* The rail's rows held in their room while a run opened from a scope scrolls its pipeline into view (#2570). */
